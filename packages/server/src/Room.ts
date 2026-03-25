@@ -5,8 +5,10 @@
 // Each room holds the authoritative GameState and runs a fixed-rate game loop
 // at ~20 ticks/sec. Every tick it:
 //   1. Increments the tick counter.
-//   2. Applies each player's latest input to move them.
-//   3. Broadcasts a TickUpdate to every connected client.
+//   2. Processes ALL queued inputs for each player (not just the latest).
+//   3. Applies movement via the shared applyInput() function.
+//   4. Updates lastProcessedInput so clients can reconcile.
+//   5. Broadcasts a TickUpdate to every connected client.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type uWS from 'uWebSockets.js';
@@ -14,10 +16,11 @@ import type uWS from 'uWebSockets.js';
 import {
   MessageType,
   SERVER_TICK_MS,
+  SERVER_TICK_S,
   MAX_PLAYERS_PER_ROOM,
-  PLAYER_SPEED,
   SPAWN_X,
   SPAWN_Y,
+  applyInput,
   type GameState,
   type PlayerInfo,
   type PlayerInputMessage,
@@ -38,10 +41,12 @@ export interface SocketData {
 type PlayerSocket = uWS.WebSocket<SocketData>;
 
 /**
- * Stores each player's latest input state.
- * The server reads this every tick to apply movement.
+ * A queued input from a client, waiting to be processed on the next tick.
+ * We store the full input + its sequence number so the server can track
+ * which inputs have been acknowledged.
  */
-interface InputState {
+interface QueuedInput {
+  sequenceNumber: number;
   up: boolean;
   down: boolean;
   left: boolean;
@@ -58,8 +63,12 @@ export class Room {
   /** All connected sockets, keyed by player ID. */
   private sockets: Map<string, PlayerSocket> = new Map();
 
-  /** Latest input state per player, keyed by player ID. */
-  private inputs: Map<string, InputState> = new Map();
+  /**
+   * Input queue per player, keyed by player ID.
+   * Inputs arrive between ticks and are ALL processed on the next tick.
+   * This ensures no inputs are dropped even if multiple arrive per tick.
+   */
+  private inputQueues: Map<string, QueuedInput[]> = new Map();
 
   /** Handle for the setInterval running the game loop. */
   private loopHandle: ReturnType<typeof setInterval> | null = null;
@@ -97,8 +106,8 @@ export class Room {
     // Register socket
     this.sockets.set(playerId, ws);
 
-    // Initialize input state (all keys released)
-    this.inputs.set(playerId, { up: false, down: false, left: false, right: false });
+    // Initialize empty input queue
+    this.inputQueues.set(playerId, []);
 
     // Add to game state with spawn position
     const playerInfo: PlayerInfo = {
@@ -106,6 +115,7 @@ export class Room {
       displayName,
       x: SPAWN_X,
       y: SPAWN_Y,
+      lastProcessedInput: 0,
     };
     this.state.players.push(playerInfo);
 
@@ -138,7 +148,7 @@ export class Room {
    */
   removePlayer(playerId: string): void {
     this.sockets.delete(playerId);
-    this.inputs.delete(playerId);
+    this.inputQueues.delete(playerId);
     this.state.players = this.state.players.filter((p) => p.id !== playerId);
 
     // Notify remaining players
@@ -161,26 +171,27 @@ export class Room {
   // ── Input Handling ────────────────────────────────────────────────────
 
   /**
-   * Store a player's latest input state.
+   * Queue a player's input for processing on the next tick.
    * Called from the WebSocket message handler in index.ts.
+   * Inputs are NOT applied immediately — they wait for the next tick.
    */
   handleInput(playerId: string, msg: PlayerInputMessage): void {
-    this.inputs.set(playerId, {
-      up: msg.up,
-      down: msg.down,
-      left: msg.left,
-      right: msg.right,
-    });
+    const queue = this.inputQueues.get(playerId);
+    if (queue) {
+      queue.push({
+        sequenceNumber: msg.sequenceNumber,
+        up: msg.up,
+        down: msg.down,
+        left: msg.left,
+        right: msg.right,
+      });
+    }
   }
 
   // ── Game Loop ─────────────────────────────────────────────────────────
 
   /**
    * Start the fixed-rate server game loop (~20 ticks/sec, 50ms interval).
-   * Each tick:
-   *   1. Increment the tick counter.
-   *   2. Apply movement from each player's latest input.
-   *   3. Broadcast TickUpdate (current state) to all clients.
    */
   private startLoop(): void {
     if (this.loopHandle !== null) return;
@@ -201,21 +212,50 @@ export class Room {
     console.info(`[Room:${this.id}] Game loop stopped`);
   }
 
-  /** Execute one server tick. */
+  /**
+   * Execute one server tick.
+   *
+   * For each player:
+   *   1. Process ALL queued inputs (may be 0, 1, or many per tick).
+   *      Each input is applied with the shared applyInput() and SERVER_TICK_S
+   *      divided by the number of inputs to distribute the tick's time budget.
+   *      Actually, per the standard Valve/Gabriel Gambetta model, each input
+   *      represents one client frame's worth of movement. We apply each with
+   *      a fixed dt = SERVER_TICK_S. This means the server processes inputs
+   *      at the same rate the client predicted them.
+   *   2. Update lastProcessedInput to the highest sequence number processed.
+   *   3. Clear the queue.
+   */
   private tick(): void {
     // 1. Advance tick counter
     this.state.tick++;
 
-    // 2. Apply movement for each player based on their latest input
+    // 2. Process all queued inputs for each player
     for (const player of this.state.players) {
-      const input = this.inputs.get(player.id);
-      if (!input) continue;
+      const queue = this.inputQueues.get(player.id);
+      if (!queue || queue.length === 0) continue;
 
-      // Apply constant speed movement in each active direction
-      if (input.up) player.y -= PLAYER_SPEED;
-      if (input.down) player.y += PLAYER_SPEED;
-      if (input.left) player.x -= PLAYER_SPEED;
-      if (input.right) player.x += PLAYER_SPEED;
+      // Process each queued input with the same dt the client used for prediction.
+      // The client predicts with its frame dt, but for deterministic reconciliation
+      // we use a fixed dt per input on the server side. Since the client sends one
+      // input per frame, and we want server and client to agree, we use a fixed
+      // dt that matches the server tick divided by the number of inputs received.
+      // This keeps total displacement per tick proportional regardless of client fps.
+      const dtPerInput = SERVER_TICK_S / queue.length;
+
+      for (const input of queue) {
+        const result = applyInput(player.x, player.y, input, dtPerInput);
+        player.x = result.x;
+        player.y = result.y;
+
+        // Track the highest processed sequence number
+        if (input.sequenceNumber > player.lastProcessedInput) {
+          player.lastProcessedInput = input.sequenceNumber;
+        }
+      }
+
+      // Clear processed inputs
+      queue.length = 0;
     }
 
     // 3. Broadcast TickUpdate with current state
@@ -253,7 +293,7 @@ export class Room {
   destroy(): void {
     this.stopLoop();
     this.sockets.clear();
-    this.inputs.clear();
+    this.inputQueues.clear();
     this.state.players = [];
   }
 }

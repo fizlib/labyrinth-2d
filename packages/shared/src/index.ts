@@ -5,6 +5,9 @@
 // This package has ZERO runtime dependencies — pure TypeScript types/constants.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Re-export physics module ────────────────────────────────────────────────
+export { PLAYER_SPEED, applyInput } from './physics.js';
+
 // ── Game Constants ──────────────────────────────────────────────────────────
 
 /** Internal rendering resolution width in pixels. */
@@ -25,11 +28,11 @@ export const SERVER_TICK_RATE = 20;
 /** Duration of one server tick in milliseconds. */
 export const SERVER_TICK_MS = 1000 / SERVER_TICK_RATE;
 
+/** Duration of one server tick in seconds (for physics). */
+export const SERVER_TICK_S = 1 / SERVER_TICK_RATE;
+
 /** Default room ID used when no lobby system is in place yet. */
 export const DEFAULT_ROOM_ID = 'default';
-
-/** Player movement speed in pixels per tick at the server tick rate. */
-export const PLAYER_SPEED = 3;
 
 /** Default spawn X coordinate. */
 export const SPAWN_X = 100;
@@ -68,15 +71,15 @@ export interface JoinRoomMessage {
 }
 
 /**
- * Sent whenever the client's input state changes.
- * Contains boolean flags for each movement direction.
- * The server stores the latest input and applies it every tick.
+ * Sent every frame the client has active movement input.
+ * The server queues these and processes them in order each tick.
  */
 export interface PlayerInputMessage {
   type: MessageType.PlayerInput;
   /**
-   * Monotonically increasing sequence number for future reconciliation.
-   * Set to 0 for now — will be used in Step 4 for client-side prediction.
+   * Monotonically increasing sequence number.
+   * The server echoes the highest processed sequenceNumber back in
+   * PlayerInfo.lastProcessedInput so the client can reconcile.
    */
   sequenceNumber: number;
   /** Movement direction flags. */
@@ -88,12 +91,21 @@ export interface PlayerInputMessage {
 
 // ── Server → Client Messages ────────────────────────────────────────────────
 
-/** Player state included in the game state — has position + display info. */
+/**
+ * Player state included in the game state.
+ * Has position, display info, and the reconciliation marker.
+ */
 export interface PlayerInfo {
   id: string;
   displayName: string;
   x: number;
   y: number;
+  /**
+   * The highest input sequenceNumber the server has processed for this player.
+   * The client uses this to discard acknowledged inputs from its pendingInputs
+   * buffer during server reconciliation.
+   */
+  lastProcessedInput: number;
 }
 
 /**

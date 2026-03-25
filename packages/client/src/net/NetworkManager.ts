@@ -2,12 +2,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // NetworkManager — Client-side WebSocket connection to the authoritative server.
 //
-// Handles:
-// - Connecting to the uWebSockets.js server.
-// - Sending JoinRoom on open.
-// - Sending PlayerInput when the local player's keys change.
-// - Receiving and dispatching RoomJoined / TickUpdate / PlayerLeft / Error.
-// - Storing the latest GameState for the rest of the client to read.
+// Step 4 changes:
+// - sendInput() now accepts a sequenceNumber from the caller (main.ts manages
+//   the counter so it can store the input in pendingInputs for reconciliation).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -59,9 +56,6 @@ export class NetworkManager {
 
   // ── Connection ──────────────────────────────────────────────────────────
 
-  /**
-   * Connect to the game server and immediately send a JoinRoom message.
-   */
   connect(url: string, roomId: string = DEFAULT_ROOM_ID, displayName: string = 'Player'): void {
     if (this.ws) {
       console.warn('[Net] Already connected — disconnect first.');
@@ -142,13 +136,19 @@ export class NetworkManager {
   // ── Sending ─────────────────────────────────────────────────────────────
 
   /**
-   * Send the current input state to the server.
-   * Called whenever WASD/arrow key state changes.
+   * Send a player input to the server with a specific sequence number.
+   * The sequence number is managed by the caller (main.ts) for reconciliation.
    */
-  sendInput(up: boolean, down: boolean, left: boolean, right: boolean): void {
+  sendInput(
+    sequenceNumber: number,
+    up: boolean,
+    down: boolean,
+    left: boolean,
+    right: boolean,
+  ): void {
     const msg: PlayerInputMessage = {
       type: MessageType.PlayerInput,
-      sequenceNumber: 0, // Placeholder — used for prediction in Step 4
+      sequenceNumber,
       up,
       down,
       left,
