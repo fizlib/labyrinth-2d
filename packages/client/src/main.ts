@@ -1,6 +1,6 @@
 // packages/client/src/main.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Labyrinth 2D — Client Entry Point
+// Labyrinth 2D — Client Entry Point (Step 2: Network Debug UI)
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // MULTIPLAYER ARCHITECTURE (Client-Side):
@@ -21,83 +21,131 @@
 //    interpolated between the two most recent server snapshots. This hides
 //    the 20-tps update rate and produces smooth movement at 60 fps.
 //
-// Step 1: This file only bootstraps the PixiJS Application with pixel-art
-// rendering constraints. No game logic, no scenes — just the renderer.
+// Step 2: No game engine canvas. Instead, a debug HTML overlay shows the
+// live tick counter and connected player list from the server.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application } from 'pixi.js';
-import { INTERNAL_WIDTH, INTERNAL_HEIGHT } from '@labyrinth/shared';
+import { NetworkManager } from './net/NetworkManager';
+import type { GameState } from '@labyrinth/shared';
 
-/**
- * Compute the largest integer scale factor that fits the internal resolution
- * within the given viewport dimensions without exceeding them.
- */
-function getIntegerScale(viewportW: number, viewportH: number): number {
-  const scaleX = Math.floor(viewportW / INTERNAL_WIDTH);
-  const scaleY = Math.floor(viewportH / INTERNAL_HEIGHT);
-  return Math.max(1, Math.min(scaleX, scaleY));
+// ── Debug UI Setup ──────────────────────────────────────────────────────────
+
+/** Create and style the debug UI overlay. */
+function createDebugUI(): HTMLDivElement {
+  const debugDiv = document.createElement('div');
+  debugDiv.id = 'debug-ui';
+  debugDiv.innerHTML = `
+    <h1>🏰 Labyrinth 2D — Network Debug</h1>
+    <div class="status" id="connection-status">⏳ Connecting...</div>
+    <div class="stats">
+      <div class="stat-card">
+        <span class="stat-label">Server Tick</span>
+        <span class="stat-value" id="tick-counter">—</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Your Player ID</span>
+        <span class="stat-value" id="player-id">—</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Room</span>
+        <span class="stat-value" id="room-id">—</span>
+      </div>
+    </div>
+    <h2>Connected Players</h2>
+    <ul id="player-list"></ul>
+  `;
+
+  document.body.appendChild(debugDiv);
+  return debugDiv;
 }
 
-/**
- * Resize the PixiJS canvas to fill the viewport with integer scaling.
- * This ensures every game pixel maps to an exact NxN block of screen pixels,
- * preventing sub-pixel artifacts that ruin the pixel-art aesthetic.
- */
-function resizeCanvas(app: Application): void {
-  const scale = getIntegerScale(window.innerWidth, window.innerHeight);
+/** Update the debug UI with fresh game state. */
+function updateDebugUI(state: GameState, playerId: string | null): void {
+  const tickEl = document.getElementById('tick-counter');
+  const playerListEl = document.getElementById('player-list');
 
-  const canvasWidth = INTERNAL_WIDTH * scale;
-  const canvasHeight = INTERNAL_HEIGHT * scale;
+  if (tickEl) {
+    tickEl.textContent = state.tick.toString();
+  }
 
-  // Set the CSS display size (integer-scaled)
-  app.canvas.style.width = `${canvasWidth}px`;
-  app.canvas.style.height = `${canvasHeight}px`;
-
-  // Resize the internal renderer resolution
-  app.renderer.resize(INTERNAL_WIDTH, INTERNAL_HEIGHT);
+  if (playerListEl) {
+    playerListEl.innerHTML = state.players
+      .map((p) => {
+        const isYou = p.id === playerId ? ' <span class="you-badge">← you</span>' : '';
+        return `<li><span class="player-name">${p.displayName}</span> <span class="player-id">${p.id}</span>${isYou}</li>`;
+      })
+      .join('');
+  }
 }
 
-async function main(): Promise<void> {
-  // ── Create PixiJS Application ───────────────────────────────────────────
-  const app = new Application();
+// ── Main ────────────────────────────────────────────────────────────────────
 
-  await app.init({
-    // ── Pixel-Art Rendering Constraints ─────────────────────────────────
-    width: INTERNAL_WIDTH, // 480px internal width
-    height: INTERNAL_HEIGHT, // 270px internal height
-    antialias: false, // CRITICAL: No anti-aliasing for pixel art
-    roundPixels: true, // Snap all sprites to integer coordinates
-    backgroundColor: 0x1a1a2e, // Deep navy — atmospheric default
+function main(): void {
+  createDebugUI();
 
-    // ── Canvas Setup ────────────────────────────────────────────────────
-    canvas: document.createElement('canvas'),
-    resizeTo: undefined, // We handle resizing manually for integer scaling
+  const statusEl = document.getElementById('connection-status');
+  const playerIdEl = document.getElementById('player-id');
+  const roomIdEl = document.getElementById('room-id');
+
+  // ── Network Manager ───────────────────────────────────────────────────
+  const net = new NetworkManager({
+    onRoomJoined: (roomId, playerId, gameState) => {
+      console.info(`[Main] Joined room "${roomId}" as ${playerId}`);
+
+      if (statusEl) {
+        statusEl.textContent = '🟢 Connected';
+        statusEl.classList.add('connected');
+      }
+      if (playerIdEl) playerIdEl.textContent = playerId;
+      if (roomIdEl) roomIdEl.textContent = roomId;
+
+      updateDebugUI(gameState, playerId);
+    },
+
+    onTickUpdate: (gameState) => {
+      updateDebugUI(gameState, net.playerId);
+    },
+
+    onPlayerLeft: (playerId) => {
+      console.info(`[Main] Player left: ${playerId}`);
+    },
+
+    onError: (code, message) => {
+      console.error(`[Main] Server error [${code}]: ${message}`);
+      if (statusEl) {
+        statusEl.textContent = `🔴 Error: ${message}`;
+        statusEl.classList.add('error');
+      }
+    },
+
+    onDisconnect: () => {
+      console.info('[Main] Disconnected from server');
+      if (statusEl) {
+        statusEl.textContent = '🔴 Disconnected';
+        statusEl.classList.remove('connected');
+        statusEl.classList.add('error');
+      }
+    },
   });
 
-  // ── Mount Canvas ──────────────────────────────────────────────────────
-  const container = document.getElementById('game-container');
-  if (!container) {
-    throw new Error('Missing #game-container element in index.html');
-  }
-  container.appendChild(app.canvas);
+  // ── Connect to Server ─────────────────────────────────────────────────
+  // In dev: Vite proxies /ws → ws://localhost:9001.
+  // Detect if we're in dev or prod and pick the right URL.
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = import.meta.env.DEV
+    ? 'ws://localhost:9001'
+    : `${wsProtocol}//${window.location.host}/ws`;
 
-  // ── Apply Integer Scaling ─────────────────────────────────────────────
-  resizeCanvas(app);
-  window.addEventListener('resize', () => resizeCanvas(app));
+  const displayName = `Explorer-${Math.floor(Math.random() * 9999)
+    .toString()
+    .padStart(4, '0')}`;
 
-  // ── Startup Log ───────────────────────────────────────────────────────
+  net.connect(wsUrl, 'default', displayName);
+
   console.info('─────────────────────────────────────────────────');
-  console.info('  🏰 Labyrinth 2D Client');
-  console.info(`  Internal: ${INTERNAL_WIDTH}×${INTERNAL_HEIGHT}`);
-  console.info(`  Scale: ${getIntegerScale(window.innerWidth, window.innerHeight)}×`);
-  console.info(`  Renderer: ${app.renderer.type}`);
+  console.info('  🏰 Labyrinth 2D Client (Step 2: Network Debug)');
+  console.info(`  Display name: ${displayName}`);
   console.info('─────────────────────────────────────────────────');
-
-  // ── Game Loop (Step 2+) ───────────────────────────────────────────────
-  // app.ticker.add((ticker) => {
-  //   const dt = ticker.deltaMS;
-  //   // TODO: Process input, run client prediction, interpolate entities, render
-  // });
 }
 
-main().catch(console.error);
+main();

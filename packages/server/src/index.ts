@@ -26,30 +26,48 @@
 //    b) Discards all inputs up to that sequence.
 //    c) Re-applies unacknowledged inputs on top of the server-authoritative state.
 //
-// Step 1: This file only sets up uWebSockets.js with a basic WebSocket handler.
-// No game logic, no rooms — just the transport layer skeleton.
+// Step 2: Room management, game loop, and basic message routing.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import uWS from 'uWebSockets.js';
 
 import {
   MessageType,
+  DEFAULT_ROOM_ID,
   MAX_PLAYERS_PER_ROOM,
   SERVER_TICK_RATE,
-  type ClientMessage,
+  type ClientToServerMessage,
 } from '@labyrinth/shared';
+
+import { Room, type SocketData } from './Room.js';
 
 const PORT = 9001;
 
-/** Per-socket user data attached by uWebSockets. */
-interface SocketData {
-  /** Unique connection ID. */
-  id: string;
-  /** Room this socket belongs to (null until joined). */
-  roomId: string | null;
+// ── Room Registry ───────────────────────────────────────────────────────────
+// For Step 2 we use a single default room. A full lobby system comes later.
+
+const rooms: Map<string, Room> = new Map();
+
+/** Get or create a room by ID. */
+function getOrCreateRoom(roomId: string): Room {
+  let room = rooms.get(roomId);
+  if (!room) {
+    room = new Room(roomId);
+    rooms.set(roomId, room);
+    console.info(`[Server] Created room: ${roomId}`);
+  }
+  return room;
 }
 
+// ── Player ID Generator ─────────────────────────────────────────────────────
+
 let nextId = 0;
+
+function generatePlayerId(): string {
+  return `player-${nextId++}`;
+}
+
+// ── uWebSockets.js Application ──────────────────────────────────────────────
 
 const app = uWS
   .App()
@@ -65,7 +83,8 @@ const app = uWS
       // Upgrade HTTP → WebSocket. Attach initial socket data.
       res.upgrade<SocketData>(
         {
-          id: `player-${nextId++}`,
+          id: generatePlayerId(),
+          displayName: '',
           roomId: null,
         },
         req.getHeader('sec-websocket-key'),
@@ -85,25 +104,36 @@ const app = uWS
 
       try {
         const text = Buffer.from(message).toString('utf-8');
-        const msg: ClientMessage = JSON.parse(text);
+        const msg: ClientToServerMessage = JSON.parse(text);
 
-        // Route message by type — placeholder for Step 2+
         switch (msg.type) {
-          case MessageType.PlayerJoin:
-            console.info(
-              `[WS] ${data.id} requests to join room "${msg.roomId}" as "${msg.displayName}"`,
-            );
-            // TODO: Room management (Step 2)
-            break;
+          case MessageType.JoinRoom: {
+            // Store the display name on the socket
+            data.displayName = msg.displayName;
 
-          case MessageType.PlayerInput:
-            // TODO: Queue input for server tick processing (Step 2)
-            break;
+            const roomId = msg.roomId || DEFAULT_ROOM_ID;
+            const room = getOrCreateRoom(roomId);
 
-          case MessageType.PlayerLeave:
-            console.info(`[WS] ${data.id} is leaving`);
-            // TODO: Room cleanup (Step 2)
+            if (room.isFull) {
+              ws.send(
+                JSON.stringify({
+                  type: MessageType.Error,
+                  code: 'ROOM_FULL',
+                  message: `Room "${roomId}" is full (${MAX_PLAYERS_PER_ROOM} players max).`,
+                }),
+                false,
+              );
+              return;
+            }
+
+            room.addPlayer(ws);
             break;
+          }
+
+          case MessageType.PlayerInput: {
+            // TODO: Queue input for server tick processing (Step 3+)
+            break;
+          }
 
           default:
             console.warn(`[WS] Unknown message type from ${data.id}`);
@@ -116,7 +146,21 @@ const app = uWS
     close: (ws, code, _message) => {
       const data = ws.getUserData();
       console.info(`[WS] Disconnected: ${data.id} (code: ${code})`);
-      // TODO: Remove from room, notify other players (Step 2)
+
+      // Remove from room if they were in one
+      if (data.roomId) {
+        const room = rooms.get(data.roomId);
+        if (room) {
+          room.removePlayer(data.id);
+
+          // Clean up empty rooms
+          if (room.playerCount === 0) {
+            room.destroy();
+            rooms.delete(data.roomId);
+            console.info(`[Server] Destroyed empty room: ${data.roomId}`);
+          }
+        }
+      }
     },
   })
   .listen(PORT, (listenSocket) => {
