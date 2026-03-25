@@ -1,0 +1,57 @@
+/* packages/client/style.css */
+/* ─────────────────────────────────────────────────────────────────────────── */
+/* Pixel-Art Rendering Constraints                                           */
+/*                                                                           */
+/* 1. image-rendering: pixelated — disables browser bilinear interpolation.  */
+/* 2. No anti-aliasing on the canvas — handled by PixiJS config.             */
+/* 3. Integer CSS scaling — canvas.style dimensions set via JS to maintain    */
+/*    crisp pixels (no fractional scaling artifacts).                         */
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── Reset ─────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ── Full-viewport container ───────────────────────────────────────────── */
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #0e0e1a;
+  /* Prevent text selection and context menu on the game canvas */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#game-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  /* Dark background visible around the integer-scaled canvas */
+  background-color: #0e0e1a;
+}
+
+/* ── Canvas pixel-art rules ────────────────────────────────────────────── */
+
+canvas {
+  /* CRITICAL: This disables the browser's bilinear filtering on scale-up. */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges; /* Firefox fallback */
+
+  /* The canvas size is set via JavaScript for integer scaling.            */
+  /* Do NOT set width/height here — JS controls it dynamically.           */
+
+  /* Remove the default canvas border/outline */
+  display: block;
+  outline: none;
+}
