@@ -48,11 +48,11 @@ export interface SpawnPoint {
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const CELL_SIZE = 3;   // Each maze cell is 3×3 floor tiles
-const WALL_SIZE = 1;   // 1-tile wall between cells
-const CELL_STEP = CELL_SIZE + WALL_SIZE; // 4 tiles per cell step
-const GRID_CELLS = 22; // 22×22 cell maze
-const MAP_SIZE = 1 + GRID_CELLS * CELL_STEP + WALL_SIZE; // = 91
+const CELL_SIZE = 6;   // Each maze cell is 6×6 floor tiles
+const WALL_SIZE = 6;   // 6-tile-thick walls between cells
+const CELL_STEP = CELL_SIZE + WALL_SIZE; // 12 tiles per cell step
+const GRID_CELLS = 15; // 15×15 cell maze
+const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 186
 const TILE_PX = 16;
 
 // ── Seeded PRNG (mulberry32) ────────────────────────────────────────────────
@@ -92,8 +92,8 @@ function shuffle<T>(arr: T[], rand: () => number): T[] {
  */
 function cellToTile(cx: number, cy: number): { tx: number; ty: number } {
   return {
-    tx: 1 + cx * CELL_STEP,
-    ty: 1 + cy * CELL_STEP,
+    tx: WALL_SIZE + cx * CELL_STEP,
+    ty: WALL_SIZE + cy * CELL_STEP,
   };
 }
 
@@ -111,8 +111,8 @@ function carveCell(data: number[], cx: number, cy: number): void {
 
 /**
  * Carve the wall between two adjacent cells, creating a 3-tile-wide passage.
- * For horizontal neighbors: carve a 1×3 column between them.
- * For vertical neighbors: carve a 3×1 row between them.
+ * For horizontal neighbors: carve a WALL_SIZE×CELL_SIZE rectangle between them.
+ * For vertical neighbors: carve a CELL_SIZE×WALL_SIZE rectangle between them.
  */
 function carvePassage(
   data: number[],
@@ -125,18 +125,22 @@ function carvePassage(
   const { tx: tx2, ty: ty2 } = cellToTile(cx2, cy2);
 
   if (cy1 === cy2) {
-    // Horizontal neighbors — carve the wall column between them
-    const wallX = Math.min(tx1, tx2) + CELL_SIZE; // the wall tile column
+    // Horizontal neighbors — carve the wall columns between them
+    const wallX = Math.min(tx1, tx2) + CELL_SIZE; // first wall tile column
     const topY = ty1; // same row
-    for (let dy = 0; dy < CELL_SIZE; dy++) {
-      data[(topY + dy) * MAP_SIZE + wallX] = 0;
+    for (let wy = 0; wy < CELL_SIZE; wy++) {
+      for (let wx = 0; wx < WALL_SIZE; wx++) {
+        data[(topY + wy) * MAP_SIZE + (wallX + wx)] = 0;
+      }
     }
   } else {
-    // Vertical neighbors — carve the wall row between them
-    const wallY = Math.min(ty1, ty2) + CELL_SIZE; // the wall tile row
+    // Vertical neighbors — carve the wall rows between them
+    const wallY = Math.min(ty1, ty2) + CELL_SIZE; // first wall tile row
     const leftX = tx1; // same column
-    for (let dx = 0; dx < CELL_SIZE; dx++) {
-      data[wallY * MAP_SIZE + (leftX + dx)] = 0;
+    for (let wy = 0; wy < WALL_SIZE; wy++) {
+      for (let wx = 0; wx < CELL_SIZE; wx++) {
+        data[(wallY + wy) * MAP_SIZE + (leftX + wx)] = 0;
+      }
     }
   }
 }
@@ -269,16 +273,21 @@ function generateMazeData(seed: number): number[] {
     const entranceCx = hubCenterCx;
     const aboveCy = hubTopCy - 1;
     if (aboveCy >= 0) {
-      // Carve a 3-wide passage from the cell above into the hub
+      // Carve the full wall between the cell above and the hub
       const { tx, ty } = cellToTile(entranceCx, aboveCy);
-      const wallY = ty + CELL_SIZE; // wall row just below the cell
-      for (let dx = 0; dx < CELL_SIZE; dx++) {
-        data[wallY * MAP_SIZE + (tx + dx)] = 0;
-      }
-      // Also ensure floor continuity into the hub
-      for (let dy = 1; dy <= 2; dy++) {
+      const wallY = ty + CELL_SIZE; // first wall row below the cell
+      for (let wy = 0; wy < WALL_SIZE; wy++) {
         for (let dx = 0; dx < CELL_SIZE; dx++) {
-          data[(wallY + dy) * MAP_SIZE + (tx + dx)] = 0;
+          data[(wallY + wy) * MAP_SIZE + (tx + dx)] = 0;
+        }
+      }
+      // Ensure floor continuity into the hub (carve any remaining gap)
+      const hubEdge = hubTileY;
+      for (let row = wallY + WALL_SIZE; row < hubEdge + CELL_SIZE; row++) {
+        for (let dx = 0; dx < CELL_SIZE; dx++) {
+          if (row >= 0 && row < MAP_SIZE) {
+            data[row * MAP_SIZE + (tx + dx)] = 0;
+          }
         }
       }
     }
@@ -290,13 +299,19 @@ function generateMazeData(seed: number): number[] {
     const leftCx = hubLeftCx - 1;
     if (leftCx >= 0) {
       const { tx, ty } = cellToTile(leftCx, entranceCy);
-      const wallX = tx + CELL_SIZE; // wall column just right of the cell
-      for (let dy = 0; dy < CELL_SIZE; dy++) {
-        data[(ty + dy) * MAP_SIZE + wallX] = 0;
-      }
-      for (let ddx = 1; ddx <= 2; ddx++) {
+      const wallX = tx + CELL_SIZE; // first wall column right of the cell
+      for (let wx = 0; wx < WALL_SIZE; wx++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
-          data[(ty + dy) * MAP_SIZE + (wallX + ddx)] = 0;
+          data[(ty + dy) * MAP_SIZE + (wallX + wx)] = 0;
+        }
+      }
+      // Ensure floor continuity into the hub
+      const hubEdge = hubTileX;
+      for (let col = wallX + WALL_SIZE; col < hubEdge + CELL_SIZE; col++) {
+        for (let dy = 0; dy < CELL_SIZE; dy++) {
+          if (col >= 0 && col < MAP_SIZE) {
+            data[(ty + dy) * MAP_SIZE + col] = 0;
+          }
         }
       }
     }
@@ -308,15 +323,20 @@ function generateMazeData(seed: number): number[] {
     const rightCx = hubRightCx + 1;
     if (rightCx < GRID_CELLS) {
       const { tx: cellTx, ty: cellTy } = cellToTile(rightCx, entranceCy);
-      // Carve wall between hub and the cell
-      const wallX = cellTx - 1; // wall column just left of the cell
-      for (let dy = 0; dy < CELL_SIZE; dy++) {
-        data[(cellTy + dy) * MAP_SIZE + wallX] = 0;
+      // Carve the full wall between the hub and the cell
+      const wallX = cellTx - WALL_SIZE; // first wall column left of the cell
+      for (let wx = 0; wx < WALL_SIZE; wx++) {
+        for (let dy = 0; dy < CELL_SIZE; dy++) {
+          data[(cellTy + dy) * MAP_SIZE + (wallX + wx)] = 0;
+        }
       }
       // Ensure floor continuity into the hub
-      for (let ddx = 1; ddx <= 2; ddx++) {
+      const hubRight = hubTileX + hubSize;
+      for (let col = hubRight - CELL_SIZE; col < wallX; col++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
-          data[(cellTy + dy) * MAP_SIZE + (wallX - ddx)] = 0;
+          if (col >= 0 && col < MAP_SIZE) {
+            data[(cellTy + dy) * MAP_SIZE + col] = 0;
+          }
         }
       }
     }

@@ -97,36 +97,30 @@ function renderTilemap(map: TileMapData): Container {
   const tilemap = new Container();
   const ts = map.tileSize;
 
+  // Batch all wall tiles into a single Graphics object
+  const walls = new Graphics();
+  // Batch all floor tiles into a single Graphics object
+  const floors = new Graphics();
+
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
       const tileId = map.data[y * map.width + x];
-      const g = new Graphics();
+      const px = x * ts;
+      const py = y * ts;
 
       if (tileId === 1) {
-        g.rect(0, 0, ts, ts);
-        g.fill(WALL_COLOR);
-        g.rect(0, 0, ts, 1);
-        g.fill(0x5c5c80);
-        g.rect(0, 0, 1, ts);
-        g.fill(0x5c5c80);
-        g.rect(0, ts - 1, ts, 1);
-        g.fill(0x36364e);
-        g.rect(ts - 1, 0, 1, ts);
-        g.fill(0x36364e);
+        walls.rect(px, py, ts, ts);
       } else {
-        g.rect(0, 0, ts, ts);
-        g.fill(FLOOR_COLOR);
-        g.rect(ts - 1, 0, 1, ts);
-        g.fill(0x24243a);
-        g.rect(0, ts - 1, ts, 1);
-        g.fill(0x24243a);
+        floors.rect(px, py, ts, ts);
       }
-
-      g.x = x * ts;
-      g.y = y * ts;
-      tilemap.addChild(g);
     }
   }
+
+  floors.fill(FLOOR_COLOR);
+  walls.fill(WALL_COLOR);
+
+  tilemap.addChild(floors);
+  tilemap.addChild(walls);
 
   return tilemap;
 }
