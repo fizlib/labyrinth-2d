@@ -6,7 +6,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Re-export physics module ────────────────────────────────────────────────
-export { PLAYER_SPEED, applyInput } from './physics.js';
+export {
+  PLAYER_SPEED,
+  PLAYER_HITBOX,
+  HITBOX_OFFSET,
+  applyInput,
+  isPositionValid,
+  applyInputWithCollision,
+} from './physics.js';
+
+// ── Re-export map data ──────────────────────────────────────────────────────
+export { LEVEL_1_MAP, type TileMapData } from './maps/level1.js';
 
 // ── Game Constants ──────────────────────────────────────────────────────────
 
@@ -34,11 +44,11 @@ export const SERVER_TICK_S = 1 / SERVER_TICK_RATE;
 /** Default room ID used when no lobby system is in place yet. */
 export const DEFAULT_ROOM_ID = 'default';
 
-/** Default spawn X coordinate. */
-export const SPAWN_X = 100;
+/** Default spawn X coordinate (tile 2,2 → pixel 32,32). */
+export const SPAWN_X = 32;
 
-/** Default spawn Y coordinate. */
-export const SPAWN_Y = 100;
+/** Default spawn Y coordinate (tile 2,2 → pixel 32,32). */
+export const SPAWN_Y = 32;
 
 // ── Network Message Types ───────────────────────────────────────────────────
 

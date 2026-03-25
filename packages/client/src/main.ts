@@ -1,48 +1,42 @@
 // packages/client/src/main.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // Labyrinth 2D — Client Entry Point
-// Step 4: Client-Side Prediction & Server Reconciliation
+// Step 5: Tilemap Integration & Collision
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // MULTIPLAYER ARCHITECTURE (Client-Side):
 //
-// 1. CLIENT-SIDE PREDICTION:
-//    - Every frame (60 fps), if the player is pressing movement keys, we:
-//      a) Create a PlayerInput with an incrementing sequenceNumber.
-//      b) Push it to the pendingInputs buffer.
-//      c) Send it to the server.
-//      d) IMMEDIATELY apply it to the local player's position using the
-//         shared applyInput() function. This eliminates perceived latency.
+// 1. CLIENT-SIDE PREDICTION with COLLISION:
+//    - Every frame (60 fps), if moving, we predict movement locally using
+//      applyInputWithCollision() — the SAME function the server uses.
+//    - This prevents rubber-banding: the client never predicts through walls.
 //
-// 2. SERVER RECONCILIATION:
-//    - When a TickUpdate arrives from the server (~20 tps):
-//      a) For remote players: snap their sprite to the server position.
-//      b) For the LOCAL player:
-//         i)   Force x/y to the server's authoritative position.
-//         ii)  Remove all pendingInputs where sequenceNumber <= server's
-//              lastProcessedInput (those are acknowledged).
-//         iii) Re-apply all REMAINING pendingInputs on top of the server
-//              position using applyInput(). This corrects any mispredictions
-//              while keeping unacknowledged inputs visible.
+// 2. SERVER RECONCILIATION with COLLISION:
+//    - On TickUpdate, snap local pos to server, discard acknowledged inputs,
+//      and re-apply pending inputs WITH collision so reconciled pos matches.
 //
-// 3. ENTITY INTERPOLATION (future step):
-//    - Remote players will be interpolated instead of snapped.
+// 3. TILEMAP RENDERING:
+//    - Wall tiles (ID: 1) drawn as gray rectangles using PixiJS Graphics.
+//    - No external textures loaded yet — pure primitives.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application, Graphics } from 'pixi.js';
+import { Application, Graphics, Container } from 'pixi.js';
 import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
   TILE_SIZE,
-  applyInput,
+  LEVEL_1_MAP,
+  applyInputWithCollision,
 } from '@labyrinth/shared';
-import type { GameState } from '@labyrinth/shared';
+import type { GameState, TileMapData } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 
-// ── Player Colors ───────────────────────────────────────────────────────────
+// ── Colors ──────────────────────────────────────────────────────────────────
 
-const LOCAL_PLAYER_COLOR = 0x00e676;  // Bright green
-const REMOTE_PLAYER_COLOR = 0xff5252; // Bright red
+const LOCAL_PLAYER_COLOR = 0x00e676;   // Bright green
+const REMOTE_PLAYER_COLOR = 0xff5252;  // Bright red
+const WALL_COLOR = 0x4a4a68;           // Muted purple-gray
+const FLOOR_COLOR = 0x1e1e32;          // Very dark navy (slightly lighter than bg)
 
 // ── Input State ─────────────────────────────────────────────────────────────
 
@@ -66,31 +60,19 @@ const KEY_MAP: Record<string, keyof typeof keys> = {
 
 // ── Prediction State ────────────────────────────────────────────────────────
 
-/**
- * A stored input for client-side prediction and server reconciliation.
- * We keep the direction flags + the sequence number + the dt used.
- */
 interface PendingInput {
   sequenceNumber: number;
   up: boolean;
   down: boolean;
   left: boolean;
   right: boolean;
-  /** The dt (in seconds) that was used when this input was predicted. */
   dt: number;
 }
 
-/** Buffer of inputs that have been predicted locally but not yet acknowledged by the server. */
 let pendingInputs: PendingInput[] = [];
-
-/** Monotonically increasing input sequence counter. */
 let inputSequenceNumber = 0;
-
-/** The local player's predicted position (separate from the sprite, which renders this). */
 let localX = 0;
 let localY = 0;
-
-/** Whether the local player has been initialized with a server position. */
 let localPlayerInitialized = false;
 
 // ── Integer Scaling ─────────────────────────────────────────────────────────
@@ -106,6 +88,56 @@ function resizeCanvas(app: Application): void {
   app.canvas.style.width = `${INTERNAL_WIDTH * scale}px`;
   app.canvas.style.height = `${INTERNAL_HEIGHT * scale}px`;
   app.renderer.resize(INTERNAL_WIDTH, INTERNAL_HEIGHT);
+}
+
+// ── Tilemap Rendering ───────────────────────────────────────────────────────
+
+/**
+ * Render the tilemap as PixiJS Graphics primitives.
+ * Wall tiles (ID: 1) = gray rectangles, floor tiles (ID: 0) = dark rectangles.
+ * Returns a Container that can be added to the stage.
+ */
+function renderTilemap(map: TileMapData): Container {
+  const tilemap = new Container();
+  const ts = map.tileSize;
+
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      const tileId = map.data[y * map.width + x];
+      const g = new Graphics();
+
+      if (tileId === 1) {
+        // Wall tile — raised look with subtle border
+        g.rect(0, 0, ts, ts);
+        g.fill(WALL_COLOR);
+        // Inner highlight (top-left edge)
+        g.rect(0, 0, ts, 1);
+        g.fill(0x5c5c80);
+        g.rect(0, 0, 1, ts);
+        g.fill(0x5c5c80);
+        // Inner shadow (bottom-right edge)
+        g.rect(0, ts - 1, ts, 1);
+        g.fill(0x36364e);
+        g.rect(ts - 1, 0, 1, ts);
+        g.fill(0x36364e);
+      } else {
+        // Floor tile — subtle grid
+        g.rect(0, 0, ts, ts);
+        g.fill(FLOOR_COLOR);
+        // Very subtle grid line
+        g.rect(ts - 1, 0, 1, ts);
+        g.fill(0x24243a);
+        g.rect(0, ts - 1, ts, 1);
+        g.fill(0x24243a);
+      }
+
+      g.x = x * ts;
+      g.y = y * ts;
+      tilemap.addChild(g);
+    }
+  }
+
+  return tilemap;
 }
 
 // ── Debug UI ────────────────────────────────────────────────────────────────
@@ -167,7 +199,7 @@ async function main(): Promise<void> {
     height: INTERNAL_HEIGHT,
     antialias: false,
     roundPixels: true,
-    backgroundColor: 0x1a1a2e,
+    backgroundColor: 0x0e0e1a,
     canvas: document.createElement('canvas'),
     resizeTo: undefined,
   });
@@ -179,11 +211,18 @@ async function main(): Promise<void> {
   resizeCanvas(app);
   window.addEventListener('resize', () => resizeCanvas(app));
 
+  // ── Render Tilemap ──────────────────────────────────────────────────────
+  const tilemapContainer = renderTilemap(LEVEL_1_MAP);
+  app.stage.addChild(tilemapContainer);
+
+  // ── Player layer (on top of tilemap) ───────────────────────────────────
+  const playerLayer = new Container();
+  app.stage.addChild(playerLayer);
+
+  // ── Debug UI (overlay) ────────────────────────────────────────────────
   createDebugUI();
 
   const statusEl = document.getElementById('connection-status');
-  const playerIdEl = document.getElementById('player-id');
-  const roomIdEl = document.getElementById('room-id');
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
@@ -196,7 +235,7 @@ async function main(): Promise<void> {
       const color = isLocal ? LOCAL_PLAYER_COLOR : REMOTE_PLAYER_COLOR;
       sprite.rect(0, 0, TILE_SIZE, TILE_SIZE);
       sprite.fill(color);
-      app.stage.addChild(sprite);
+      playerLayer.addChild(sprite);
       playerSprites.set(playerId, sprite);
     }
     return sprite;
@@ -205,7 +244,7 @@ async function main(): Promise<void> {
   function removePlayerSprite(playerId: string): void {
     const sprite = playerSprites.get(playerId);
     if (sprite) {
-      app.stage.removeChild(sprite);
+      playerLayer.removeChild(sprite);
       sprite.destroy();
       playerSprites.delete(playerId);
     }
@@ -213,7 +252,6 @@ async function main(): Promise<void> {
 
   // ── Network Manager ───────────────────────────────────────────────────
 
-  /** Reference to the latest server game state for the debug UI. */
   let latestServerState: GameState | null = null;
 
   const net = new NetworkManager({
@@ -225,7 +263,6 @@ async function main(): Promise<void> {
         statusEl.classList.add('connected');
       }
 
-      // Initialize local player position from server
       const me = gameState.players.find((p) => p.id === playerId);
       if (me) {
         localX = me.x;
@@ -233,7 +270,6 @@ async function main(): Promise<void> {
         localPlayerInitialized = true;
       }
 
-      // Render all players at their server positions
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const sprite = ensurePlayerSprite(player.id, isLocal);
@@ -253,7 +289,7 @@ async function main(): Promise<void> {
         const sprite = ensurePlayerSprite(player.id, isLocal);
 
         if (isLocal) {
-          // ── SERVER RECONCILIATION ───────────────────────────────
+          // ── SERVER RECONCILIATION (with collision) ──────────────
           // a) Force position to the server's authoritative state
           localX = player.x;
           localY = player.y;
@@ -263,24 +299,29 @@ async function main(): Promise<void> {
             (input) => input.sequenceNumber > player.lastProcessedInput,
           );
 
-          // c) Re-apply all unacknowledged inputs on top of the server state
+          // c) Re-apply all unacknowledged inputs WITH collision
           for (const input of pendingInputs) {
-            const result = applyInput(localX, localY, input, input.dt);
+            const result = applyInputWithCollision(
+              localX,
+              localY,
+              input,
+              input.dt,
+              LEVEL_1_MAP,
+            );
             localX = result.x;
             localY = result.y;
           }
 
-          // Update sprite to the reconciled position
           sprite.x = Math.round(localX);
           sprite.y = Math.round(localY);
         } else {
-          // Remote players: snap to server position (interpolation in future step)
+          // Remote players: snap to server position
           sprite.x = Math.round(player.x);
           sprite.y = Math.round(player.y);
         }
       }
 
-      // Remove sprites for players no longer in the state
+      // Remove sprites for disconnected players
       const activeIds = new Set(gameState.players.map((p) => p.id));
       for (const [id] of playerSprites) {
         if (!activeIds.has(id)) {
@@ -315,13 +356,7 @@ async function main(): Promise<void> {
     },
   });
 
-  // ── 60 FPS Game Loop — Input Sampling & Prediction ────────────────────
-  //
-  // Every frame:
-  //   1. Check if any movement key is pressed.
-  //   2. If yes, create a PendingInput, apply it locally (prediction),
-  //      send it to the server, and push it to the pendingInputs buffer.
-  //   3. Update the local player sprite to the predicted position.
+  // ── 60 FPS Game Loop — Prediction with Collision ──────────────────────
 
   app.ticker.add((ticker) => {
     if (!net.isConnected || !localPlayerInitialized || !net.playerId) return;
@@ -330,7 +365,6 @@ async function main(): Promise<void> {
     const isMoving = keys.up || keys.down || keys.left || keys.right;
 
     if (isMoving) {
-      // 1. Create the input
       inputSequenceNumber++;
 
       const input: PendingInput = {
@@ -342,10 +376,19 @@ async function main(): Promise<void> {
         dt: dtSeconds,
       };
 
-      // 2. Push to pending buffer (for reconciliation later)
+      // CLIENT-SIDE PREDICTION with collision — prevents rubber-banding
+      const result = applyInputWithCollision(
+        localX,
+        localY,
+        input,
+        dtSeconds,
+        LEVEL_1_MAP,
+      );
+      localX = result.x;
+      localY = result.y;
+
       pendingInputs.push(input);
 
-      // 3. Send to server
       net.sendInput(
         input.sequenceNumber,
         input.up,
@@ -353,14 +396,9 @@ async function main(): Promise<void> {
         input.left,
         input.right,
       );
-
-      // 4. CLIENT-SIDE PREDICTION: apply immediately to local position
-      const result = applyInput(localX, localY, input, dtSeconds);
-      localX = result.x;
-      localY = result.y;
     }
 
-    // 5. Update the local player's sprite to the predicted position
+    // Update local player sprite to predicted position
     const localSprite = playerSprites.get(net.playerId);
     if (localSprite) {
       localSprite.x = Math.round(localX);
@@ -400,7 +438,8 @@ async function main(): Promise<void> {
 
   console.info('─────────────────────────────────────────────────');
   console.info('  🏰 Labyrinth 2D Client');
-  console.info('  Step 4: Client-Side Prediction + Reconciliation');
+  console.info('  Step 5: Tilemap + Collision');
+  console.info(`  Map: ${LEVEL_1_MAP.width}×${LEVEL_1_MAP.height} tiles`);
   console.info(`  Internal: ${INTERNAL_WIDTH}×${INTERNAL_HEIGHT}`);
   console.info(`  Scale: ${getIntegerScale(window.innerWidth, window.innerHeight)}×`);
   console.info(`  Display name: ${displayName}`);

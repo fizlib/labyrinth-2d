@@ -5,10 +5,9 @@
 // Each room holds the authoritative GameState and runs a fixed-rate game loop
 // at ~20 ticks/sec. Every tick it:
 //   1. Increments the tick counter.
-//   2. Processes ALL queued inputs for each player (not just the latest).
-//   3. Applies movement via the shared applyInput() function.
-//   4. Updates lastProcessedInput so clients can reconcile.
-//   5. Broadcasts a TickUpdate to every connected client.
+//   2. Processes ALL queued inputs with collision detection (sliding walls).
+//   3. Updates lastProcessedInput so clients can reconcile.
+//   4. Broadcasts a TickUpdate to every connected client.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type uWS from 'uWebSockets.js';
@@ -20,7 +19,8 @@ import {
   MAX_PLAYERS_PER_ROOM,
   SPAWN_X,
   SPAWN_Y,
-  applyInput,
+  LEVEL_1_MAP,
+  applyInputWithCollision,
   type GameState,
   type PlayerInfo,
   type PlayerInputMessage,
@@ -42,8 +42,6 @@ type PlayerSocket = uWS.WebSocket<SocketData>;
 
 /**
  * A queued input from a client, waiting to be processed on the next tick.
- * We store the full input + its sequence number so the server can track
- * which inputs have been acknowledged.
  */
 interface QueuedInput {
   sequenceNumber: number;
@@ -66,7 +64,6 @@ export class Room {
   /**
    * Input queue per player, keyed by player ID.
    * Inputs arrive between ticks and are ALL processed on the next tick.
-   * This ensures no inputs are dropped even if multiple arrive per tick.
    */
   private inputQueues: Map<string, QueuedInput[]> = new Map();
 
@@ -83,33 +80,22 @@ export class Room {
 
   // ── Player Management ─────────────────────────────────────────────────
 
-  /** Current number of players in this room. */
   get playerCount(): number {
     return this.sockets.size;
   }
 
-  /** Whether the room has capacity for another player. */
   get isFull(): boolean {
     return this.sockets.size >= MAX_PLAYERS_PER_ROOM;
   }
 
-  /**
-   * Add a player to the room.
-   * Spawns them at the default coordinate and sends RoomJoined.
-   * Starts the game loop if this is the first player.
-   */
   addPlayer(ws: PlayerSocket): void {
     const data = ws.getUserData();
     const playerId = data.id;
     const displayName = data.displayName;
 
-    // Register socket
     this.sockets.set(playerId, ws);
-
-    // Initialize empty input queue
     this.inputQueues.set(playerId, []);
 
-    // Add to game state with spawn position
     const playerInfo: PlayerInfo = {
       id: playerId,
       displayName,
@@ -119,10 +105,8 @@ export class Room {
     };
     this.state.players.push(playerInfo);
 
-    // Tag the socket so we know which room it's in
     data.roomId = this.id;
 
-    // Send RoomJoined to the joining client with current state
     const joinMsg: RoomJoinedMessage = {
       type: MessageType.RoomJoined,
       roomId: this.id,
@@ -135,23 +119,16 @@ export class Room {
       `[Room:${this.id}] Player joined: ${displayName} (${playerId}) at (${SPAWN_X}, ${SPAWN_Y}) — ${this.playerCount} player(s)`,
     );
 
-    // Start the game loop when the first player joins
     if (this.playerCount === 1) {
       this.startLoop();
     }
   }
 
-  /**
-   * Remove a player from the room.
-   * Broadcasts `PlayerLeft` to remaining clients.
-   * Stops the game loop if the room is now empty.
-   */
   removePlayer(playerId: string): void {
     this.sockets.delete(playerId);
     this.inputQueues.delete(playerId);
     this.state.players = this.state.players.filter((p) => p.id !== playerId);
 
-    // Notify remaining players
     const leftMsg: PlayerLeftMessage = {
       type: MessageType.PlayerLeft,
       playerId,
@@ -162,7 +139,6 @@ export class Room {
       `[Room:${this.id}] Player left: ${playerId} — ${this.playerCount} player(s) remaining`,
     );
 
-    // Stop the loop when the last player leaves
     if (this.playerCount === 0) {
       this.stopLoop();
     }
@@ -170,11 +146,6 @@ export class Room {
 
   // ── Input Handling ────────────────────────────────────────────────────
 
-  /**
-   * Queue a player's input for processing on the next tick.
-   * Called from the WebSocket message handler in index.ts.
-   * Inputs are NOT applied immediately — they wait for the next tick.
-   */
   handleInput(playerId: string, msg: PlayerInputMessage): void {
     const queue = this.inputQueues.get(playerId);
     if (queue) {
@@ -190,9 +161,6 @@ export class Room {
 
   // ── Game Loop ─────────────────────────────────────────────────────────
 
-  /**
-   * Start the fixed-rate server game loop (~20 ticks/sec, 50ms interval).
-   */
   private startLoop(): void {
     if (this.loopHandle !== null) return;
 
@@ -203,7 +171,6 @@ export class Room {
     }, SERVER_TICK_MS);
   }
 
-  /** Stop the game loop. */
   private stopLoop(): void {
     if (this.loopHandle === null) return;
 
@@ -215,16 +182,10 @@ export class Room {
   /**
    * Execute one server tick.
    *
-   * For each player:
-   *   1. Process ALL queued inputs (may be 0, 1, or many per tick).
-   *      Each input is applied with the shared applyInput() and SERVER_TICK_S
-   *      divided by the number of inputs to distribute the tick's time budget.
-   *      Actually, per the standard Valve/Gabriel Gambetta model, each input
-   *      represents one client frame's worth of movement. We apply each with
-   *      a fixed dt = SERVER_TICK_S. This means the server processes inputs
-   *      at the same rate the client predicted them.
-   *   2. Update lastProcessedInput to the highest sequence number processed.
-   *   3. Clear the queue.
+   * For each player: process ALL queued inputs using applyInputWithCollision().
+   * This enforces wall collision on the server side (authoritative).
+   * The shared collision function does axis-independent sliding so players
+   * can slide along walls.
    */
   private tick(): void {
     // 1. Advance tick counter
@@ -235,16 +196,18 @@ export class Room {
       const queue = this.inputQueues.get(player.id);
       if (!queue || queue.length === 0) continue;
 
-      // Process each queued input with the same dt the client used for prediction.
-      // The client predicts with its frame dt, but for deterministic reconciliation
-      // we use a fixed dt per input on the server side. Since the client sends one
-      // input per frame, and we want server and client to agree, we use a fixed
-      // dt that matches the server tick divided by the number of inputs received.
-      // This keeps total displacement per tick proportional regardless of client fps.
+      // Distribute the tick's time budget across all queued inputs
       const dtPerInput = SERVER_TICK_S / queue.length;
 
       for (const input of queue) {
-        const result = applyInput(player.x, player.y, input, dtPerInput);
+        // Apply movement WITH collision detection against the map
+        const result = applyInputWithCollision(
+          player.x,
+          player.y,
+          input,
+          dtPerInput,
+          LEVEL_1_MAP,
+        );
         player.x = result.x;
         player.y = result.y;
 
@@ -268,12 +231,10 @@ export class Room {
 
   // ── Networking Helpers ────────────────────────────────────────────────
 
-  /** Send a message to a single client. */
   private send(ws: PlayerSocket, msg: ServerToClientMessage): void {
     ws.send(JSON.stringify(msg), false);
   }
 
-  /** Broadcast a message to all clients in this room. */
   private broadcast(msg: ServerToClientMessage): void {
     const payload = JSON.stringify(msg);
     for (const ws of this.sockets.values()) {
@@ -281,7 +242,6 @@ export class Room {
     }
   }
 
-  /** Create a deep-enough clone of the state for safe serialization. */
   private cloneState(): GameState {
     return {
       tick: this.state.tick,
@@ -289,7 +249,6 @@ export class Room {
     };
   }
 
-  /** Clean up the room (stop loop, clear all state). */
   destroy(): void {
     this.stopLoop();
     this.sockets.clear();
