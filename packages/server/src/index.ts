@@ -9,24 +9,16 @@
 //    Clients send inputs (PlayerInput), never direct state mutations.
 //
 // 2. ROOM/LOBBY SYSTEM: Each group of up to 10 players joins a "room".
-//    One maze instance is generated per room. Players create or join rooms
-//    via the lobby screen. Room state is isolated — no cross-room interaction.
+//    One maze instance is generated per room. Room state is isolated.
 //
 // 3. SERVER GAME LOOP (~20 ticks/sec): Every tick, the server:
-//    a) Dequeues and validates all buffered player inputs.
-//    b) Runs the game simulation (movement, collision, triggers).
-//    c) Computes a DELTA STATE SNAPSHOT (only entities that changed).
-//    d) Broadcasts the delta snapshot to all clients in the room.
+//    a) Applies each player's latest input to move them (constant speed).
+//    b) Broadcasts a TickUpdate with the authoritative positions.
 //
-// 4. CLIENT-SIDE PREDICTION: Clients apply their own inputs immediately
-//    for smooth 60-fps rendering. They buffer inputs with sequence numbers.
+// 4. CLIENT-SIDE PREDICTION (Step 4): Not yet implemented.
+//    Currently the client renders raw server positions — expect latency.
 //
-// 5. SERVER RECONCILIATION: When a server snapshot arrives, the client:
-//    a) Finds the last acknowledged input sequence.
-//    b) Discards all inputs up to that sequence.
-//    c) Re-applies unacknowledged inputs on top of the server-authoritative state.
-//
-// Step 2: Room management, game loop, and basic message routing.
+// Step 3: Room management, movement processing, message routing.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import uWS from 'uWebSockets.js';
@@ -44,7 +36,6 @@ import { Room, type SocketData } from './Room.js';
 const PORT = 9001;
 
 // ── Room Registry ───────────────────────────────────────────────────────────
-// For Step 2 we use a single default room. A full lobby system comes later.
 
 const rooms: Map<string, Room> = new Map();
 
@@ -80,7 +71,6 @@ const app = uWS
     /* ── Lifecycle Hooks ─────────────────────────────────────── */
 
     upgrade: (res, req, context) => {
-      // Upgrade HTTP → WebSocket. Attach initial socket data.
       res.upgrade<SocketData>(
         {
           id: generatePlayerId(),
@@ -108,7 +98,6 @@ const app = uWS
 
         switch (msg.type) {
           case MessageType.JoinRoom: {
-            // Store the display name on the socket
             data.displayName = msg.displayName;
 
             const roomId = msg.roomId || DEFAULT_ROOM_ID;
@@ -131,7 +120,13 @@ const app = uWS
           }
 
           case MessageType.PlayerInput: {
-            // TODO: Queue input for server tick processing (Step 3+)
+            // Forward the input to the player's room for processing on next tick
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) {
+                room.handleInput(data.id, msg);
+              }
+            }
             break;
           }
 
@@ -147,13 +142,11 @@ const app = uWS
       const data = ws.getUserData();
       console.info(`[WS] Disconnected: ${data.id} (code: ${code})`);
 
-      // Remove from room if they were in one
       if (data.roomId) {
         const room = rooms.get(data.roomId);
         if (room) {
           room.removePlayer(data.id);
 
-          // Clean up empty rooms
           if (room.playerCount === 0) {
             room.destroy();
             rooms.delete(data.roomId);

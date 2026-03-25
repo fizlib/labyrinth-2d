@@ -28,6 +28,15 @@ export const SERVER_TICK_MS = 1000 / SERVER_TICK_RATE;
 /** Default room ID used when no lobby system is in place yet. */
 export const DEFAULT_ROOM_ID = 'default';
 
+/** Player movement speed in pixels per tick at the server tick rate. */
+export const PLAYER_SPEED = 3;
+
+/** Default spawn X coordinate. */
+export const SPAWN_X = 100;
+
+/** Default spawn Y coordinate. */
+export const SPAWN_Y = 100;
+
 // ── Network Message Types ───────────────────────────────────────────────────
 
 /**
@@ -59,24 +68,32 @@ export interface JoinRoomMessage {
 }
 
 /**
- * Sent every frame the player has input.
- * The server processes these in order, keyed by `seq` for reconciliation.
- *
- * NOTE: Payload is intentionally empty for Step 2.
- * Movement fields (dx, dy) will be added in a later step.
+ * Sent whenever the client's input state changes.
+ * Contains boolean flags for each movement direction.
+ * The server stores the latest input and applies it every tick.
  */
 export interface PlayerInputMessage {
   type: MessageType.PlayerInput;
-  /** Monotonically increasing sequence number for reconciliation. */
-  seq: number;
+  /**
+   * Monotonically increasing sequence number for future reconciliation.
+   * Set to 0 for now — will be used in Step 4 for client-side prediction.
+   */
+  sequenceNumber: number;
+  /** Movement direction flags. */
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
 }
 
 // ── Server → Client Messages ────────────────────────────────────────────────
 
-/** Minimal player info included in network messages. */
+/** Player state included in the game state — has position + display info. */
 export interface PlayerInfo {
   id: string;
   displayName: string;
+  x: number;
+  y: number;
 }
 
 /**
@@ -94,7 +111,7 @@ export interface RoomJoinedMessage {
 
 /**
  * Broadcast to all clients in a room every server tick (~20 tps).
- * Contains the current authoritative game state (delta in future steps).
+ * Contains the current authoritative game state.
  */
 export interface TickUpdateMessage {
   type: MessageType.TickUpdate;
@@ -119,13 +136,12 @@ export interface ErrorMessage {
 
 /**
  * The authoritative game state held by the server and broadcast to clients.
- * For Step 2 this is minimal: a tick counter and a list of connected players.
- * It will grow as we add maze data, positions, items, etc.
+ * Contains a tick counter and all player positions.
  */
 export interface GameState {
   /** Monotonically increasing tick counter (incremented each server tick). */
   tick: number;
-  /** All players currently in the room. */
+  /** All players currently in the room with their positions. */
   players: PlayerInfo[];
 }
 

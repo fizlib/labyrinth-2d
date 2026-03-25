@@ -5,6 +5,7 @@
 // Handles:
 // - Connecting to the uWebSockets.js server.
 // - Sending JoinRoom on open.
+// - Sending PlayerInput when the local player's keys change.
 // - Receiving and dispatching RoomJoined / TickUpdate / PlayerLeft / Error.
 // - Storing the latest GameState for the rest of the client to read.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,6 +15,7 @@ import {
   DEFAULT_ROOM_ID,
   type GameState,
   type JoinRoomMessage,
+  type PlayerInputMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -59,10 +61,6 @@ export class NetworkManager {
 
   /**
    * Connect to the game server and immediately send a JoinRoom message.
-   *
-   * @param url       WebSocket URL (e.g. "ws://localhost:9001")
-   * @param roomId    Room to join (defaults to the shared default room)
-   * @param displayName  Display name for this player
    */
   connect(url: string, roomId: string = DEFAULT_ROOM_ID, displayName: string = 'Player'): void {
     if (this.ws) {
@@ -115,7 +113,6 @@ export class NetworkManager {
 
   // ── Message Handling ────────────────────────────────────────────────────
 
-  /** Route an incoming server message to the appropriate callback. */
   private handleMessage(msg: ServerToClientMessage): void {
     switch (msg.type) {
       case MessageType.RoomJoined:
@@ -143,6 +140,22 @@ export class NetworkManager {
   }
 
   // ── Sending ─────────────────────────────────────────────────────────────
+
+  /**
+   * Send the current input state to the server.
+   * Called whenever WASD/arrow key state changes.
+   */
+  sendInput(up: boolean, down: boolean, left: boolean, right: boolean): void {
+    const msg: PlayerInputMessage = {
+      type: MessageType.PlayerInput,
+      sequenceNumber: 0, // Placeholder — used for prediction in Step 4
+      up,
+      down,
+      left,
+      right,
+    };
+    this.send(msg);
+  }
 
   /** Send a JSON message to the server. */
   private send(msg: object): void {
