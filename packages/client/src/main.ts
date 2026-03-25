@@ -1,23 +1,23 @@
 // packages/client/src/main.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // Labyrinth 2D — Client Entry Point
-// Step 5: Tilemap Integration & Collision
+// Step 6: Entity Interpolation (Remote Player Smoothing)
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // MULTIPLAYER ARCHITECTURE (Client-Side):
 //
-// 1. CLIENT-SIDE PREDICTION with COLLISION:
-//    - Every frame (60 fps), if moving, we predict movement locally using
-//      applyInputWithCollision() — the SAME function the server uses.
-//    - This prevents rubber-banding: the client never predicts through walls.
+// 1. CLIENT-SIDE PREDICTION (local player — unchanged from Step 5):
+//    - 60fps: sample keys → predict via applyInputWithCollision() → buffer.
+//    - On TickUpdate: snap to server, discard acknowledged, re-apply pending.
 //
-// 2. SERVER RECONCILIATION with COLLISION:
-//    - On TickUpdate, snap local pos to server, discard acknowledged inputs,
-//      and re-apply pending inputs WITH collision so reconciled pos matches.
+// 2. ENTITY INTERPOLATION (remote players — NEW in Step 6):
+//    - Server snapshots are stored in a SnapshotBuffer with local timestamps.
+//    - Remote players render at (performance.now() - INTERPOLATION_DELAY),
+//      100ms behind real-time.
+//    - We find the two snapshots bracketing renderTime and lerp x/y.
+//    - This turns 20-tps updates into buttery 60-fps movement for remotes.
 //
-// 3. TILEMAP RENDERING:
-//    - Wall tiles (ID: 1) drawn as gray rectangles using PixiJS Graphics.
-//    - No external textures loaded yet — pure primitives.
+// 3. TILEMAP + COLLISION: same as Step 5.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Application, Graphics, Container } from 'pixi.js';
@@ -28,15 +28,16 @@ import {
   LEVEL_1_MAP,
   applyInputWithCollision,
 } from '@labyrinth/shared';
-import type { GameState, TileMapData } from '@labyrinth/shared';
+import type { GameState, TileMapData, PlayerInfo } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
+import { SnapshotBuffer, INTERPOLATION_DELAY } from './net/SnapshotBuffer';
 
 // ── Colors ──────────────────────────────────────────────────────────────────
 
 const LOCAL_PLAYER_COLOR = 0x00e676;   // Bright green
 const REMOTE_PLAYER_COLOR = 0xff5252;  // Bright red
 const WALL_COLOR = 0x4a4a68;           // Muted purple-gray
-const FLOOR_COLOR = 0x1e1e32;          // Very dark navy (slightly lighter than bg)
+const FLOOR_COLOR = 0x1e1e32;          // Very dark navy
 
 // ── Input State ─────────────────────────────────────────────────────────────
 
@@ -75,6 +76,10 @@ let localX = 0;
 let localY = 0;
 let localPlayerInitialized = false;
 
+// ── Snapshot Buffer (for remote player interpolation) ────────────────────────
+
+const snapshotBuffer = new SnapshotBuffer();
+
 // ── Integer Scaling ─────────────────────────────────────────────────────────
 
 function getIntegerScale(viewportW: number, viewportH: number): number {
@@ -92,11 +97,6 @@ function resizeCanvas(app: Application): void {
 
 // ── Tilemap Rendering ───────────────────────────────────────────────────────
 
-/**
- * Render the tilemap as PixiJS Graphics primitives.
- * Wall tiles (ID: 1) = gray rectangles, floor tiles (ID: 0) = dark rectangles.
- * Returns a Container that can be added to the stage.
- */
 function renderTilemap(map: TileMapData): Container {
   const tilemap = new Container();
   const ts = map.tileSize;
@@ -107,24 +107,19 @@ function renderTilemap(map: TileMapData): Container {
       const g = new Graphics();
 
       if (tileId === 1) {
-        // Wall tile — raised look with subtle border
         g.rect(0, 0, ts, ts);
         g.fill(WALL_COLOR);
-        // Inner highlight (top-left edge)
         g.rect(0, 0, ts, 1);
         g.fill(0x5c5c80);
         g.rect(0, 0, 1, ts);
         g.fill(0x5c5c80);
-        // Inner shadow (bottom-right edge)
         g.rect(0, ts - 1, ts, 1);
         g.fill(0x36364e);
         g.rect(ts - 1, 0, 1, ts);
         g.fill(0x36364e);
       } else {
-        // Floor tile — subtle grid
         g.rect(0, 0, ts, ts);
         g.fill(FLOOR_COLOR);
-        // Very subtle grid line
         g.rect(ts - 1, 0, 1, ts);
         g.fill(0x24243a);
         g.rect(0, ts - 1, ts, 1);
@@ -138,6 +133,53 @@ function renderTilemap(map: TileMapData): Container {
   }
 
   return tilemap;
+}
+
+// ── Interpolation Helper ────────────────────────────────────────────────────
+
+/** Linear interpolation. */
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+/**
+ * Get the interpolated position for a remote player at the current renderTime.
+ *
+ * 1. Look for two bracketing snapshots in the buffer.
+ * 2. Find the player in both snapshots.
+ * 3. Lerp their x/y by the interpolation factor t.
+ * 4. Fallback: if no pair, use the latest known position.
+ */
+function getInterpolatedPosition(
+  playerId: string,
+  renderTime: number,
+): { x: number; y: number } | null {
+  const pair = snapshotBuffer.getInterpolationPair(renderTime);
+
+  if (pair) {
+    const pastPlayer = pair.past.state.players.find((p) => p.id === playerId);
+    const futurePlayer = pair.future.state.players.find((p) => p.id === playerId);
+
+    if (pastPlayer && futurePlayer) {
+      return {
+        x: lerp(pastPlayer.x, futurePlayer.x, pair.t),
+        y: lerp(pastPlayer.y, futurePlayer.y, pair.t),
+      };
+    }
+
+    // Player exists in only one snapshot — use whichever has them
+    if (futurePlayer) return { x: futurePlayer.x, y: futurePlayer.y };
+    if (pastPlayer) return { x: pastPlayer.x, y: pastPlayer.y };
+  }
+
+  // Fallback: use latest snapshot
+  const latest = snapshotBuffer.getLatest();
+  if (latest) {
+    const player = latest.state.players.find((p) => p.id === playerId);
+    if (player) return { x: player.x, y: player.y };
+  }
+
+  return null;
 }
 
 // ── Debug UI ────────────────────────────────────────────────────────────────
@@ -154,12 +196,12 @@ function createDebugUI(): void {
         <span class="stat-value" id="tick-counter">—</span>
       </div>
       <div class="stat-card">
-        <span class="stat-label">Pending Inputs</span>
+        <span class="stat-label">Pending</span>
         <span class="stat-value" id="pending-count">0</span>
       </div>
       <div class="stat-card">
-        <span class="stat-label">Input Seq</span>
-        <span class="stat-value" id="input-seq">0</span>
+        <span class="stat-label">Snapshots</span>
+        <span class="stat-value" id="snapshot-count">0</span>
       </div>
     </div>
     <h2>Connected Players</h2>
@@ -171,12 +213,12 @@ function createDebugUI(): void {
 function updateDebugUI(state: GameState, playerId: string | null): void {
   const tickEl = document.getElementById('tick-counter');
   const pendingEl = document.getElementById('pending-count');
-  const seqEl = document.getElementById('input-seq');
+  const snapshotEl = document.getElementById('snapshot-count');
   const playerListEl = document.getElementById('player-list');
 
   if (tickEl) tickEl.textContent = state.tick.toString();
   if (pendingEl) pendingEl.textContent = pendingInputs.length.toString();
-  if (seqEl) seqEl.textContent = inputSequenceNumber.toString();
+  if (snapshotEl) snapshotEl.textContent = snapshotBuffer.length.toString();
 
   if (playerListEl) {
     playerListEl.innerHTML = state.players
@@ -191,7 +233,6 @@ function updateDebugUI(state: GameState, playerId: string | null): void {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  // ── PixiJS Application ──────────────────────────────────────────────────
   const app = new Application();
 
   await app.init({
@@ -211,17 +252,16 @@ async function main(): Promise<void> {
   resizeCanvas(app);
   window.addEventListener('resize', () => resizeCanvas(app));
 
-  // ── Render Tilemap ──────────────────────────────────────────────────────
+  // ── Tilemap ─────────────────────────────────────────────────────────────
   const tilemapContainer = renderTilemap(LEVEL_1_MAP);
   app.stage.addChild(tilemapContainer);
 
-  // ── Player layer (on top of tilemap) ───────────────────────────────────
+  // ── Player layer ──────────────────────────────────────────────────────
   const playerLayer = new Container();
   app.stage.addChild(playerLayer);
 
-  // ── Debug UI (overlay) ────────────────────────────────────────────────
+  // ── Debug UI ──────────────────────────────────────────────────────────
   createDebugUI();
-
   const statusEl = document.getElementById('connection-status');
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
@@ -250,6 +290,11 @@ async function main(): Promise<void> {
     }
   }
 
+  // ── Track which remote players exist ──────────────────────────────────
+  // We use this set to ensure sprites exist for remote players even before
+  // interpolation kicks in. Updated on every TickUpdate.
+  const knownRemotePlayers: Set<string> = new Set();
+
   // ── Network Manager ───────────────────────────────────────────────────
 
   let latestServerState: GameState | null = null;
@@ -270,12 +315,17 @@ async function main(): Promise<void> {
         localPlayerInitialized = true;
       }
 
+      // Initialize all sprites
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const sprite = ensurePlayerSprite(player.id, isLocal);
         sprite.x = Math.round(player.x);
         sprite.y = Math.round(player.y);
+        if (!isLocal) knownRemotePlayers.add(player.id);
       }
+
+      // Seed the snapshot buffer
+      snapshotBuffer.push(gameState);
 
       latestServerState = gameState;
       updateDebugUI(gameState, playerId);
@@ -284,40 +334,47 @@ async function main(): Promise<void> {
     onTickUpdate: (gameState) => {
       const localPlayerId = net.playerId;
 
-      for (const player of gameState.players) {
-        const isLocal = player.id === localPlayerId;
-        const sprite = ensurePlayerSprite(player.id, isLocal);
+      // ── Push snapshot for interpolation ──────────────────────────
+      snapshotBuffer.push(gameState);
 
-        if (isLocal) {
-          // ── SERVER RECONCILIATION (with collision) ──────────────
-          // a) Force position to the server's authoritative state
-          localX = player.x;
-          localY = player.y;
+      // ── Local player: reconciliation (unchanged from Step 5) ────
+      const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
+      if (localPlayerData) {
+        const sprite = ensurePlayerSprite(localPlayerData.id, true);
 
-          // b) Discard all acknowledged inputs
-          pendingInputs = pendingInputs.filter(
-            (input) => input.sequenceNumber > player.lastProcessedInput,
+        // a) Force to server authoritative position
+        localX = localPlayerData.x;
+        localY = localPlayerData.y;
+
+        // b) Discard acknowledged inputs
+        pendingInputs = pendingInputs.filter(
+          (input) => input.sequenceNumber > localPlayerData.lastProcessedInput,
+        );
+
+        // c) Re-apply unacknowledged inputs WITH collision
+        for (const input of pendingInputs) {
+          const result = applyInputWithCollision(
+            localX,
+            localY,
+            input,
+            input.dt,
+            LEVEL_1_MAP,
           );
+          localX = result.x;
+          localY = result.y;
+        }
 
-          // c) Re-apply all unacknowledged inputs WITH collision
-          for (const input of pendingInputs) {
-            const result = applyInputWithCollision(
-              localX,
-              localY,
-              input,
-              input.dt,
-              LEVEL_1_MAP,
-            );
-            localX = result.x;
-            localY = result.y;
-          }
+        sprite.x = Math.round(localX);
+        sprite.y = Math.round(localY);
+      }
 
-          sprite.x = Math.round(localX);
-          sprite.y = Math.round(localY);
-        } else {
-          // Remote players: snap to server position
-          sprite.x = Math.round(player.x);
-          sprite.y = Math.round(player.y);
+      // ── Remote players: just ensure sprites exist ───────────────
+      // Actual position updates happen in the 60fps ticker via interpolation.
+      knownRemotePlayers.clear();
+      for (const player of gameState.players) {
+        if (player.id !== localPlayerId) {
+          knownRemotePlayers.add(player.id);
+          ensurePlayerSprite(player.id, false);
         }
       }
 
@@ -326,6 +383,7 @@ async function main(): Promise<void> {
       for (const [id] of playerSprites) {
         if (!activeIds.has(id)) {
           removePlayerSprite(id);
+          knownRemotePlayers.delete(id);
         }
       }
 
@@ -336,6 +394,7 @@ async function main(): Promise<void> {
     onPlayerLeft: (playerId) => {
       console.info(`[Main] Player left: ${playerId}`);
       removePlayerSprite(playerId);
+      knownRemotePlayers.delete(playerId);
     },
 
     onError: (code, message) => {
@@ -356,12 +415,19 @@ async function main(): Promise<void> {
     },
   });
 
-  // ── 60 FPS Game Loop — Prediction with Collision ──────────────────────
+  // ── 60 FPS Game Loop ──────────────────────────────────────────────────
+  //
+  // Every frame:
+  //   1. LOCAL PLAYER: sample input → predict with collision → send to server.
+  //   2. REMOTE PLAYERS: interpolate between two server snapshots.
 
   app.ticker.add((ticker) => {
     if (!net.isConnected || !localPlayerInitialized || !net.playerId) return;
 
     const dtSeconds = ticker.deltaMS / 1000;
+    const now = performance.now();
+
+    // ── 1. Local player prediction ────────────────────────────────────
     const isMoving = keys.up || keys.down || keys.left || keys.right;
 
     if (isMoving) {
@@ -376,7 +442,6 @@ async function main(): Promise<void> {
         dt: dtSeconds,
       };
 
-      // CLIENT-SIDE PREDICTION with collision — prevents rubber-banding
       const result = applyInputWithCollision(
         localX,
         localY,
@@ -398,11 +463,25 @@ async function main(): Promise<void> {
       );
     }
 
-    // Update local player sprite to predicted position
+    // Update local player sprite
     const localSprite = playerSprites.get(net.playerId);
     if (localSprite) {
       localSprite.x = Math.round(localX);
       localSprite.y = Math.round(localY);
+    }
+
+    // ── 2. Remote player interpolation ────────────────────────────────
+    const renderTime = now - INTERPOLATION_DELAY;
+
+    for (const remoteId of knownRemotePlayers) {
+      const sprite = playerSprites.get(remoteId);
+      if (!sprite) continue;
+
+      const pos = getInterpolatedPosition(remoteId, renderTime);
+      if (pos) {
+        sprite.x = Math.round(pos.x);
+        sprite.y = Math.round(pos.y);
+      }
     }
   });
 
@@ -438,7 +517,8 @@ async function main(): Promise<void> {
 
   console.info('─────────────────────────────────────────────────');
   console.info('  🏰 Labyrinth 2D Client');
-  console.info('  Step 5: Tilemap + Collision');
+  console.info('  Step 6: Entity Interpolation');
+  console.info(`  Interpolation delay: ${INTERPOLATION_DELAY}ms`);
   console.info(`  Map: ${LEVEL_1_MAP.width}×${LEVEL_1_MAP.height} tiles`);
   console.info(`  Internal: ${INTERNAL_WIDTH}×${INTERNAL_HEIGHT}`);
   console.info(`  Scale: ${getIntegerScale(window.innerWidth, window.innerHeight)}×`);
