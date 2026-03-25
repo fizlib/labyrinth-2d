@@ -15,9 +15,10 @@ import {
   SERVER_TICK_S,
   MAX_PLAYERS_PER_ROOM,
   TILE_SIZE,
-  LEVEL_1_MAP,
+  generateMaze,
   SPAWN_POINTS,
   applyInputWithCollision,
+  type TileMapData,
   type GameState,
   type PlayerInfo,
   type PlayerInputMessage,
@@ -57,12 +58,21 @@ export class Room {
    */
   private joinCounter = 0;
 
+  /** Random seed used to generate this room's maze. */
+  readonly mapSeed: number;
+
+  /** The generated maze tile map for this room. */
+  private readonly map: TileMapData;
+
   constructor(id: string) {
     this.id = id;
+    this.mapSeed = Math.floor(Math.random() * 2147483647);
+    this.map = generateMaze(this.mapSeed);
     this.state = {
       tick: 0,
       players: [],
     };
+    console.info(`[Room:${this.id}] Created with maze seed ${this.mapSeed}`);
   }
 
   // ── Player Management ─────────────────────────────────────────────────
@@ -105,6 +115,7 @@ export class Room {
       type: MessageType.RoomJoined,
       roomId: this.id,
       playerId,
+      mapSeed: this.mapSeed,
       gameState: this.cloneState(),
     };
     this.send(ws, joinMsg);
@@ -188,7 +199,7 @@ export class Room {
           player.y,
           input,
           dtPerInput,
-          LEVEL_1_MAP,
+          this.map,
         );
         player.x = result.x;
         player.y = result.y;

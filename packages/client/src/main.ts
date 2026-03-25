@@ -16,7 +16,8 @@ import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
   TILE_SIZE,
-  LEVEL_1_MAP,
+  MAZE_SIZE,
+  generateMaze,
   applyInputWithCollision,
 } from '@labyrinth/shared';
 import type { GameState, TileMapData } from '@labyrinth/shared';
@@ -66,6 +67,10 @@ let inputSequenceNumber = 0;
 let localX = 0;
 let localY = 0;
 let localPlayerInitialized = false;
+
+// ── Current Map (set on room join from server seed) ───────────────────────
+
+let currentMap: TileMapData | null = null;
 
 // ── Snapshot Buffer ─────────────────────────────────────────────────────────
 
@@ -138,25 +143,37 @@ function updateCamera(
   targetY: number,
   mapPixelW: number,
   mapPixelH: number,
+  zoomScale: number,
 ): void {
   // Center offset: we want the player's center (targetX + TILE_SIZE/2)
   // to be at the center of the viewport
   const playerCenterX = targetX + TILE_SIZE / 2;
   const playerCenterY = targetY + TILE_SIZE / 2;
 
-  let camX = INTERNAL_WIDTH / 2 - playerCenterX;
-  let camY = INTERNAL_HEIGHT / 2 - playerCenterY;
+  let camX = INTERNAL_WIDTH / 2 - playerCenterX * zoomScale;
+  let camY = INTERNAL_HEIGHT / 2 - playerCenterY * zoomScale;
 
   // Clamp so we never show area outside the map
-  // When world.x = 0, we see the left edge of the map.
-  // When world.x = -(mapPixelW - INTERNAL_WIDTH), we see the right edge.
-  const minX = -(mapPixelW - INTERNAL_WIDTH);
-  const minY = -(mapPixelH - INTERNAL_HEIGHT);
-  const maxX = 0;
-  const maxY = 0;
+  const scaledMapW = mapPixelW * zoomScale;
+  const scaledMapH = mapPixelH * zoomScale;
 
-  camX = Math.max(minX, Math.min(maxX, camX));
-  camY = Math.max(minY, Math.min(maxY, camY));
+  // Only clamp if the map is larger than the viewport at this zoom
+  if (scaledMapW > INTERNAL_WIDTH) {
+    const minX = -(scaledMapW - INTERNAL_WIDTH);
+    const maxX = 0;
+    camX = Math.max(minX, Math.min(maxX, camX));
+  } else {
+    // Center the map if it fits entirely
+    camX = (INTERNAL_WIDTH - scaledMapW) / 2;
+  }
+
+  if (scaledMapH > INTERNAL_HEIGHT) {
+    const minY = -(scaledMapH - INTERNAL_HEIGHT);
+    const maxY = 0;
+    camY = Math.max(minY, Math.min(maxY, camY));
+  } else {
+    camY = (INTERNAL_HEIGHT - scaledMapH) / 2;
+  }
 
   world.x = Math.round(camX);
   world.y = Math.round(camY);
@@ -273,16 +290,23 @@ async function main(): Promise<void> {
   app.stage.addChild(worldContainer);
 
   // ── Tilemap (child of world) ──────────────────────────────────────────
-  const tilemapContainer = renderTilemap(LEVEL_1_MAP);
+  // Initially empty — rebuilt when we receive the maze seed from the server
+  let tilemapContainer = new Container();
   worldContainer.addChild(tilemapContainer);
 
   // ── Player layer (child of world, on top of tilemap) ──────────────────
   const playerLayer = new Container();
   worldContainer.addChild(playerLayer);
 
-  // ── Map dimensions in pixels ──────────────────────────────────────────
-  const mapPixelW = LEVEL_1_MAP.width * LEVEL_1_MAP.tileSize;
-  const mapPixelH = LEVEL_1_MAP.height * LEVEL_1_MAP.tileSize;
+  // ── Map dimensions in pixels (updated on room join) ───────────────────
+  let mapPixelW = MAZE_SIZE * TILE_SIZE;
+  let mapPixelH = MAZE_SIZE * TILE_SIZE;
+
+  // ── Debug Zoom ────────────────────────────────────────────────────────
+  let zoomLevel = 1.0;
+  const MIN_ZOOM = 0.1;
+  const MAX_ZOOM = 2.0;
+  const ZOOM_STEP = 0.05;
 
   // ── Debug UI ──────────────────────────────────────────────────────────
   createDebugUI();
@@ -322,8 +346,19 @@ async function main(): Promise<void> {
   let latestServerState: GameState | null = null;
 
   const net = new NetworkManager({
-    onRoomJoined: (roomId, playerId, gameState) => {
-      console.info(`[Main] Joined room "${roomId}" as ${playerId}`);
+    onRoomJoined: (roomId, playerId, mapSeed, gameState) => {
+      console.info(`[Main] Joined room "${roomId}" as ${playerId} (maze seed: ${mapSeed})`);
+
+      // Generate the maze from the server's seed
+      currentMap = generateMaze(mapSeed);
+      mapPixelW = currentMap.width * currentMap.tileSize;
+      mapPixelH = currentMap.height * currentMap.tileSize;
+
+      // Rebuild tilemap
+      worldContainer.removeChild(tilemapContainer);
+      tilemapContainer.destroy({ children: true });
+      tilemapContainer = renderTilemap(currentMap);
+      worldContainer.addChildAt(tilemapContainer, 0);
 
       if (statusEl) {
         statusEl.textContent = '🟢 Connected';
@@ -347,8 +382,7 @@ async function main(): Promise<void> {
 
       snapshotBuffer.push(gameState);
 
-      // Initial camera position
-      updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH);
+      updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
 
       latestServerState = gameState;
       updateDebugUI(gameState, playerId);
@@ -377,7 +411,7 @@ async function main(): Promise<void> {
             localY,
             input,
             input.dt,
-            LEVEL_1_MAP,
+            currentMap!,
           );
           localX = result.x;
           localY = result.y;
@@ -461,7 +495,7 @@ async function main(): Promise<void> {
         localY,
         input,
         dtSeconds,
-        LEVEL_1_MAP,
+        currentMap!,
       );
       localX = result.x;
       localY = result.y;
@@ -498,9 +532,21 @@ async function main(): Promise<void> {
       }
     }
 
-    // ── 3. Camera follow ──────────────────────────────────────────
-    updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH);
+    // ── 3. Camera follow + zoom ─────────────────────────────────────
+    worldContainer.scale.set(zoomLevel);
+    updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
   });
+
+  // ── Mousewheel Zoom (debug) ───────────────────────────────────────────
+
+  app.canvas.addEventListener('wheel', (e: WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      zoomLevel = Math.min(MAX_ZOOM, zoomLevel + ZOOM_STEP);
+    } else {
+      zoomLevel = Math.max(MIN_ZOOM, zoomLevel - ZOOM_STEP);
+    }
+  }, { passive: false });
 
   // ── Keyboard Input ────────────────────────────────────────────────────
 
@@ -535,7 +581,7 @@ async function main(): Promise<void> {
   console.info('─────────────────────────────────────────────────');
   console.info('  🏰 Labyrinth 2D Client');
   console.info('  Step 7: Labyrinth + Camera Follow');
-  console.info(`  Map: ${LEVEL_1_MAP.width}×${LEVEL_1_MAP.height} tiles (${mapPixelW}×${mapPixelH} px)`);
+  console.info(`  Map: ${MAZE_SIZE}×${MAZE_SIZE} tiles (${mapPixelW}×${mapPixelH} px)`);
   console.info(`  Internal: ${INTERNAL_WIDTH}×${INTERNAL_HEIGHT}`);
   console.info(`  Scale: ${getIntegerScale(window.innerWidth, window.innerHeight)}×`);
   console.info(`  Display name: ${displayName}`);

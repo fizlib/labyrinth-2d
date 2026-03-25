@@ -17,7 +17,8 @@ export {
 
 // ── Re-export map data ──────────────────────────────────────────────────────
 export {
-  LEVEL_1_MAP,
+  generateMaze,
+  MAZE_SIZE,
   SPAWN_POINTS,
   type TileMapData,
   type SpawnPoint,
@@ -98,6 +99,7 @@ export interface RoomJoinedMessage {
   type: MessageType.RoomJoined;
   roomId: string;
   playerId: string;
+  mapSeed: number;
   gameState: GameState;
 }
 

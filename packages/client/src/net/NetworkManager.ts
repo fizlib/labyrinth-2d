@@ -18,7 +18,7 @@ import {
 
 /** Callback signatures for network events. */
 export interface NetworkCallbacks {
-  onRoomJoined: (roomId: string, playerId: string, gameState: GameState) => void;
+  onRoomJoined: (roomId: string, playerId: string, mapSeed: number, gameState: GameState) => void;
   onTickUpdate: (gameState: GameState) => void;
   onPlayerLeft: (playerId: string) => void;
   onError: (code: string, message: string) => void;
@@ -112,7 +112,7 @@ export class NetworkManager {
       case MessageType.RoomJoined:
         this._playerId = msg.playerId;
         this._gameState = msg.gameState;
-        this.callbacks.onRoomJoined(msg.roomId, msg.playerId, msg.gameState);
+        this.callbacks.onRoomJoined(msg.roomId, msg.playerId, msg.mapSeed, msg.gameState);
         break;
 
       case MessageType.TickUpdate:

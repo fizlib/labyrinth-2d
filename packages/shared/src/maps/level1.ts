@@ -165,10 +165,10 @@ function getHubCells(hubTileX: number, hubTileY: number, hubSize: number): Set<s
 
 /**
  * Generate the maze using iterative backtracking (stack-based DFS).
- * Uses a seeded PRNG for deterministic results.
+ * Uses a seeded PRNG so the same seed produces the same maze.
  */
-function generateLevel1(): number[] {
-  const rand = mulberry32(42); // Fixed seed for reproducibility
+function generateMazeData(seed: number): number[] {
+  const rand = mulberry32(seed);
 
   // Start with all walls
   const data = new Array(MAP_SIZE * MAP_SIZE).fill(1);
@@ -327,6 +327,9 @@ function generateLevel1(): number[] {
 
 // ── Exports ─────────────────────────────────────────────────────────────────
 
+/** Map dimensions in tiles (exported so other packages can reference it). */
+export const MAZE_SIZE = MAP_SIZE;
+
 /**
  * The 3 spawn points in TILE coordinates.
  * Placed at corners of the maze on valid cell centers.
@@ -351,9 +354,17 @@ export const SPAWN_POINTS: SpawnPoint[] = (() => {
   return points;
 })();
 
-export const LEVEL_1_MAP: TileMapData = {
-  width: MAP_SIZE,
-  height: MAP_SIZE,
-  tileSize: TILE_PX,
-  data: generateLevel1(),
-};
+/**
+ * Generate a complete maze for the given seed.
+ * The same seed always produces the same maze layout.
+ * @param seed — integer seed for the PRNG
+ * @returns A TileMapData ready for collision and rendering.
+ */
+export function generateMaze(seed: number): TileMapData {
+  return {
+    width: MAP_SIZE,
+    height: MAP_SIZE,
+    tileSize: TILE_PX,
+    data: generateMazeData(seed),
+  };
+}
