@@ -1,23 +1,14 @@
 // packages/client/src/main.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // Labyrinth 2D — Client Entry Point
-// Step 6: Entity Interpolation (Remote Player Smoothing)
+// Step 7: Labyrinth Structure & Spawn Logic + Camera Follow
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// MULTIPLAYER ARCHITECTURE (Client-Side):
-//
-// 1. CLIENT-SIDE PREDICTION (local player — unchanged from Step 5):
-//    - 60fps: sample keys → predict via applyInputWithCollision() → buffer.
-//    - On TickUpdate: snap to server, discard acknowledged, re-apply pending.
-//
-// 2. ENTITY INTERPOLATION (remote players — NEW in Step 6):
-//    - Server snapshots are stored in a SnapshotBuffer with local timestamps.
-//    - Remote players render at (performance.now() - INTERPOLATION_DELAY),
-//      100ms behind real-time.
-//    - We find the two snapshots bracketing renderTime and lerp x/y.
-//    - This turns 20-tps updates into buttery 60-fps movement for remotes.
-//
-// 3. TILEMAP + COLLISION: same as Step 5.
+// CHANGES IN STEP 7:
+//   - Map is now 41×41 tiles (656×656 px) — larger than the viewport.
+//   - Camera follows the local player, keeping them centered.
+//   - Camera is clamped to map bounds so we never see outside the map.
+//   - All previous systems (prediction, reconciliation, interpolation) intact.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Application, Graphics, Container } from 'pixi.js';
@@ -28,7 +19,7 @@ import {
   LEVEL_1_MAP,
   applyInputWithCollision,
 } from '@labyrinth/shared';
-import type { GameState, TileMapData, PlayerInfo } from '@labyrinth/shared';
+import type { GameState, TileMapData } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 import { SnapshotBuffer, INTERPOLATION_DELAY } from './net/SnapshotBuffer';
 
@@ -76,7 +67,7 @@ let localX = 0;
 let localY = 0;
 let localPlayerInitialized = false;
 
-// ── Snapshot Buffer (for remote player interpolation) ────────────────────────
+// ── Snapshot Buffer ─────────────────────────────────────────────────────────
 
 const snapshotBuffer = new SnapshotBuffer();
 
@@ -135,21 +126,48 @@ function renderTilemap(map: TileMapData): Container {
   return tilemap;
 }
 
-// ── Interpolation Helper ────────────────────────────────────────────────────
+// ── Camera ──────────────────────────────────────────────────────────────────
 
-/** Linear interpolation. */
+/**
+ * Update the world container position so the camera follows the local player.
+ * Centers the player on screen and clamps to map boundaries.
+ */
+function updateCamera(
+  world: Container,
+  targetX: number,
+  targetY: number,
+  mapPixelW: number,
+  mapPixelH: number,
+): void {
+  // Center offset: we want the player's center (targetX + TILE_SIZE/2)
+  // to be at the center of the viewport
+  const playerCenterX = targetX + TILE_SIZE / 2;
+  const playerCenterY = targetY + TILE_SIZE / 2;
+
+  let camX = INTERNAL_WIDTH / 2 - playerCenterX;
+  let camY = INTERNAL_HEIGHT / 2 - playerCenterY;
+
+  // Clamp so we never show area outside the map
+  // When world.x = 0, we see the left edge of the map.
+  // When world.x = -(mapPixelW - INTERNAL_WIDTH), we see the right edge.
+  const minX = -(mapPixelW - INTERNAL_WIDTH);
+  const minY = -(mapPixelH - INTERNAL_HEIGHT);
+  const maxX = 0;
+  const maxY = 0;
+
+  camX = Math.max(minX, Math.min(maxX, camX));
+  camY = Math.max(minY, Math.min(maxY, camY));
+
+  world.x = Math.round(camX);
+  world.y = Math.round(camY);
+}
+
+// ── Interpolation ───────────────────────────────────────────────────────────
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-/**
- * Get the interpolated position for a remote player at the current renderTime.
- *
- * 1. Look for two bracketing snapshots in the buffer.
- * 2. Find the player in both snapshots.
- * 3. Lerp their x/y by the interpolation factor t.
- * 4. Fallback: if no pair, use the latest known position.
- */
 function getInterpolatedPosition(
   playerId: string,
   renderTime: number,
@@ -167,12 +185,10 @@ function getInterpolatedPosition(
       };
     }
 
-    // Player exists in only one snapshot — use whichever has them
     if (futurePlayer) return { x: futurePlayer.x, y: futurePlayer.y };
     if (pastPlayer) return { x: pastPlayer.x, y: pastPlayer.y };
   }
 
-  // Fallback: use latest snapshot
   const latest = snapshotBuffer.getLatest();
   if (latest) {
     const player = latest.state.players.find((p) => p.id === playerId);
@@ -192,7 +208,7 @@ function createDebugUI(): void {
     <div class="status" id="connection-status">⏳ Connecting...</div>
     <div class="stats">
       <div class="stat-card">
-        <span class="stat-label">Server Tick</span>
+        <span class="stat-label">Tick</span>
         <span class="stat-value" id="tick-counter">—</span>
       </div>
       <div class="stat-card">
@@ -200,11 +216,11 @@ function createDebugUI(): void {
         <span class="stat-value" id="pending-count">0</span>
       </div>
       <div class="stat-card">
-        <span class="stat-label">Snapshots</span>
+        <span class="stat-label">Snaps</span>
         <span class="stat-value" id="snapshot-count">0</span>
       </div>
     </div>
-    <h2>Connected Players</h2>
+    <h2>Players</h2>
     <ul id="player-list"></ul>
   `;
   document.body.appendChild(debugDiv);
@@ -224,7 +240,7 @@ function updateDebugUI(state: GameState, playerId: string | null): void {
     playerListEl.innerHTML = state.players
       .map((p) => {
         const isYou = p.id === playerId ? ' <span class="you-badge">← you</span>' : '';
-        return `<li><span class="player-name">${p.displayName}</span> <span class="player-id">${p.id}</span> <span class="player-pos">(${Math.round(p.x)}, ${Math.round(p.y)})</span>${isYou}</li>`;
+        return `<li><span class="player-name">${p.displayName}</span> <span class="player-pos">(${Math.round(p.x)}, ${Math.round(p.y)})</span>${isYou}</li>`;
       })
       .join('');
   }
@@ -252,13 +268,21 @@ async function main(): Promise<void> {
   resizeCanvas(app);
   window.addEventListener('resize', () => resizeCanvas(app));
 
-  // ── Tilemap ─────────────────────────────────────────────────────────────
-  const tilemapContainer = renderTilemap(LEVEL_1_MAP);
-  app.stage.addChild(tilemapContainer);
+  // ── World Container (everything that moves with the camera) ──────────
+  const worldContainer = new Container();
+  app.stage.addChild(worldContainer);
 
-  // ── Player layer ──────────────────────────────────────────────────────
+  // ── Tilemap (child of world) ──────────────────────────────────────────
+  const tilemapContainer = renderTilemap(LEVEL_1_MAP);
+  worldContainer.addChild(tilemapContainer);
+
+  // ── Player layer (child of world, on top of tilemap) ──────────────────
   const playerLayer = new Container();
-  app.stage.addChild(playerLayer);
+  worldContainer.addChild(playerLayer);
+
+  // ── Map dimensions in pixels ──────────────────────────────────────────
+  const mapPixelW = LEVEL_1_MAP.width * LEVEL_1_MAP.tileSize;
+  const mapPixelH = LEVEL_1_MAP.height * LEVEL_1_MAP.tileSize;
 
   // ── Debug UI ──────────────────────────────────────────────────────────
   createDebugUI();
@@ -290,9 +314,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── Track which remote players exist ──────────────────────────────────
-  // We use this set to ensure sprites exist for remote players even before
-  // interpolation kicks in. Updated on every TickUpdate.
+  // ── Remote player tracking ────────────────────────────────────────────
   const knownRemotePlayers: Set<string> = new Set();
 
   // ── Network Manager ───────────────────────────────────────────────────
@@ -315,7 +337,6 @@ async function main(): Promise<void> {
         localPlayerInitialized = true;
       }
 
-      // Initialize all sprites
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const sprite = ensurePlayerSprite(player.id, isLocal);
@@ -324,8 +345,10 @@ async function main(): Promise<void> {
         if (!isLocal) knownRemotePlayers.add(player.id);
       }
 
-      // Seed the snapshot buffer
       snapshotBuffer.push(gameState);
+
+      // Initial camera position
+      updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH);
 
       latestServerState = gameState;
       updateDebugUI(gameState, playerId);
@@ -334,24 +357,20 @@ async function main(): Promise<void> {
     onTickUpdate: (gameState) => {
       const localPlayerId = net.playerId;
 
-      // ── Push snapshot for interpolation ──────────────────────────
       snapshotBuffer.push(gameState);
 
-      // ── Local player: reconciliation (unchanged from Step 5) ────
+      // ── Local player reconciliation ─────────────────────────────
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
         const sprite = ensurePlayerSprite(localPlayerData.id, true);
 
-        // a) Force to server authoritative position
         localX = localPlayerData.x;
         localY = localPlayerData.y;
 
-        // b) Discard acknowledged inputs
         pendingInputs = pendingInputs.filter(
           (input) => input.sequenceNumber > localPlayerData.lastProcessedInput,
         );
 
-        // c) Re-apply unacknowledged inputs WITH collision
         for (const input of pendingInputs) {
           const result = applyInputWithCollision(
             localX,
@@ -368,8 +387,7 @@ async function main(): Promise<void> {
         sprite.y = Math.round(localY);
       }
 
-      // ── Remote players: just ensure sprites exist ───────────────
-      // Actual position updates happen in the 60fps ticker via interpolation.
+      // ── Remote players: ensure sprites exist ────────────────────
       knownRemotePlayers.clear();
       for (const player of gameState.players) {
         if (player.id !== localPlayerId) {
@@ -378,7 +396,7 @@ async function main(): Promise<void> {
         }
       }
 
-      // Remove sprites for disconnected players
+      // Remove disconnected
       const activeIds = new Set(gameState.players.map((p) => p.id));
       for (const [id] of playerSprites) {
         if (!activeIds.has(id)) {
@@ -416,10 +434,6 @@ async function main(): Promise<void> {
   });
 
   // ── 60 FPS Game Loop ──────────────────────────────────────────────────
-  //
-  // Every frame:
-  //   1. LOCAL PLAYER: sample input → predict with collision → send to server.
-  //   2. REMOTE PLAYERS: interpolate between two server snapshots.
 
   app.ticker.add((ticker) => {
     if (!net.isConnected || !localPlayerInitialized || !net.playerId) return;
@@ -427,7 +441,7 @@ async function main(): Promise<void> {
     const dtSeconds = ticker.deltaMS / 1000;
     const now = performance.now();
 
-    // ── 1. Local player prediction ────────────────────────────────────
+    // ── 1. Local player prediction ────────────────────────────────
     const isMoving = keys.up || keys.down || keys.left || keys.right;
 
     if (isMoving) {
@@ -470,7 +484,7 @@ async function main(): Promise<void> {
       localSprite.y = Math.round(localY);
     }
 
-    // ── 2. Remote player interpolation ────────────────────────────────
+    // ── 2. Remote player interpolation ────────────────────────────
     const renderTime = now - INTERPOLATION_DELAY;
 
     for (const remoteId of knownRemotePlayers) {
@@ -483,6 +497,9 @@ async function main(): Promise<void> {
         sprite.y = Math.round(pos.y);
       }
     }
+
+    // ── 3. Camera follow ──────────────────────────────────────────
+    updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH);
   });
 
   // ── Keyboard Input ────────────────────────────────────────────────────
@@ -517,9 +534,8 @@ async function main(): Promise<void> {
 
   console.info('─────────────────────────────────────────────────');
   console.info('  🏰 Labyrinth 2D Client');
-  console.info('  Step 6: Entity Interpolation');
-  console.info(`  Interpolation delay: ${INTERPOLATION_DELAY}ms`);
-  console.info(`  Map: ${LEVEL_1_MAP.width}×${LEVEL_1_MAP.height} tiles`);
+  console.info('  Step 7: Labyrinth + Camera Follow');
+  console.info(`  Map: ${LEVEL_1_MAP.width}×${LEVEL_1_MAP.height} tiles (${mapPixelW}×${mapPixelH} px)`);
   console.info(`  Internal: ${INTERNAL_WIDTH}×${INTERNAL_HEIGHT}`);
   console.info(`  Scale: ${getIntegerScale(window.innerWidth, window.innerHeight)}×`);
   console.info(`  Display name: ${displayName}`);

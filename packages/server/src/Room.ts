@@ -2,12 +2,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Room — Manages one maze instance and its connected players.
 //
-// Each room holds the authoritative GameState and runs a fixed-rate game loop
-// at ~20 ticks/sec. Every tick it:
-//   1. Increments the tick counter.
-//   2. Processes ALL queued inputs with collision detection (sliding walls).
-//   3. Updates lastProcessedInput so clients can reconcile.
-//   4. Broadcasts a TickUpdate to every connected client.
+// Step 7 changes:
+//   - Players spawn at one of 3 SPAWN_POINTS using round-robin assignment.
+//   - Tile coordinates converted to pixel coordinates (tile.x * tileSize).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type uWS from 'uWebSockets.js';
@@ -17,9 +14,9 @@ import {
   SERVER_TICK_MS,
   SERVER_TICK_S,
   MAX_PLAYERS_PER_ROOM,
-  SPAWN_X,
-  SPAWN_Y,
+  TILE_SIZE,
   LEVEL_1_MAP,
+  SPAWN_POINTS,
   applyInputWithCollision,
   type GameState,
   type PlayerInfo,
@@ -37,12 +34,8 @@ export interface SocketData {
   roomId: string | null;
 }
 
-/** Convenience alias for a uWS WebSocket with our user data. */
 type PlayerSocket = uWS.WebSocket<SocketData>;
 
-/**
- * A queued input from a client, waiting to be processed on the next tick.
- */
 interface QueuedInput {
   sequenceNumber: number;
   up: boolean;
@@ -52,23 +45,17 @@ interface QueuedInput {
 }
 
 export class Room {
-  /** Unique room identifier. */
   readonly id: string;
-
-  /** Authoritative game state — the single source of truth. */
   private state: GameState;
-
-  /** All connected sockets, keyed by player ID. */
   private sockets: Map<string, PlayerSocket> = new Map();
+  private inputQueues: Map<string, QueuedInput[]> = new Map();
+  private loopHandle: ReturnType<typeof setInterval> | null = null;
 
   /**
-   * Input queue per player, keyed by player ID.
-   * Inputs arrive between ticks and are ALL processed on the next tick.
+   * Monotonically increasing join counter for round-robin spawn assignment.
+   * Never decremented — ensures even distribution even after disconnects.
    */
-  private inputQueues: Map<string, QueuedInput[]> = new Map();
-
-  /** Handle for the setInterval running the game loop. */
-  private loopHandle: ReturnType<typeof setInterval> | null = null;
+  private joinCounter = 0;
 
   constructor(id: string) {
     this.id = id;
@@ -96,11 +83,18 @@ export class Room {
     this.sockets.set(playerId, ws);
     this.inputQueues.set(playerId, []);
 
+    // ── Round-Robin Spawn Assignment ────────────────────────────────
+    const spawnIndex = this.joinCounter % SPAWN_POINTS.length;
+    const spawnTile = SPAWN_POINTS[spawnIndex];
+    const spawnX = spawnTile.x * TILE_SIZE;
+    const spawnY = spawnTile.y * TILE_SIZE;
+    this.joinCounter++;
+
     const playerInfo: PlayerInfo = {
       id: playerId,
       displayName,
-      x: SPAWN_X,
-      y: SPAWN_Y,
+      x: spawnX,
+      y: spawnY,
       lastProcessedInput: 0,
     };
     this.state.players.push(playerInfo);
@@ -116,7 +110,7 @@ export class Room {
     this.send(ws, joinMsg);
 
     console.info(
-      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) at (${SPAWN_X}, ${SPAWN_Y}) — ${this.playerCount} player(s)`,
+      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) at spawn ${spawnIndex} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
     );
 
     if (this.playerCount === 1) {
@@ -179,28 +173,16 @@ export class Room {
     console.info(`[Room:${this.id}] Game loop stopped`);
   }
 
-  /**
-   * Execute one server tick.
-   *
-   * For each player: process ALL queued inputs using applyInputWithCollision().
-   * This enforces wall collision on the server side (authoritative).
-   * The shared collision function does axis-independent sliding so players
-   * can slide along walls.
-   */
   private tick(): void {
-    // 1. Advance tick counter
     this.state.tick++;
 
-    // 2. Process all queued inputs for each player
     for (const player of this.state.players) {
       const queue = this.inputQueues.get(player.id);
       if (!queue || queue.length === 0) continue;
 
-      // Distribute the tick's time budget across all queued inputs
       const dtPerInput = SERVER_TICK_S / queue.length;
 
       for (const input of queue) {
-        // Apply movement WITH collision detection against the map
         const result = applyInputWithCollision(
           player.x,
           player.y,
@@ -211,17 +193,14 @@ export class Room {
         player.x = result.x;
         player.y = result.y;
 
-        // Track the highest processed sequence number
         if (input.sequenceNumber > player.lastProcessedInput) {
           player.lastProcessedInput = input.sequenceNumber;
         }
       }
 
-      // Clear processed inputs
       queue.length = 0;
     }
 
-    // 3. Broadcast TickUpdate with current state
     const update: TickUpdateMessage = {
       type: MessageType.TickUpdate,
       gameState: this.cloneState(),
