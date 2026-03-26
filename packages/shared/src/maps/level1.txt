@@ -3,10 +3,11 @@
 // Level 1 — Procedurally-generated labyrinth with multi-layer 2.5D tiles.
 //
 // Tile IDs:
-//   0 = Grass Floor  (walkable, background layer)
-//   1 = Dirt Floor    (walkable, background layer — near-cliff transition)
-//   2 = Cliff Face    (solid, blocks movement — vertical rock wall)
-//   3 = Cliff Top     (non-solid, foreground layer — grassy overhang)
+//   0 = Floor           (walkable, background layer)
+//   1 = Floor Shadow    (walkable, background layer — ambient occlusion)
+//   2 = Wall Face       (solid, entity layer — vertical drop)
+//   3 = Wall Top        (solid, entity layer — bright rim border)
+//   4 = Wall Interior   (solid, entity layer — deep rock mass)
 //
 // Layout:
 //   - 186×186 tile grid at 16px/tile
@@ -17,61 +18,52 @@
 //   - 3 spawn points near corners
 //
 // Post-processing:
-//   - Walls (old ID 1) → Cliff Face (2)
-//   - Floor tiles adjacent to cliff faces → Dirt (1)
-//   - Floor tile directly above a cliff face → Cliff Top (3)
+//   - 2-tile high South-facing wall profiles
+//   - Dirt shadows hugging the bases of the walls
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Tiled-style map data structure.
- * Shared between client (rendering) and server (collision).
- */
 export interface TileMapData {
-  /** Width of the map in tiles. */
   width: number;
-  /** Height of the map in tiles. */
   height: number;
-  /** Size of each tile in pixels. */
   tileSize: number;
-  /**
-   * 1D array of tile IDs, row-major order (left-to-right, top-to-bottom).
-   * Index formula: data[y * width + x]
-   */
   data: number[];
 }
 
-/** A spawn point in tile coordinates. */
 export interface SpawnPoint {
-  /** Tile X coordinate. */
   x: number;
-  /** Tile Y coordinate. */
   y: number;
 }
 
 // ── Tile ID Constants ───────────────────────────────────────────────────────
 
-/** Grass floor — walkable, rendered on background layer. */
-export const TILE_GRASS = 0;
+/** Base floor — walkable, rendered on background layer. */
+export const TILE_FLOOR = 0;
 
-/** Dirt floor — walkable, rendered on background layer. Near-cliff transition. */
-export const TILE_DIRT = 1;
+/** Dirt floor / shadow — walkable, rendered on background layer. Ambient occlusion near walls. */
+export const TILE_FLOOR_SHADOW = 1;
 
-/** Cliff face — south-facing rock wall front. Solid, blocks movement. */
-export const TILE_CLIFF_FACE = 2;
+/** Vertical rock wall face — solid, Y-sorted on entity layer. */
+export const TILE_WALL_FACE = 2;
 
-/** Cliff top — grassy overhang above a cliff. Solid, blocks movement. */
-export const TILE_CLIFF_TOP = 3;
+/** Flat top edge of the rock wall — solid, Y-sorted on entity layer. */
+export const TILE_WALL_TOP = 3;
 
-/** Cliff body — dark interior/non-south-facing wall. Solid, blocks movement. */
-export const TILE_CLIFF_BODY = 4;
+/** Deep rock interior — solid, Y-sorted on entity layer. */
+export const TILE_WALL_INTERIOR = 4;
+
+/** Left vertical edge of a cliff mass — solid, Y-sorted. */
+export const TILE_WALL_SIDE_LEFT = 5;
+
+/** Right vertical edge of a cliff mass — solid, Y-sorted. */
+export const TILE_WALL_SIDE_RIGHT = 6;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const CELL_SIZE = 6;   // Each maze cell is 6×6 floor tiles
-const WALL_SIZE = 6;   // 6-tile-thick walls between cells
-const CELL_STEP = CELL_SIZE + WALL_SIZE; // 12 tiles per cell step
-const GRID_CELLS = 15; // 15×15 cell maze
-const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 186
+const CELL_SIZE = 6;
+const WALL_SIZE = 6;
+const CELL_STEP = CELL_SIZE + WALL_SIZE;
+const GRID_CELLS = 15;
+export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 186
 const TILE_PX = 16;
 
 // ── Seeded PRNG (mulberry32) ────────────────────────────────────────────────
@@ -95,7 +87,6 @@ const DIRS = [
   { dx: -1, dy: 0 }, // west
 ] as const;
 
-/** Shuffle an array in-place using Fisher-Yates with the given PRNG. */
 function shuffle<T>(arr: T[], rand: () => number): T[] {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
@@ -106,9 +97,6 @@ function shuffle<T>(arr: T[], rand: () => number): T[] {
 
 // ── Maze Generation ─────────────────────────────────────────────────────────
 
-/**
- * Convert a cell coordinate to the top-left tile coordinate of its 6×6 area.
- */
 function cellToTile(cx: number, cy: number): { tx: number; ty: number } {
   return {
     tx: WALL_SIZE + cx * CELL_STEP,
@@ -116,64 +104,43 @@ function cellToTile(cx: number, cy: number): { tx: number; ty: number } {
   };
 }
 
-/**
- * Carve a 6×6 floor block for the given cell.
- */
 function carveCell(data: number[], cx: number, cy: number): void {
   const { tx, ty } = cellToTile(cx, cy);
   for (let dy = 0; dy < CELL_SIZE; dy++) {
     for (let dx = 0; dx < CELL_SIZE; dx++) {
-      data[(ty + dy) * MAP_SIZE + (tx + dx)] = TILE_GRASS;
+      data[(ty + dy) * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
     }
   }
 }
 
-/**
- * Carve the wall between two adjacent cells, creating a passage.
- * For horizontal neighbors: carve a WALL_SIZE×CELL_SIZE rectangle between them.
- * For vertical neighbors: carve a CELL_SIZE×WALL_SIZE rectangle between them.
- */
-function carvePassage(
-  data: number[],
-  cx1: number,
-  cy1: number,
-  cx2: number,
-  cy2: number,
-): void {
+function carvePassage(data: number[], cx1: number, cy1: number, cx2: number, cy2: number): void {
   const { tx: tx1, ty: ty1 } = cellToTile(cx1, cy1);
   const { tx: tx2, ty: ty2 } = cellToTile(cx2, cy2);
 
   if (cy1 === cy2) {
-    // Horizontal neighbors — carve the wall columns between them
-    const wallX = Math.min(tx1, tx2) + CELL_SIZE; // first wall tile column
-    const topY = ty1; // same row
+    const wallX = Math.min(tx1, tx2) + CELL_SIZE;
+    const topY = ty1;
     for (let wy = 0; wy < CELL_SIZE; wy++) {
       for (let wx = 0; wx < WALL_SIZE; wx++) {
-        data[(topY + wy) * MAP_SIZE + (wallX + wx)] = TILE_GRASS;
+        data[(topY + wy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
       }
     }
   } else {
-    // Vertical neighbors — carve the wall rows between them
-    const wallY = Math.min(ty1, ty2) + CELL_SIZE; // first wall tile row
-    const leftX = tx1; // same column
+    const wallY = Math.min(ty1, ty2) + CELL_SIZE;
+    const leftX = tx1;
     for (let wy = 0; wy < WALL_SIZE; wy++) {
       for (let wx = 0; wx < CELL_SIZE; wx++) {
-        data[(wallY + wy) * MAP_SIZE + (leftX + wx)] = TILE_GRASS;
+        data[(wallY + wy) * MAP_SIZE + (leftX + wx)] = TILE_FLOOR;
       }
     }
   }
 }
 
-/**
- * Compute which cells are occupied by the central hub.
- * Returns a Set of "cx,cy" strings for cells that overlap the hub area.
- */
 function getHubCells(hubTileX: number, hubTileY: number, hubSize: number): Set<string> {
   const cells = new Set<string>();
   for (let cy = 0; cy < GRID_CELLS; cy++) {
     for (let cx = 0; cx < GRID_CELLS; cx++) {
       const { tx, ty } = cellToTile(cx, cy);
-      // Check if this cell's area overlaps the hub area
       const cellRight = tx + CELL_SIZE - 1;
       const cellBottom = ty + CELL_SIZE - 1;
       const hubRight = hubTileX + hubSize - 1;
@@ -186,36 +153,23 @@ function getHubCells(hubTileX: number, hubTileY: number, hubSize: number): Set<s
   return cells;
 }
 
-/**
- * Generate the maze using iterative backtracking (stack-based DFS).
- * Uses a seeded PRNG so the same seed produces the same maze.
- *
- * After the base maze is generated (0 = floor, 1 = wall), a post-processing
- * pass converts:
- *   - Walls → Cliff Face (2)
- *   - Floor tiles adjacent to cliff faces → Dirt (1)
- *   - Floor tiles directly above cliff faces → Cliff Top (3)
- */
 function generateMazeData(seed: number): number[] {
   const rand = mulberry32(seed);
 
-  // Start with all walls (temporarily 1, will be converted to 2 later)
+  // Start with all walls (temporarily 1)
   const data = new Array(MAP_SIZE * MAP_SIZE).fill(1);
 
   // ── Central Hub ─────────────────────────────────────────────────────────
-  // 9×9 room centered in the map
   const hubSize = 9;
   const hubTileX = Math.floor((MAP_SIZE - hubSize) / 2);
   const hubTileY = Math.floor((MAP_SIZE - hubSize) / 2);
 
-  // Carve hub floor
   for (let dy = 0; dy < hubSize; dy++) {
     for (let dx = 0; dx < hubSize; dx++) {
-      data[(hubTileY + dy) * MAP_SIZE + (hubTileX + dx)] = TILE_GRASS;
+      data[(hubTileY + dy) * MAP_SIZE + (hubTileX + dx)] = TILE_FLOOR;
     }
   }
 
-  // ── Mark hub cells as visited ───────────────────────────────────────────
   const hubCells = getHubCells(hubTileX, hubTileY, hubSize);
   const visited = new Array(GRID_CELLS * GRID_CELLS).fill(false);
 
@@ -225,7 +179,6 @@ function generateMazeData(seed: number): number[] {
   }
 
   // ── Carve all non-hub cells ─────────────────────────────────────────────
-  // First, carve floor for every non-hub cell
   for (let cy = 0; cy < GRID_CELLS; cy++) {
     for (let cx = 0; cx < GRID_CELLS; cx++) {
       if (!hubCells.has(`${cx},${cy}`)) {
@@ -234,8 +187,7 @@ function generateMazeData(seed: number): number[] {
     }
   }
 
-  // ── Recursive backtracking (iterative with stack) ───────────────────────
-  // Start from cell (0, 0)
+  // ── Recursive backtracking ──────────────────────────────────────────────
   const startCx = 0;
   const startCy = 0;
   visited[startCy * GRID_CELLS + startCx] = true;
@@ -246,7 +198,6 @@ function generateMazeData(seed: number): number[] {
     const current = stack[stack.length - 1];
     const { cx, cy } = current;
 
-    // Find unvisited neighbors
     const neighbors: Array<{ cx: number; cy: number }> = [];
     for (const dir of DIRS) {
       const nx = cx + dir.dx;
@@ -257,29 +208,20 @@ function generateMazeData(seed: number): number[] {
     }
 
     if (neighbors.length === 0) {
-      // Backtrack
       stack.pop();
     } else {
-      // Pick a random unvisited neighbor
       shuffle(neighbors, rand);
       const next = neighbors[0];
-
-      // Carve passage between current and next
       carvePassage(data, cx, cy, next.cx, next.cy);
-
       visited[next.cy * GRID_CELLS + next.cx] = true;
       stack.push(next);
     }
   }
 
   // ── Connect hub to maze ─────────────────────────────────────────────────
-  // Find maze cells adjacent to the hub and carve entrances.
-  // We create 3 entrances: north, west, east.
-
   const hubCenterCx = Math.floor(GRID_CELLS / 2);
   const hubCenterCy = Math.floor(GRID_CELLS / 2);
 
-  // Find the topmost row of hub cells and the cell just above it
   let hubTopCy = GRID_CELLS;
   let hubBottomCy = -1;
   let hubLeftCx = GRID_CELLS;
@@ -301,14 +243,14 @@ function generateMazeData(seed: number): number[] {
       const wallY = ty + CELL_SIZE;
       for (let wy = 0; wy < WALL_SIZE; wy++) {
         for (let dx = 0; dx < CELL_SIZE; dx++) {
-          data[(wallY + wy) * MAP_SIZE + (tx + dx)] = TILE_GRASS;
+          data[(wallY + wy) * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
         }
       }
       const hubEdge = hubTileY;
       for (let row = wallY + WALL_SIZE; row < hubEdge + CELL_SIZE; row++) {
         for (let dx = 0; dx < CELL_SIZE; dx++) {
           if (row >= 0 && row < MAP_SIZE) {
-            data[row * MAP_SIZE + (tx + dx)] = TILE_GRASS;
+            data[row * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
           }
         }
       }
@@ -324,14 +266,14 @@ function generateMazeData(seed: number): number[] {
       const wallX = tx + CELL_SIZE;
       for (let wx = 0; wx < WALL_SIZE; wx++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
-          data[(ty + dy) * MAP_SIZE + (wallX + wx)] = TILE_GRASS;
+          data[(ty + dy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
         }
       }
       const hubEdge = hubTileX;
       for (let col = wallX + WALL_SIZE; col < hubEdge + CELL_SIZE; col++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
           if (col >= 0 && col < MAP_SIZE) {
-            data[(ty + dy) * MAP_SIZE + col] = TILE_GRASS;
+            data[(ty + dy) * MAP_SIZE + col] = TILE_FLOOR;
           }
         }
       }
@@ -347,88 +289,104 @@ function generateMazeData(seed: number): number[] {
       const wallX = cellTx - WALL_SIZE;
       for (let wx = 0; wx < WALL_SIZE; wx++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
-          data[(cellTy + dy) * MAP_SIZE + (wallX + wx)] = TILE_GRASS;
+          data[(cellTy + dy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
         }
       }
       const hubRight = hubTileX + hubSize;
       for (let col = hubRight - CELL_SIZE; col < wallX; col++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
           if (col >= 0 && col < MAP_SIZE) {
-            data[(cellTy + dy) * MAP_SIZE + col] = TILE_GRASS;
+            data[(cellTy + dy) * MAP_SIZE + col] = TILE_FLOOR;
           }
         }
       }
     }
   }
 
-  // ── Post-processing: convert to multi-layer tiles ───────────────────────
+  // ── Post-processing: convert to Stardew-style 2.5D tiles ────────────────
 
-  // Step 1a: Convert ALL old walls (1) → Cliff Body (4) initially
+  // Step 1: Convert ALL old walls (1) → Wall Interior (4) initially
   for (let i = 0; i < data.length; i++) {
     if (data[i] === 1) {
-      data[i] = TILE_CLIFF_BODY;
+      data[i] = TILE_WALL_INTERIOR;
     }
   }
 
-  // Step 1b: Promote south-facing wall edges → Cliff Face (2)
-  // A wall tile with a walkable tile (grass/dirt/floor) directly BELOW it
-  // is the visible front face of the cliff — the south-facing rock texture.
-  for (let y = 0; y < MAP_SIZE - 1; y++) {
+  const snapshot = data.slice();
+
+  // Step 2: Carve South-facing walls (2-tiles high vertical face + 1-tile top border)
+  for (let y = MAP_SIZE - 2; y >= 2; y--) {
     for (let x = 0; x < MAP_SIZE; x++) {
       const thisIdx = y * MAP_SIZE + x;
       const belowIdx = (y + 1) * MAP_SIZE + x;
-      if (data[thisIdx] === TILE_CLIFF_BODY && data[belowIdx] === TILE_GRASS) {
-        data[thisIdx] = TILE_CLIFF_FACE;
+
+      // If this tile is solid rock, but the tile directly south is walkable floor
+      if (snapshot[thisIdx] === TILE_WALL_INTERIOR && snapshot[belowIdx] === TILE_FLOOR) {
+
+        data[thisIdx] = TILE_WALL_FACE; // Base of the wall face
+
+        // Extend the face upwards for a chunky 2-tile high appearance
+        const midIdx = (y - 1) * MAP_SIZE + x;
+        if (snapshot[midIdx] === TILE_WALL_INTERIOR) {
+          data[midIdx] = TILE_WALL_FACE;
+
+          // Cap the wall face with a bright top border
+          const topIdx = (y - 2) * MAP_SIZE + x;
+          if (snapshot[topIdx] === TILE_WALL_INTERIOR) {
+            data[topIdx] = TILE_WALL_TOP;
+          }
+        } else {
+          // Fallback if wall thickness is somehow only 1 block
+          data[thisIdx] = TILE_WALL_TOP;
+        }
       }
     }
   }
 
-  // Step 2: Floor tiles adjacent to any solid cliff → Dirt (1)
-  const snapshot = data.slice();
+  // Step 3: Cap all other exposed interior edges with a directional border
+  const snap2 = data.slice();
+  for (let y = 1; y < MAP_SIZE - 1; y++) {
+    for (let x = 1; x < MAP_SIZE - 1; x++) {
+      const idx = y * MAP_SIZE + x;
+      if (snap2[idx] === TILE_WALL_INTERIOR) {
+        
+        // Helper to check if a neighbor is empty space (floor or a drop)
+        const isExposed = (neighborIdx: number) => 
+          snap2[neighborIdx] === TILE_FLOOR || 
+          snap2[neighborIdx] === TILE_FLOOR_SHADOW || 
+          snap2[neighborIdx] === TILE_WALL_FACE;
+
+        const exposedLeft = isExposed(idx - 1);
+        const exposedRight = isExposed(idx + 1);
+        const exposedTop = isExposed(idx - MAP_SIZE);
+        // Note: Bottom exposure is handled by Step 2 (South facing walls)
+
+        // Assign specific side textures based on which way the wall is exposed
+        if (exposedLeft) {
+          data[idx] = TILE_WALL_SIDE_LEFT;
+        } else if (exposedRight) {
+          data[idx] = TILE_WALL_SIDE_RIGHT;
+        } else if (exposedTop) {
+          data[idx] = TILE_WALL_TOP; // Top edge rim
+        }
+      }
+    }
+  }
+
+  // Step 4: Add dark dirt shadows around the base edges of the walkable areas
+  const snap3 = data.slice();
   for (let y = 0; y < MAP_SIZE; y++) {
     for (let x = 0; x < MAP_SIZE; x++) {
       const idx = y * MAP_SIZE + x;
-      if (snapshot[idx] !== TILE_GRASS) continue;
+      if (snap3[idx] === TILE_FLOOR) {
+        const isNearWall =
+          (x > 0 && snap3[idx - 1] !== TILE_FLOOR) ||
+          (x < MAP_SIZE - 1 && snap3[idx + 1] !== TILE_FLOOR) ||
+          (y > 0 && snap3[idx - MAP_SIZE] !== TILE_FLOOR) ||
+          (y < MAP_SIZE - 1 && snap3[idx + MAP_SIZE] !== TILE_FLOOR);
 
-      // Check 4-directional neighbors for any solid cliff tile
-      let nearCliff = false;
-      const isCliff = (v: number) => v === TILE_CLIFF_FACE || v === TILE_CLIFF_BODY;
-      if (x > 0 && isCliff(snapshot[idx - 1])) nearCliff = true;
-      if (x < MAP_SIZE - 1 && isCliff(snapshot[idx + 1])) nearCliff = true;
-      if (y > 0 && isCliff(snapshot[idx - MAP_SIZE])) nearCliff = true;
-      if (y < MAP_SIZE - 1 && isCliff(snapshot[idx + MAP_SIZE])) nearCliff = true;
-
-      if (nearCliff) {
-        data[idx] = TILE_DIRT;
-      }
-    }
-  }
-
-  // Step 3: Place Cliff Top (3) on floor tiles directly above cliff face/body.
-  // A cliff top replaces a non-solid tile that sits directly above a solid cliff.
-  // This creates the visual grassy overhang.
-  for (let y = 0; y < MAP_SIZE - 1; y++) {
-    for (let x = 0; x < MAP_SIZE; x++) {
-      const belowIdx = (y + 1) * MAP_SIZE + x;
-      const thisIdx = y * MAP_SIZE + x;
-      const belowIsCliff = data[belowIdx] === TILE_CLIFF_FACE || data[belowIdx] === TILE_CLIFF_BODY;
-      if (belowIsCliff && (data[thisIdx] === TILE_GRASS || data[thisIdx] === TILE_DIRT)) {
-        data[thisIdx] = TILE_CLIFF_TOP;
-      }
-    }
-  }
-
-  // Step 4: Re-check cliff face after dirt/cliff-top passes.
-  // Cliff face tiles whose south neighbor became dirt (from step 2) need to stay as cliff face.
-  // Also promote cliff body → cliff face if its south neighbor is now dirt or cliff top.
-  for (let y = 0; y < MAP_SIZE - 1; y++) {
-    for (let x = 0; x < MAP_SIZE; x++) {
-      const thisIdx = y * MAP_SIZE + x;
-      const belowIdx = (y + 1) * MAP_SIZE + x;
-      if (data[thisIdx] === TILE_CLIFF_BODY) {
-        const below = data[belowIdx];
-        if (below === TILE_DIRT || below === TILE_CLIFF_TOP || below === TILE_GRASS) {
-          data[thisIdx] = TILE_CLIFF_FACE;
+        if (isNearWall) {
+          data[idx] = TILE_FLOOR_SHADOW;
         }
       }
     }
@@ -439,38 +397,24 @@ function generateMazeData(seed: number): number[] {
 
 // ── Exports ─────────────────────────────────────────────────────────────────
 
-/** Map dimensions in tiles (exported so other packages can reference it). */
 export const MAZE_SIZE = MAP_SIZE;
 
-/**
- * The 3 spawn points in TILE coordinates.
- * Placed at corners of the maze on valid cell centers.
- * The server assigns players to these using round-robin.
- */
 export const SPAWN_POINTS: SpawnPoint[] = (() => {
-  // Place spawns at cells near the 3 corners (avoiding the hub corner)
   const points: SpawnPoint[] = [];
   const cornerCells: Array<{ cx: number; cy: number }> = [
-    { cx: 0, cy: 0 },                         // top-left
-    { cx: GRID_CELLS - 1, cy: 0 },            // top-right
-    { cx: 0, cy: GRID_CELLS - 1 },            // bottom-left
+    { cx: 0, cy: 0 },
+    { cx: GRID_CELLS - 1, cy: 0 },
+    { cx: 0, cy: GRID_CELLS - 1 },
   ];
 
   for (const cell of cornerCells) {
     const { tx, ty } = cellToTile(cell.cx, cell.cy);
-    // Center of the cell
     points.push({ x: tx + Math.floor(CELL_SIZE / 2), y: ty + Math.floor(CELL_SIZE / 2) });
   }
 
   return points;
 })();
 
-/**
- * Generate a complete maze for the given seed.
- * The same seed always produces the same maze layout.
- * @param seed — integer seed for the PRNG
- * @returns A TileMapData ready for collision and rendering.
- */
 export function generateMaze(seed: number): TileMapData {
   return {
     width: MAP_SIZE,
