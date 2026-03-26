@@ -51,6 +51,12 @@ export const TILE_WALL_TOP = 3;
 /** Deep rock interior — solid, Y-sorted on entity layer. */
 export const TILE_WALL_INTERIOR = 4;
 
+/** Left vertical edge of a cliff mass — solid, Y-sorted. */
+export const TILE_WALL_SIDE_LEFT = 5;
+
+/** Right vertical edge of a cliff mass — solid, Y-sorted. */
+export const TILE_WALL_SIDE_RIGHT = 6;
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const CELL_SIZE = 6;
@@ -337,21 +343,31 @@ function generateMazeData(seed: number): number[] {
     }
   }
 
-  // Step 3: Cap all other exposed interior edges with a top border
+  // Step 3: Cap all other exposed interior edges with a directional border
   const snap2 = data.slice();
   for (let y = 1; y < MAP_SIZE - 1; y++) {
     for (let x = 1; x < MAP_SIZE - 1; x++) {
       const idx = y * MAP_SIZE + x;
       if (snap2[idx] === TILE_WALL_INTERIOR) {
-        // If the rock interior is exposed to floor OR an existing wall face on any side
-        const isExposed =
-          snap2[idx - 1] === TILE_FLOOR || snap2[idx - 1] === TILE_WALL_FACE ||
-          snap2[idx + 1] === TILE_FLOOR || snap2[idx + 1] === TILE_WALL_FACE ||
-          snap2[idx - MAP_SIZE] === TILE_FLOOR || snap2[idx - MAP_SIZE] === TILE_WALL_FACE ||
-          snap2[idx + MAP_SIZE] === TILE_FLOOR || snap2[idx + MAP_SIZE] === TILE_WALL_FACE;
+        
+        // Helper to check if a neighbor is empty space (floor or a drop)
+        const isExposed = (neighborIdx: number) => 
+          snap2[neighborIdx] === TILE_FLOOR || 
+          snap2[neighborIdx] === TILE_FLOOR_SHADOW || 
+          snap2[neighborIdx] === TILE_WALL_FACE;
 
-        if (isExposed) {
-          data[idx] = TILE_WALL_TOP;
+        const exposedLeft = isExposed(idx - 1);
+        const exposedRight = isExposed(idx + 1);
+        const exposedTop = isExposed(idx - MAP_SIZE);
+        // Note: Bottom exposure is handled by Step 2 (South facing walls)
+
+        // Assign specific side textures based on which way the wall is exposed
+        if (exposedLeft) {
+          data[idx] = TILE_WALL_SIDE_LEFT;
+        } else if (exposedRight) {
+          data[idx] = TILE_WALL_SIDE_RIGHT;
+        } else if (exposedTop) {
+          data[idx] = TILE_WALL_TOP; // Top edge rim
         }
       }
     }

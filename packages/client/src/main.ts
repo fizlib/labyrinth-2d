@@ -15,6 +15,8 @@ import {
   TILE_WALL_FACE,
   TILE_WALL_TOP,
   TILE_WALL_INTERIOR,
+  TILE_WALL_SIDE_LEFT,
+  TILE_WALL_SIDE_RIGHT,
   generateMaze,
   applyInputWithCollision,
 } from '@labyrinth/shared';
@@ -358,6 +360,8 @@ async function main(): Promise<void> {
             case TILE_WALL_FACE: tex = assets.wallFaceTexture; isSolid = true; break;
             case TILE_WALL_TOP: tex = assets.wallTopTexture; isSolid = true; break;
             case TILE_WALL_INTERIOR: tex = assets.wallInteriorTexture; isSolid = true; break;
+            case TILE_WALL_SIDE_LEFT: tex = assets.wallSideLeftTexture; isSolid = true; break;
+            case TILE_WALL_SIDE_RIGHT: tex = assets.wallSideRightTexture; isSolid = true; break;
             default: tex = assets.floorTexture; break;
           }
 

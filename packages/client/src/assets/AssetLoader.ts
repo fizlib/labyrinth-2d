@@ -23,6 +23,8 @@ export interface GameAssets {
   wallFaceTexture: Texture;
   wallTopTexture: Texture;
   wallInteriorTexture: Texture;
+  wallSideLeftTexture: Texture;
+  wallSideRightTexture: Texture;
   playerAnimations: Record<string, Texture[]>;
 }
 
@@ -32,6 +34,8 @@ export async function loadAssets(): Promise<GameAssets> {
   let wallFaceTexture: Texture;
   let wallTopTexture: Texture;
   let wallInteriorTexture: Texture;
+  let wallSideLeftTexture: Texture;
+  let wallSideRightTexture: Texture;
   let playerAnimations: Record<string, Texture[]>;
 
   try {
@@ -43,8 +47,10 @@ export async function loadAssets(): Promise<GameAssets> {
     wallFaceTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(32, 0, 16, 16) });
     wallTopTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(48, 0, 16, 16) });
     wallInteriorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(64, 0, 16, 16) });
+    wallSideLeftTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(80, 0, 16, 16) });
+    wallSideRightTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(96, 0, 16, 16) });
 
-    console.info('[Assets] Loaded tiles.png (5 tile types)');
+    console.info('[Assets] Loaded tiles.png (7 tile types)');
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
     // Map existing fallback generators to the new semantic naming
@@ -53,6 +59,8 @@ export async function loadAssets(): Promise<GameAssets> {
     wallFaceTexture = generateCliffFaceTexture();
     wallTopTexture = generateCliffTopTexture();
     wallInteriorTexture = generateCliffBodyTexture();
+    wallSideLeftTexture = generateCliffBodyTexture();
+    wallSideRightTexture = generateCliffBodyTexture();
   }
 
   // ── Player spritesheet ─────────────────────────────────────────────────
@@ -94,5 +102,14 @@ export async function loadAssets(): Promise<GameAssets> {
     playerAnimations = animations;
   }
 
-  return { floorTexture, floorShadowTexture, wallFaceTexture, wallTopTexture, wallInteriorTexture, playerAnimations };
+  return {
+    floorTexture,
+    floorShadowTexture,
+    wallFaceTexture,
+    wallTopTexture,
+    wallInteriorTexture,
+    wallSideLeftTexture,
+    wallSideRightTexture,
+    playerAnimations,
+  };
 }

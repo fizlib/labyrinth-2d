@@ -10,7 +10,7 @@
 // centered horizontally at x and extending upward from y.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { TILE_WALL_FACE, TILE_WALL_TOP, TILE_WALL_INTERIOR, type TileMapData } from './maps/level1.js';
+import { TILE_WALL_FACE, TILE_WALL_TOP, TILE_WALL_INTERIOR, TILE_WALL_SIDE_LEFT, TILE_WALL_SIDE_RIGHT, type TileMapData } from './maps/level1.js';
 
 export const PLAYER_SPEED = 150;
 export const FEET_HITBOX_W = 8;
@@ -38,7 +38,11 @@ function isSolidTile(tileX: number, tileY: number, map: TileMapData): boolean {
     return true; // Out of bounds = impassable
   }
   const tile = map.data[tileY * map.width + tileX];
-  return tile === TILE_WALL_FACE || tile === TILE_WALL_TOP || tile === TILE_WALL_INTERIOR;
+  return tile === TILE_WALL_FACE || 
+         tile === TILE_WALL_TOP || 
+         tile === TILE_WALL_INTERIOR ||
+         tile === TILE_WALL_SIDE_LEFT ||
+         tile === TILE_WALL_SIDE_RIGHT;
 }
 
 export function isPositionValid(x: number, y: number, map: TileMapData): boolean {
