@@ -95,10 +95,12 @@ export class Room {
     this.inputQueues.set(playerId, []);
 
     // ── Round-Robin Spawn Assignment ────────────────────────────────
+    // Player x,y = bottom-center of sprite (feet position)
     const spawnIndex = this.joinCounter % SPAWN_POINTS.length;
     const spawnTile = SPAWN_POINTS[spawnIndex];
-    const spawnX = spawnTile.x * TILE_SIZE;
-    const spawnY = spawnTile.y * TILE_SIZE;
+    // Center horizontally in the tile, bottom of tile vertically
+    const spawnX = (spawnTile.x + 0.5) * TILE_SIZE;
+    const spawnY = (spawnTile.y + 1) * TILE_SIZE;
     this.joinCounter++;
 
     const playerInfo: PlayerInfo = {

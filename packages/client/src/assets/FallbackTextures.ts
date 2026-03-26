@@ -3,6 +3,8 @@
 // Procedural fallback texture generator.
 // Creates simple pixel-art textures in-memory using an offscreen <canvas>
 // so the game never crashes even without real PNG assets.
+//
+// Step 9: 4 tile types — grass, dirt, cliff face, cliff top.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Texture, Rectangle } from 'pixi.js';
@@ -31,66 +33,175 @@ function setPixel(ctx: CanvasRenderingContext2D, x: number, y: number, color: st
   ctx.fillRect(x, y, 1, 1);
 }
 
-// ── Wall Texture (16×16 brick) ──────────────────────────────────────────────
+// ── Grass Texture (16×16) ───────────────────────────────────────────────────
 
-export function generateWallTexture(): Texture {
+export function generateGrassTexture(): Texture {
   const [canvas, ctx] = makeCanvas(TILE, TILE);
 
-  // Base color
-  ctx.fillStyle = '#4a4a68';
+  // Lush green base
+  ctx.fillStyle = '#3a7a2a';
   ctx.fillRect(0, 0, TILE, TILE);
 
-  // Brick mortar lines (horizontal)
-  ctx.fillStyle = '#2e2e42';
+  // Subtle variation patches
+  ctx.fillStyle = '#327222';
+  ctx.fillRect(2, 3, 4, 3);
+  ctx.fillRect(10, 8, 3, 4);
+  ctx.fillRect(6, 12, 5, 2);
+
+  // Lighter highlights
+  ctx.fillStyle = '#4a8a3a';
+  ctx.fillRect(8, 1, 3, 2);
+  ctx.fillRect(1, 9, 2, 3);
+  ctx.fillRect(12, 5, 2, 2);
+
+  // Tiny grass blade details
+  const blades = [
+    [4, 1], [7, 5], [13, 3], [2, 7],
+    [9, 11], [14, 13], [1, 14], [11, 14],
+  ];
+  for (const [bx, by] of blades) {
+    setPixel(ctx, bx, by, '#4e9e3e');
+  }
+
+  return canvasToTexture(canvas);
+}
+
+// ── Dirt Texture (16×16) ────────────────────────────────────────────────────
+
+export function generateDirtTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  // Brown-tan base
+  ctx.fillStyle = '#7a6a42';
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Darker patches
+  ctx.fillStyle = '#6a5a32';
+  ctx.fillRect(3, 2, 4, 3);
+  ctx.fillRect(9, 7, 5, 3);
+  ctx.fillRect(1, 11, 3, 3);
+
+  // Lighter sandy highlights
+  ctx.fillStyle = '#8a7a52';
+  ctx.fillRect(7, 0, 3, 2);
+  ctx.fillRect(12, 4, 2, 3);
+  ctx.fillRect(5, 13, 4, 2);
+
+  // Small pebbles/speckles
+  const pebbles = [
+    [2, 5], [6, 8], [11, 2], [14, 10],
+    [4, 14], [8, 4], [13, 13], [0, 8],
+  ];
+  for (const [px, py] of pebbles) {
+    setPixel(ctx, px, py, '#5a4a2a');
+  }
+
+  return canvasToTexture(canvas);
+}
+
+// ── Cliff Face Texture (16×16 rocky wall) ───────────────────────────────────
+
+export function generateCliffFaceTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  // Dark rock base
+  ctx.fillStyle = '#4a4a58';
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Horizontal cracks/strata
+  ctx.fillStyle = '#3a3a48';
   ctx.fillRect(0, 3, TILE, 1);
   ctx.fillRect(0, 7, TILE, 1);
   ctx.fillRect(0, 11, TILE, 1);
   ctx.fillRect(0, 15, TILE, 1);
 
-  // Vertical mortar (offset every other row)
-  ctx.fillRect(4, 0, 1, 3);
-  ctx.fillRect(12, 0, 1, 3);
-  ctx.fillRect(0, 4, 1, 3);
+  // Vertical cracks (offset per row for brick-like pattern)
+  ctx.fillRect(5, 0, 1, 3);
+  ctx.fillRect(11, 0, 1, 3);
+  ctx.fillRect(2, 4, 1, 3);
   ctx.fillRect(8, 4, 1, 3);
-  ctx.fillRect(4, 8, 1, 3);
-  ctx.fillRect(12, 8, 1, 3);
-  ctx.fillRect(0, 12, 1, 3);
+  ctx.fillRect(14, 4, 1, 3);
+  ctx.fillRect(5, 8, 1, 3);
+  ctx.fillRect(11, 8, 1, 3);
+  ctx.fillRect(2, 12, 1, 3);
   ctx.fillRect(8, 12, 1, 3);
+  ctx.fillRect(14, 12, 1, 3);
 
-  // Slight highlight on top-left edges of bricks
-  ctx.fillStyle = '#5a5a7a';
-  ctx.fillRect(1, 0, 3, 1);
-  ctx.fillRect(5, 0, 7, 1);
-  ctx.fillRect(13, 0, 3, 1);
-  ctx.fillRect(1, 4, 7, 1);
-  ctx.fillRect(9, 4, 3, 1);
+  // Top highlight (slight light from above, 2.5D style)
+  ctx.fillStyle = '#5a5a6a';
+  ctx.fillRect(0, 0, TILE, 1);
+
+  // Bottom shadow
+  ctx.fillStyle = '#2e2e3e';
+  ctx.fillRect(0, 15, TILE, 1);
 
   return canvasToTexture(canvas);
 }
 
-// ── Floor Texture (16×16 stone) ─────────────────────────────────────────────
+// ── Cliff Body Texture (16×16 dark interior wall) ───────────────────────────
 
-export function generateFloorTexture(): Texture {
+export function generateCliffBodyTexture(): Texture {
   const [canvas, ctx] = makeCanvas(TILE, TILE);
 
-  // Dark stone base
-  ctx.fillStyle = '#1e1e32';
+  // Very dark rock — this is the shadowed interior / non-south-facing wall
+  ctx.fillStyle = '#2a2a38';
   ctx.fillRect(0, 0, TILE, TILE);
 
-  // Subtle grid/grout lines
-  ctx.fillStyle = '#171729';
-  ctx.fillRect(0, 0, TILE, 1);
-  ctx.fillRect(0, 0, 1, TILE);
+  // Subtle horizontal strata (barely visible)
+  ctx.fillStyle = '#242432';
+  ctx.fillRect(0, 4, TILE, 1);
+  ctx.fillRect(0, 9, TILE, 1);
+  ctx.fillRect(0, 14, TILE, 1);
 
-  // Add sparse noise speckles for texture
+  // A few darker speckles for texture
   const speckles = [
-    [3, 5], [7, 2], [11, 9], [14, 6],
-    [2, 12], [9, 13], [6, 8], [13, 3],
+    [3, 2], [10, 6], [7, 11], [13, 3],
+    [1, 8], [14, 13], [5, 15], [9, 1],
   ];
-  ctx.fillStyle = '#242440';
   for (const [sx, sy] of speckles) {
-    setPixel(ctx, sx, sy, '#242440');
+    setPixel(ctx, sx, sy, '#1e1e2e');
   }
+
+  return canvasToTexture(canvas);
+}
+
+// ── Cliff Top Texture (16×16 grassy overhang) ──────────────────────────────
+
+export function generateCliffTopTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  // Upper portion: grass (the top of the cliff)
+  ctx.fillStyle = '#2a6a1a';
+  ctx.fillRect(0, 0, TILE, 10);
+
+  // Lower portion: cliff edge shadow (hanging down)
+  ctx.fillStyle = '#3a3a48';
+  ctx.fillRect(0, 10, TILE, 6);
+
+  // Grass-to-rock transition with irregular edge
+  ctx.fillStyle = '#2a6a1a';
+  // Irregular grass draping down
+  ctx.fillRect(0, 10, 3, 2);
+  ctx.fillRect(5, 10, 2, 3);
+  ctx.fillRect(9, 10, 3, 2);
+  ctx.fillRect(14, 10, 2, 3);
+
+  // Highlight on grass
+  ctx.fillStyle = '#3a7a2a';
+  ctx.fillRect(2, 1, 4, 2);
+  ctx.fillRect(8, 3, 5, 2);
+  ctx.fillRect(1, 6, 3, 2);
+  ctx.fillRect(11, 7, 4, 2);
+
+  // Shadow beneath overhang
+  ctx.fillStyle = '#2a2a3a';
+  ctx.fillRect(0, 14, TILE, 2);
+
+  // Tiny vine details hanging from edge
+  setPixel(ctx, 3, 12, '#1a5a0a');
+  setPixel(ctx, 3, 13, '#1a5a0a');
+  setPixel(ctx, 10, 12, '#1a5a0a');
+  setPixel(ctx, 10, 13, '#1a5a0a');
 
   return canvasToTexture(canvas);
 }
@@ -214,7 +325,7 @@ export function generatePlayerSpritesheet(): {
     }
     animations[`walk-${dir}`] = walkFrames;
 
-    // Idle frames: col 2, 3 (we use just col 2 as a static idle, col 3 as subtle shift)
+    // Idle frames: col 2, 3
     const idleFrames: Texture[] = [];
     for (let col = 2; col < 4; col++) {
       const frame = new Texture({

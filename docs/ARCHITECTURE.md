@@ -1,7 +1,7 @@
 # Labyrinth 2D — Architecture Specification
 
 > **Living document.** Updated as the project evolves.  
-> Last updated: 2026-03-25 — Step 8 (Pixel-Art Sprites & Textured Tiles)
+> Last updated: 2026-03-26 — Step 9 (2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles)
 
 ---
 
@@ -112,7 +112,7 @@ Each player in `GameState.players[]` carries:
 |---|---|---|
 | `id` | `string` | Server-assigned unique ID |
 | `displayName` | `string` | Player-chosen name |
-| `x`, `y` | `number` | Pixel position (top-left of 16×16 hitbox area) |
+| `x`, `y` | `number` | Pixel position (bottom-center of sprite / feet position) |
 | `facing` | `FacingDirection` | Current facing direction (`'up'`/`'down'`/`'left'`/`'right'`). Derived by server from last input. |
 | `isMoving` | `boolean` | Whether the player was moving in their last input. Derived by server. |
 | `lastProcessedInput` | `number` | Highest acknowledged input sequence for reconciliation |
@@ -123,17 +123,25 @@ Each player in `GameState.players[]` carries:
 
 All physics run in `@labyrinth/shared` so client and server execute **identical** logic.
 
+### 4.1 Feet-Based Collision (2.5D)
+
+Player `(x, y)` = **bottom-center** of sprite (feet position). The collision hitbox covers only the feet area:
+
 | Constant | Value | Purpose |
 |---|---|---|
 | `PLAYER_SPEED` | 150 px/s | Movement speed |
-| `PLAYER_HITBOX` | 12 px | AABB hitbox size (centered in 16×16 sprite) |
-| `HITBOX_OFFSET` | 2 px | Offset from sprite top-left to hitbox top-left |
+| `FEET_HITBOX_W` | 8 px | Width of feet collision box, centered at x |
+| `FEET_HITBOX_H` | 12 px | Height of feet collision box, extends upward from y |
 | `SERVER_TICK_S` | 0.05 s | One server tick duration |
 
-### 4.1 Core Functions
+Feet hitbox bounds: `left = x - 4`, `top = y - 12`, `right = x + 3`, `bottom = y - 1`.
+
+This allows the top half of the player sprite to visually overlap wall tiles above, creating a 2.5D depth illusion.
+
+### 4.2 Core Functions
 
 - **`applyInput(x, y, input, dt)`** — Pure movement (no collision). Returns new `{x, y}`.
-- **`isPositionValid(x, y, map)`** — AABB check: is the 12×12 hitbox at `(x+2, y+2)` free of wall tiles?
+- **`isPositionValid(x, y, map)`** — AABB check: is the 8×12 feet hitbox free of solid tiles (cliff face)?
 - **`applyInputWithCollision(x, y, input, dt, map)`** — Applies movement with **axis-independent sliding**: tries X-axis first, then Y-axis independently. Prevents getting stuck in corners.
 
 ---
@@ -158,10 +166,15 @@ Maps are generated in `@labyrinth/shared` so both client and server use the same
 
 ### 5.2 Tile IDs
 
-| ID | Meaning |
-|---|---|
-| `0` | Floor (walkable) |
-| `1` | Wall (solid, blocks movement) |
+| ID | Constant | Meaning | Collision | Render Layer |
+|---|---|---|---|---|
+| `0` | `TILE_GRASS` | Grass floor | walkable | Background (`depth = -100`) |
+| `1` | `TILE_DIRT` | Dirt floor (near-cliff transition) | walkable | Background (`depth = -100`) |
+| `2` | `TILE_CLIFF_FACE` | Vertical rock wall | **solid** | Main (`depth = bottom Y`) |
+| `3` | `TILE_CLIFF_TOP` | Grassy overhang | **solid** | Background (`depth = -100`) |
+| `4` | `TILE_CLIFF_BODY` | Dark interior/non-south wall | **solid** | Background (`depth = -100`) |
+
+Post-processing passes convert the raw maze output: walls→cliff face, floor near cliff→dirt, floor above cliff→cliff top.
 
 ### 5.3 Spawn Points
 
@@ -195,22 +208,26 @@ The map (91×91 = 1456×1456 px) is larger than the viewport (480×270). A `worl
 2. Clamps to map boundaries so no area outside the map is visible.
 3. Rounds to integer pixels for pixel-perfect rendering.
 
-### 6.2 Rendering (Sprite-Based)
+### 6.2 Rendering (Multi-Layer 2.5D)
 
-All visuals now use **PixiJS Sprite / AnimatedSprite** objects with textures:
+All visuals use **PixiJS Sprite / AnimatedSprite** objects with textures. The tilemap is rendered in 3 depth layers for 2.5D perspective:
 
-| Element | Rendering |
-|---|---|
-| Wall tiles | 16×16 brick-patterned sprite (fallback: procedurally generated) |
-| Floor tiles | 16×16 dark stone sprite (fallback: procedurally generated) |
-| Local player | 16×32 AnimatedSprite, animation driven by immediate keyboard input (prediction) |
-| Remote players | 16×32 AnimatedSprite, animation driven by server `facing`/`isMoving` via interpolation |
+| Element | Rendering | Depth |
+|---|---|---|
+| Grass tiles | 16×16 green grass sprite | `-100` (background) |
+| Dirt tiles | 16×16 brown dirt sprite | `-100` (background) |
+| Cliff face tiles | 16×16 dark rocky wall sprite | `(tileY+1) * tileSize` (Y-sorted with players) |
+| Cliff top tiles | 16×16 grassy overhang sprite | `10000` (foreground, always on top) |
+| Local player | 16×32 AnimatedSprite, anchor `(0.5, 1.0)` | `sprite.y` (Y-sorted) |
+| Remote players | 16×32 AnimatedSprite, anchor `(0.5, 1.0)` | `sprite.y` (Y-sorted) |
 
-**Asset loading:** The client attempts to load `assets/tiles.png` and `assets/player.png`. If either fails, it falls back to procedurally generated textures via `FallbackTextures.ts`.
+**Sprite anchors:** All player sprites use bottom-center anchor `(0.5, 1.0)`. The `x,y` coordinate = feet position.
+
+**Asset loading:** The client attempts to load `assets/tiles.png` (4 tiles: grass, dirt, cliff face, cliff top) and `assets/player.png`. If either fails, it falls back to procedurally generated textures via `FallbackTextures.ts`.
 
 **Animations:** 8 animation keys: `idle-up`, `idle-down`, `idle-left`, `idle-right`, `walk-up`, `walk-down`, `walk-left`, `walk-right`.
 
-**Y-Sorting:** The player layer uses `sortableChildren = true` with `sprite.zIndex = sprite.y` for correct visual overlap (2.5D top-down illusion).
+**Y-Sorting:** The world container uses `sortableChildren = true`. Cliff face tiles depth = bottom Y of tile. Player depth = `sprite.y`. This creates correct overlap: players walk behind cliffs when below them, in front when above.
 
 ---
 

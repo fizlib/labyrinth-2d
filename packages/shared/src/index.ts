@@ -8,8 +8,8 @@
 // ── Re-export physics module ────────────────────────────────────────────────
 export {
   PLAYER_SPEED,
-  PLAYER_HITBOX,
-  HITBOX_OFFSET,
+  FEET_HITBOX_W,
+  FEET_HITBOX_H,
   applyInput,
   isPositionValid,
   applyInputWithCollision,
@@ -20,6 +20,11 @@ export {
   generateMaze,
   MAZE_SIZE,
   SPAWN_POINTS,
+  TILE_GRASS,
+  TILE_DIRT,
+  TILE_CLIFF_FACE,
+  TILE_CLIFF_TOP,
+  TILE_CLIFF_BODY,
   type TileMapData,
   type SpawnPoint,
 } from './maps/level1.js';
