@@ -1,6 +1,25 @@
 // packages/shared/src/maps/level1.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Level 1 — Procedurally-generated labyrinth with robust 15-tile autotiling.
+// Level 1 — Procedurally-generated labyrinth with multi-layer 2.5D tiles.
+//
+// Tile IDs:
+//   0 = Floor           (walkable, background layer)
+//   1 = Floor Shadow    (walkable, background layer — ambient occlusion)
+//   2 = Wall Face       (solid, entity layer — vertical drop)
+//   3 = Wall Top        (solid, entity layer — bright rim border)
+//   4 = Wall Interior   (solid, entity layer — deep rock mass)
+//
+// Layout:
+//   - 186×186 tile grid at 16px/tile
+//   - 9×9 central hub room
+//   - Recursive-backtracking maze fills the entire space
+//   - All corridors are 6 tiles wide
+//   - Hub has 3 entrances: north, west, east
+//   - 3 spawn points near corners
+//
+// Post-processing:
+//   - 2-tile high South-facing wall profiles
+//   - Dirt shadows hugging the bases of the walls
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface TileMapData {
@@ -17,27 +36,26 @@ export interface SpawnPoint {
 
 // ── Tile ID Constants ───────────────────────────────────────────────────────
 
+/** Base floor — walkable, rendered on background layer. */
 export const TILE_FLOOR = 0;
+
+/** Dirt floor / shadow — walkable, rendered on background layer. Ambient occlusion near walls. */
 export const TILE_FLOOR_SHADOW = 1;
 
-// Solid Walls (>= 10 for easy physics checking)
-export const TILE_WALL_INTERIOR = 10;
-export const TILE_WALL_TOP = 11;
-export const TILE_WALL_BOTTOM = 12;
-export const TILE_WALL_LEFT = 13;
-export const TILE_WALL_RIGHT = 14;
+/** Vertical rock wall face — solid, Y-sorted on entity layer. */
+export const TILE_WALL_FACE = 2;
 
-// Outer Corners
-export const TILE_WALL_TL = 15; // Top-Left
-export const TILE_WALL_TR = 16; // Top-Right
-export const TILE_WALL_BL = 17; // Bottom-Left
-export const TILE_WALL_BR = 18; // Bottom-Right
+/** Flat top edge of the rock wall — solid, Y-sorted on entity layer. */
+export const TILE_WALL_TOP = 3;
 
-// Inner Corners
-export const TILE_WALL_INNER_NW = 19;
-export const TILE_WALL_INNER_NE = 20;
-export const TILE_WALL_INNER_SW = 21;
-export const TILE_WALL_INNER_SE = 22;
+/** Deep rock interior — solid, Y-sorted on entity layer. */
+export const TILE_WALL_INTERIOR = 4;
+
+/** Left vertical edge of a cliff mass — solid, Y-sorted. */
+export const TILE_WALL_SIDE_LEFT = 5;
+
+/** Right vertical edge of a cliff mass — solid, Y-sorted. */
+export const TILE_WALL_SIDE_RIGHT = 6;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -46,7 +64,7 @@ const WALL_SIZE = 6;
 const CELL_STEP = CELL_SIZE + WALL_SIZE;
 const GRID_CELLS = 15;
 export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 186
-export const TILE_SIZE = 16;
+const TILE_PX = 16;
 
 // ── Seeded PRNG (mulberry32) ────────────────────────────────────────────────
 
@@ -163,7 +181,9 @@ function generateMazeData(seed: number): number[] {
   // ── Carve all non-hub cells ─────────────────────────────────────────────
   for (let cy = 0; cy < GRID_CELLS; cy++) {
     for (let cx = 0; cx < GRID_CELLS; cx++) {
-      if (!hubCells.has(`${cx},${cy}`)) carveCell(data, cx, cy);
+      if (!hubCells.has(`${cx},${cy}`)) {
+        carveCell(data, cx, cy);
+      }
     }
   }
 
@@ -202,8 +222,10 @@ function generateMazeData(seed: number): number[] {
   const hubCenterCx = Math.floor(GRID_CELLS / 2);
   const hubCenterCy = Math.floor(GRID_CELLS / 2);
 
-  let hubTopCy = GRID_CELLS, hubBottomCy = -1;
-  let hubLeftCx = GRID_CELLS, hubRightCx = -1;
+  let hubTopCy = GRID_CELLS;
+  let hubBottomCy = -1;
+  let hubLeftCx = GRID_CELLS;
+  let hubRightCx = -1;
   for (const key of hubCells) {
     const [cx, cy] = key.split(',').map(Number);
     if (cy < hubTopCy) hubTopCy = cy;
@@ -213,113 +235,159 @@ function generateMazeData(seed: number): number[] {
   }
 
   // North entrance
-  if (hubTopCy - 1 >= 0) {
-    const { tx, ty } = cellToTile(hubCenterCx, hubTopCy - 1);
-    const wallY = ty + CELL_SIZE;
-    for (let wy = 0; wy < WALL_SIZE; wy++) {
-      for (let dx = 0; dx < CELL_SIZE; dx++) data[(wallY + wy) * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
-    }
-    for (let row = wallY + WALL_SIZE; row < hubTileY + CELL_SIZE; row++) {
-      for (let dx = 0; dx < CELL_SIZE; dx++) {
-        if (row >= 0 && row < MAP_SIZE) data[row * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+  {
+    const entranceCx = hubCenterCx;
+    const aboveCy = hubTopCy - 1;
+    if (aboveCy >= 0) {
+      const { tx, ty } = cellToTile(entranceCx, aboveCy);
+      const wallY = ty + CELL_SIZE;
+      for (let wy = 0; wy < WALL_SIZE; wy++) {
+        for (let dx = 0; dx < CELL_SIZE; dx++) {
+          data[(wallY + wy) * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+        }
+      }
+      const hubEdge = hubTileY;
+      for (let row = wallY + WALL_SIZE; row < hubEdge + CELL_SIZE; row++) {
+        for (let dx = 0; dx < CELL_SIZE; dx++) {
+          if (row >= 0 && row < MAP_SIZE) {
+            data[row * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+          }
+        }
       }
     }
   }
 
   // West entrance
-  if (hubLeftCx - 1 >= 0) {
-    const { tx, ty } = cellToTile(hubLeftCx - 1, hubCenterCy);
-    const wallX = tx + CELL_SIZE;
-    for (let wx = 0; wx < WALL_SIZE; wx++) {
-      for (let dy = 0; dy < CELL_SIZE; dy++) data[(ty + dy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
-    }
-    for (let col = wallX + WALL_SIZE; col < hubTileX + CELL_SIZE; col++) {
-      for (let dy = 0; dy < CELL_SIZE; dy++) {
-        if (col >= 0 && col < MAP_SIZE) data[(ty + dy) * MAP_SIZE + col] = TILE_FLOOR;
+  {
+    const entranceCy = hubCenterCy;
+    const leftCx = hubLeftCx - 1;
+    if (leftCx >= 0) {
+      const { tx, ty } = cellToTile(leftCx, entranceCy);
+      const wallX = tx + CELL_SIZE;
+      for (let wx = 0; wx < WALL_SIZE; wx++) {
+        for (let dy = 0; dy < CELL_SIZE; dy++) {
+          data[(ty + dy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
+        }
+      }
+      const hubEdge = hubTileX;
+      for (let col = wallX + WALL_SIZE; col < hubEdge + CELL_SIZE; col++) {
+        for (let dy = 0; dy < CELL_SIZE; dy++) {
+          if (col >= 0 && col < MAP_SIZE) {
+            data[(ty + dy) * MAP_SIZE + col] = TILE_FLOOR;
+          }
+        }
       }
     }
   }
 
   // East entrance
-  if (hubRightCx + 1 < GRID_CELLS) {
-    const { tx: cellTx, ty: cellTy } = cellToTile(hubRightCx + 1, hubCenterCy);
-    const wallX = cellTx - WALL_SIZE;
-    for (let wx = 0; wx < WALL_SIZE; wx++) {
-      for (let dy = 0; dy < CELL_SIZE; dy++) data[(cellTy + dy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
-    }
-    for (let col = hubTileX + hubSize - CELL_SIZE; col < wallX; col++) {
-      for (let dy = 0; dy < CELL_SIZE; dy++) {
-        if (col >= 0 && col < MAP_SIZE) data[(cellTy + dy) * MAP_SIZE + col] = TILE_FLOOR;
-      }
-    }
-  }
-
-  // ── Post-processing: Robust Autotiling ────────────────────────────────
-  const snap = data.slice();
-
-  // Helper: Is a given coordinate a wall (or out of bounds)?
-  const isWall = (tx: number, ty: number) => {
-    if (tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE) return true;
-    return snap[ty * MAP_SIZE + tx] !== TILE_FLOOR;
-  };
-
-  // Bitmask mapping based on North(1), East(2), South(4), West(8) neighbors
-  const maskToTile = new Map<number, number>([[0, TILE_WALL_INTERIOR], // No neighbors
-  [1, TILE_WALL_BOTTOM],   // N is wall -> open face is Bottom
-  [2, TILE_WALL_LEFT],     // E is wall -> open face is Left
-  [3, TILE_WALL_BL],       // N & E are walls -> open faces Bottom & Left -> Bottom-Left Corner
-  [4, TILE_WALL_TOP],      // S is wall -> open face is Top
-  [5, TILE_WALL_LEFT],     // N & S -> Vertical column fallback[6,  TILE_WALL_TL],       // E & S are walls -> Top-Left Corner[7,  TILE_WALL_LEFT],     // N, E, S -> Left Face[8,  TILE_WALL_RIGHT],    // W is wall -> open face is Right[9,  TILE_WALL_BR],       // N & W are walls -> Bottom-Right Corner[10, TILE_WALL_TOP],      // E & W -> Horizontal row fallback
-  [11, TILE_WALL_BOTTOM],   // N, E, W -> Bottom Face
-  [12, TILE_WALL_TR],       // S & W are walls -> Top-Right Corner
-  [13, TILE_WALL_RIGHT],    // N, S, W -> Right Face
-  [14, TILE_WALL_TOP],      // E, S, W -> Top Face
-  [15, TILE_WALL_INTERIOR]  // All 4 cardinal neighbors are walls (may be inner corner)
-  ]);
-
-  for (let y = 0; y < MAP_SIZE; y++) {
-    for (let x = 0; x < MAP_SIZE; x++) {
-      const idx = y * MAP_SIZE + x;
-      if (snap[idx] !== TILE_FLOOR) { // If it's a solid block
-        let mask = 0;
-        if (isWall(x, y - 1)) mask |= 1; // North
-        if (isWall(x + 1, y)) mask |= 2; // East
-        if (isWall(x, y + 1)) mask |= 4; // South
-        if (isWall(x - 1, y)) mask |= 8; // West
-
-        let tile = maskToTile.get(mask) ?? TILE_WALL_INTERIOR;
-
-        // Inner corner check (if fully surrounded on cardinals, check diagonals)
-        if (mask === 15) {
-          const nw = isWall(x - 1, y - 1);
-          const ne = isWall(x + 1, y - 1);
-          const sw = isWall(x - 1, y + 1);
-          const se = isWall(x + 1, y + 1);
-
-          if (!nw) tile = TILE_WALL_INNER_NW;
-          else if (!ne) tile = TILE_WALL_INNER_NE;
-          else if (!sw) tile = TILE_WALL_INNER_SW;
-          else if (!se) tile = TILE_WALL_INNER_SE;
+  {
+    const entranceCy = hubCenterCy;
+    const rightCx = hubRightCx + 1;
+    if (rightCx < GRID_CELLS) {
+      const { tx: cellTx, ty: cellTy } = cellToTile(rightCx, entranceCy);
+      const wallX = cellTx - WALL_SIZE;
+      for (let wx = 0; wx < WALL_SIZE; wx++) {
+        for (let dy = 0; dy < CELL_SIZE; dy++) {
+          data[(cellTy + dy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
         }
-
-        data[idx] = tile;
+      }
+      const hubRight = hubTileX + hubSize;
+      for (let col = hubRight - CELL_SIZE; col < wallX; col++) {
+        for (let dy = 0; dy < CELL_SIZE; dy++) {
+          if (col >= 0 && col < MAP_SIZE) {
+            data[(cellTy + dy) * MAP_SIZE + col] = TILE_FLOOR;
+          }
+        }
       }
     }
   }
 
-  // ── Step 3: Add dark dirt shadows near walls ──────────────────────────
+  // ── Post-processing: convert to Stardew-style 2.5D tiles ────────────────
+
+  // Step 1: Convert ALL old walls (1) → Wall Interior (4) initially
+  for (let i = 0; i < data.length; i++) {
+    if (data[i] === 1) {
+      data[i] = TILE_WALL_INTERIOR;
+    }
+  }
+
+  const snapshot = data.slice();
+
+  // Step 2: Carve South-facing walls (2-tiles high vertical face + 1-tile top border)
+  for (let y = MAP_SIZE - 2; y >= 2; y--) {
+    for (let x = 0; x < MAP_SIZE; x++) {
+      const thisIdx = y * MAP_SIZE + x;
+      const belowIdx = (y + 1) * MAP_SIZE + x;
+
+      // If this tile is solid rock, but the tile directly south is walkable floor
+      if (snapshot[thisIdx] === TILE_WALL_INTERIOR && snapshot[belowIdx] === TILE_FLOOR) {
+
+        data[thisIdx] = TILE_WALL_FACE; // Base of the wall face
+
+        // Extend the face upwards for a chunky 2-tile high appearance
+        const midIdx = (y - 1) * MAP_SIZE + x;
+        if (snapshot[midIdx] === TILE_WALL_INTERIOR) {
+          data[midIdx] = TILE_WALL_FACE;
+
+          // Cap the wall face with a bright top border
+          const topIdx = (y - 2) * MAP_SIZE + x;
+          if (snapshot[topIdx] === TILE_WALL_INTERIOR) {
+            data[topIdx] = TILE_WALL_TOP;
+          }
+        } else {
+          // Fallback if wall thickness is somehow only 1 block
+          data[thisIdx] = TILE_WALL_TOP;
+        }
+      }
+    }
+  }
+
+  // Step 3: Cap all other exposed interior edges with a directional border
+  const snap2 = data.slice();
+  for (let y = 1; y < MAP_SIZE - 1; y++) {
+    for (let x = 1; x < MAP_SIZE - 1; x++) {
+      const idx = y * MAP_SIZE + x;
+      if (snap2[idx] === TILE_WALL_INTERIOR) {
+
+        // Helper to check if a neighbor is empty space (floor or a drop)
+        const isExposed = (neighborIdx: number) =>
+          snap2[neighborIdx] === TILE_FLOOR ||
+          snap2[neighborIdx] === TILE_FLOOR_SHADOW ||
+          snap2[neighborIdx] === TILE_WALL_FACE;
+
+        const exposedLeft = isExposed(idx - 1);
+        const exposedRight = isExposed(idx + 1);
+        const exposedTop = isExposed(idx - MAP_SIZE);
+        // Note: Bottom exposure is handled by Step 2 (South facing walls)
+
+        // Assign specific side textures based on which way the wall is exposed
+        if (exposedLeft) {
+          data[idx] = TILE_WALL_SIDE_LEFT;
+        } else if (exposedRight) {
+          data[idx] = TILE_WALL_SIDE_RIGHT;
+        } else if (exposedTop) {
+          data[idx] = TILE_WALL_TOP; // Top edge rim
+        }
+      }
+    }
+  }
+
+  // Step 4: Add dark dirt shadows around the base edges of the walkable areas
   const snap3 = data.slice();
   for (let y = 0; y < MAP_SIZE; y++) {
     for (let x = 0; x < MAP_SIZE; x++) {
       const idx = y * MAP_SIZE + x;
       if (snap3[idx] === TILE_FLOOR) {
         const isNearWall =
-          (x > 0 && snap3[idx - 1] >= 10) ||
-          (x < MAP_SIZE - 1 && snap3[idx + 1] >= 10) ||
-          (y > 0 && snap3[idx - MAP_SIZE] >= 10) ||
-          (y < MAP_SIZE - 1 && snap3[idx + MAP_SIZE] >= 10);
+          (x > 0 && snap3[idx - 1] !== TILE_FLOOR) ||
+          (x < MAP_SIZE - 1 && snap3[idx + 1] !== TILE_FLOOR) ||
+          (y > 0 && snap3[idx - MAP_SIZE] !== TILE_FLOOR) ||
+          (y < MAP_SIZE - 1 && snap3[idx + MAP_SIZE] !== TILE_FLOOR);
 
-        if (isNearWall) data[idx] = TILE_FLOOR_SHADOW;
+        if (isNearWall) {
+          data[idx] = TILE_FLOOR_SHADOW;
+        }
       }
     }
   }
@@ -351,7 +419,7 @@ export function generateMaze(seed: number): TileMapData {
   return {
     width: MAP_SIZE,
     height: MAP_SIZE,
-    tileSize: TILE_SIZE,
+    tileSize: TILE_PX,
     data: generateMazeData(seed),
   };
 }
