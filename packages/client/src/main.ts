@@ -1,17 +1,10 @@
 // packages/client/src/main.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // Labyrinth 2D — Client Entry Point
-// Step 7: Labyrinth Structure & Spawn Logic + Camera Follow
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// CHANGES IN STEP 7:
-//   - Map is now 41×41 tiles (656×656 px) — larger than the viewport.
-//   - Camera follows the local player, keeping them centered.
-//   - Camera is clamped to map bounds so we never see outside the map.
-//   - All previous systems (prediction, reconciliation, interpolation) intact.
+// Step 8: Pixel-Art Sprites & Textured Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application, Graphics, Container } from 'pixi.js';
+import { Application, Sprite, AnimatedSprite, Container, Texture } from 'pixi.js';
 import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
@@ -20,16 +13,19 @@ import {
   generateMaze,
   applyInputWithCollision,
 } from '@labyrinth/shared';
-import type { GameState, TileMapData } from '@labyrinth/shared';
+import type { GameState, TileMapData, FacingDirection } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 import { SnapshotBuffer, INTERPOLATION_DELAY } from './net/SnapshotBuffer';
+import { loadAssets, type GameAssets } from './assets/AssetLoader';
 
-// ── Colors ──────────────────────────────────────────────────────────────────
+// ── Player sprite dimensions ────────────────────────────────────────────────
 
-const LOCAL_PLAYER_COLOR = 0x00e676;   // Bright green
-const REMOTE_PLAYER_COLOR = 0xff5252;  // Bright red
-const WALL_COLOR = 0x4a4a68;           // Muted purple-gray
-const FLOOR_COLOR = 0x1e1e32;          // Very dark navy
+/** Player sprites are 16 wide × 32 tall (standard RPG proportions). */
+const PLAYER_SPRITE_W = 16;
+const PLAYER_SPRITE_H = 32;
+
+/** Y offset: the sprite is taller than a tile, so we shift it up visually. */
+const PLAYER_Y_OFFSET = PLAYER_SPRITE_H - TILE_SIZE; // 16px
 
 // ── Input State ─────────────────────────────────────────────────────────────
 
@@ -68,6 +64,10 @@ let localX = 0;
 let localY = 0;
 let localPlayerInitialized = false;
 
+// ── Local facing (for immediate animation, used by prediction) ──────────────
+
+let localFacing: FacingDirection = 'down';
+
 // ── Current Map (set on room join from server seed) ───────────────────────
 
 let currentMap: TileMapData | null = null;
@@ -91,46 +91,34 @@ function resizeCanvas(app: Application): void {
   app.renderer.resize(INTERNAL_WIDTH, INTERNAL_HEIGHT);
 }
 
-// ── Tilemap Rendering ───────────────────────────────────────────────────────
+// ── Tilemap Rendering (sprite-based) ────────────────────────────────────────
 
-function renderTilemap(map: TileMapData): Container {
+function renderTilemap(
+  map: TileMapData,
+  wallTex: Texture,
+  floorTex: Texture,
+): Container {
   const tilemap = new Container();
   const ts = map.tileSize;
-
-  // Batch all wall tiles into a single Graphics object
-  const walls = new Graphics();
-  // Batch all floor tiles into a single Graphics object
-  const floors = new Graphics();
 
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
       const tileId = map.data[y * map.width + x];
-      const px = x * ts;
-      const py = y * ts;
-
-      if (tileId === 1) {
-        walls.rect(px, py, ts, ts);
-      } else {
-        floors.rect(px, py, ts, ts);
-      }
+      const tex = tileId === 1 ? wallTex : floorTex;
+      const sprite = new Sprite(tex);
+      sprite.x = x * ts;
+      sprite.y = y * ts;
+      sprite.width = ts;
+      sprite.height = ts;
+      tilemap.addChild(sprite);
     }
   }
-
-  floors.fill(FLOOR_COLOR);
-  walls.fill(WALL_COLOR);
-
-  tilemap.addChild(floors);
-  tilemap.addChild(walls);
 
   return tilemap;
 }
 
 // ── Camera ──────────────────────────────────────────────────────────────────
 
-/**
- * Update the world container position so the camera follows the local player.
- * Centers the player on screen and clamps to map boundaries.
- */
 function updateCamera(
   world: Container,
   targetX: number,
@@ -139,32 +127,25 @@ function updateCamera(
   mapPixelH: number,
   zoomScale: number,
 ): void {
-  // Center offset: we want the player's center (targetX + TILE_SIZE/2)
-  // to be at the center of the viewport
   const playerCenterX = targetX + TILE_SIZE / 2;
   const playerCenterY = targetY + TILE_SIZE / 2;
 
   let camX = INTERNAL_WIDTH / 2 - playerCenterX * zoomScale;
   let camY = INTERNAL_HEIGHT / 2 - playerCenterY * zoomScale;
 
-  // Clamp so we never show area outside the map
   const scaledMapW = mapPixelW * zoomScale;
   const scaledMapH = mapPixelH * zoomScale;
 
-  // Only clamp if the map is larger than the viewport at this zoom
   if (scaledMapW > INTERNAL_WIDTH) {
     const minX = -(scaledMapW - INTERNAL_WIDTH);
-    const maxX = 0;
-    camX = Math.max(minX, Math.min(maxX, camX));
+    camX = Math.max(minX, Math.min(0, camX));
   } else {
-    // Center the map if it fits entirely
     camX = (INTERNAL_WIDTH - scaledMapW) / 2;
   }
 
   if (scaledMapH > INTERNAL_HEIGHT) {
     const minY = -(scaledMapH - INTERNAL_HEIGHT);
-    const maxY = 0;
-    camY = Math.max(minY, Math.min(maxY, camY));
+    camY = Math.max(minY, Math.min(0, camY));
   } else {
     camY = (INTERNAL_HEIGHT - scaledMapH) / 2;
   }
@@ -179,10 +160,17 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function getInterpolatedPosition(
+interface InterpolatedPlayer {
+  x: number;
+  y: number;
+  facing: FacingDirection;
+  isMoving: boolean;
+}
+
+function getInterpolatedPlayer(
   playerId: string,
   renderTime: number,
-): { x: number; y: number } | null {
+): InterpolatedPlayer | null {
   const pair = snapshotBuffer.getInterpolationPair(renderTime);
 
   if (pair) {
@@ -193,20 +181,46 @@ function getInterpolatedPosition(
       return {
         x: lerp(pastPlayer.x, futurePlayer.x, pair.t),
         y: lerp(pastPlayer.y, futurePlayer.y, pair.t),
+        facing: futurePlayer.facing,
+        isMoving: futurePlayer.isMoving,
       };
     }
 
-    if (futurePlayer) return { x: futurePlayer.x, y: futurePlayer.y };
-    if (pastPlayer) return { x: pastPlayer.x, y: pastPlayer.y };
+    if (futurePlayer) return {
+      x: futurePlayer.x, y: futurePlayer.y,
+      facing: futurePlayer.facing, isMoving: futurePlayer.isMoving,
+    };
+    if (pastPlayer) return {
+      x: pastPlayer.x, y: pastPlayer.y,
+      facing: pastPlayer.facing, isMoving: pastPlayer.isMoving,
+    };
   }
 
   const latest = snapshotBuffer.getLatest();
   if (latest) {
     const player = latest.state.players.find((p) => p.id === playerId);
-    if (player) return { x: player.x, y: player.y };
+    if (player) return {
+      x: player.x, y: player.y,
+      facing: player.facing, isMoving: player.isMoving,
+    };
   }
 
   return null;
+}
+
+// ── Animation Helpers ───────────────────────────────────────────────────────
+
+function getAnimationKey(facing: FacingDirection, isMoving: boolean): string {
+  return isMoving ? `walk-${facing}` : `idle-${facing}`;
+}
+
+function deriveFacingFromKeys(): FacingDirection {
+  // Priority: down > up > right > left (same as server)
+  if (keys.down) return 'down';
+  if (keys.up) return 'up';
+  if (keys.right) return 'right';
+  if (keys.left) return 'left';
+  return localFacing; // no keys pressed — keep current
 }
 
 // ── Debug UI ────────────────────────────────────────────────────────────────
@@ -251,7 +265,7 @@ function updateDebugUI(state: GameState, playerId: string | null): void {
     playerListEl.innerHTML = state.players
       .map((p) => {
         const isYou = p.id === playerId ? ' <span class="you-badge">← you</span>' : '';
-        return `<li><span class="player-name">${p.displayName}</span> <span class="player-pos">(${Math.round(p.x)}, ${Math.round(p.y)})</span>${isYou}</li>`;
+        return `<li><span class="player-name">${p.displayName}</span> <span class="player-pos">(${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${isYou}</li>`;
       })
       .join('');
   }
@@ -279,17 +293,20 @@ async function main(): Promise<void> {
   resizeCanvas(app);
   window.addEventListener('resize', () => resizeCanvas(app));
 
+  // ── Load Assets (with fallback) ─────────────────────────────────────────
+  const assets: GameAssets = await loadAssets();
+
   // ── World Container (everything that moves with the camera) ──────────
   const worldContainer = new Container();
   app.stage.addChild(worldContainer);
 
   // ── Tilemap (child of world) ──────────────────────────────────────────
-  // Initially empty — rebuilt when we receive the maze seed from the server
   let tilemapContainer = new Container();
   worldContainer.addChild(tilemapContainer);
 
   // ── Player layer (child of world, on top of tilemap) ──────────────────
   const playerLayer = new Container();
+  playerLayer.sortableChildren = true; // enable Y-sorting via zIndex
   worldContainer.addChild(playerLayer);
 
   // ── Map dimensions in pixels (updated on room join) ───────────────────
@@ -297,10 +314,10 @@ async function main(): Promise<void> {
   let mapPixelH = MAZE_SIZE * TILE_SIZE;
 
   // ── Debug Zoom ────────────────────────────────────────────────────────
-  let zoomLevel = 1.0;
   const MIN_ZOOM = 0.1;
   const MAX_ZOOM = 2.0;
   const ZOOM_STEP = 0.05;
+  let zoomLevel = MAX_ZOOM;
 
   // ── Debug UI ──────────────────────────────────────────────────────────
   createDebugUI();
@@ -308,26 +325,53 @@ async function main(): Promise<void> {
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
-  const playerSprites: Map<string, Graphics> = new Map();
+  interface PlayerSpriteData {
+    sprite: AnimatedSprite;
+    currentAnimKey: string;
+  }
 
-  function ensurePlayerSprite(playerId: string, isLocal: boolean): Graphics {
-    let sprite = playerSprites.get(playerId);
-    if (!sprite) {
-      sprite = new Graphics();
-      const color = isLocal ? LOCAL_PLAYER_COLOR : REMOTE_PLAYER_COLOR;
-      sprite.rect(0, 0, TILE_SIZE, TILE_SIZE);
-      sprite.fill(color);
-      playerLayer.addChild(sprite);
-      playerSprites.set(playerId, sprite);
+  const playerSprites: Map<string, PlayerSpriteData> = new Map();
+
+  function createPlayerSprite(playerId: string): PlayerSpriteData {
+    // Start with idle-down animation
+    const animKey = 'idle-down';
+    const frames = assets.playerAnimations[animKey];
+    const sprite = new AnimatedSprite(frames);
+    sprite.animationSpeed = 0.1; // ~6 fps at 60fps ticker
+    sprite.loop = true;
+    sprite.play();
+    sprite.width = PLAYER_SPRITE_W;
+    sprite.height = PLAYER_SPRITE_H;
+
+    playerLayer.addChild(sprite);
+
+    const data: PlayerSpriteData = { sprite, currentAnimKey: animKey };
+    playerSprites.set(playerId, data);
+    return data;
+  }
+
+  function ensurePlayerSprite(playerId: string): PlayerSpriteData {
+    let data = playerSprites.get(playerId);
+    if (!data) {
+      data = createPlayerSprite(playerId);
     }
-    return sprite;
+    return data;
+  }
+
+  function setPlayerAnimation(data: PlayerSpriteData, animKey: string): void {
+    if (data.currentAnimKey === animKey) return;
+    const frames = assets.playerAnimations[animKey];
+    if (!frames) return;
+    data.sprite.textures = frames;
+    data.sprite.play();
+    data.currentAnimKey = animKey;
   }
 
   function removePlayerSprite(playerId: string): void {
-    const sprite = playerSprites.get(playerId);
-    if (sprite) {
-      playerLayer.removeChild(sprite);
-      sprite.destroy();
+    const data = playerSprites.get(playerId);
+    if (data) {
+      playerLayer.removeChild(data.sprite);
+      data.sprite.destroy();
       playerSprites.delete(playerId);
     }
   }
@@ -348,10 +392,10 @@ async function main(): Promise<void> {
       mapPixelW = currentMap.width * currentMap.tileSize;
       mapPixelH = currentMap.height * currentMap.tileSize;
 
-      // Rebuild tilemap
+      // Rebuild tilemap with sprite-based rendering
       worldContainer.removeChild(tilemapContainer);
       tilemapContainer.destroy({ children: true });
-      tilemapContainer = renderTilemap(currentMap);
+      tilemapContainer = renderTilemap(currentMap, assets.wallTexture, assets.floorTexture);
       worldContainer.addChildAt(tilemapContainer, 0);
 
       if (statusEl) {
@@ -363,14 +407,16 @@ async function main(): Promise<void> {
       if (me) {
         localX = me.x;
         localY = me.y;
+        localFacing = me.facing;
         localPlayerInitialized = true;
       }
 
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
-        const sprite = ensurePlayerSprite(player.id, isLocal);
-        sprite.x = Math.round(player.x);
-        sprite.y = Math.round(player.y);
+        const data = ensurePlayerSprite(player.id);
+        data.sprite.x = Math.round(player.x);
+        data.sprite.y = Math.round(player.y) - PLAYER_Y_OFFSET;
+        data.sprite.zIndex = player.y;
         if (!isLocal) knownRemotePlayers.add(player.id);
       }
 
@@ -390,7 +436,7 @@ async function main(): Promise<void> {
       // ── Local player reconciliation ─────────────────────────────
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
-        const sprite = ensurePlayerSprite(localPlayerData.id, true);
+        const data = ensurePlayerSprite(localPlayerData.id);
 
         localX = localPlayerData.x;
         localY = localPlayerData.y;
@@ -411,8 +457,9 @@ async function main(): Promise<void> {
           localY = result.y;
         }
 
-        sprite.x = Math.round(localX);
-        sprite.y = Math.round(localY);
+        data.sprite.x = Math.round(localX);
+        data.sprite.y = Math.round(localY) - PLAYER_Y_OFFSET;
+        data.sprite.zIndex = localY;
       }
 
       // ── Remote players: ensure sprites exist ────────────────────
@@ -420,7 +467,7 @@ async function main(): Promise<void> {
       for (const player of gameState.players) {
         if (player.id !== localPlayerId) {
           knownRemotePlayers.add(player.id);
-          ensurePlayerSprite(player.id, false);
+          ensurePlayerSprite(player.id);
         }
       }
 
@@ -473,6 +520,7 @@ async function main(): Promise<void> {
     const isMoving = keys.up || keys.down || keys.left || keys.right;
 
     if (isMoving) {
+      localFacing = deriveFacingFromKeys();
       inputSequenceNumber++;
 
       const input: PendingInput = {
@@ -505,24 +553,32 @@ async function main(): Promise<void> {
       );
     }
 
-    // Update local player sprite
-    const localSprite = playerSprites.get(net.playerId);
-    if (localSprite) {
-      localSprite.x = Math.round(localX);
-      localSprite.y = Math.round(localY);
+    // Update local player sprite position & animation
+    const localData = playerSprites.get(net.playerId);
+    if (localData) {
+      localData.sprite.x = Math.round(localX);
+      localData.sprite.y = Math.round(localY) - PLAYER_Y_OFFSET;
+      localData.sprite.zIndex = localY;
+
+      const localAnimKey = getAnimationKey(localFacing, isMoving);
+      setPlayerAnimation(localData, localAnimKey);
     }
 
     // ── 2. Remote player interpolation ────────────────────────────
     const renderTime = now - INTERPOLATION_DELAY;
 
     for (const remoteId of knownRemotePlayers) {
-      const sprite = playerSprites.get(remoteId);
-      if (!sprite) continue;
+      const data = playerSprites.get(remoteId);
+      if (!data) continue;
 
-      const pos = getInterpolatedPosition(remoteId, renderTime);
-      if (pos) {
-        sprite.x = Math.round(pos.x);
-        sprite.y = Math.round(pos.y);
+      const interp = getInterpolatedPlayer(remoteId, renderTime);
+      if (interp) {
+        data.sprite.x = Math.round(interp.x);
+        data.sprite.y = Math.round(interp.y) - PLAYER_Y_OFFSET;
+        data.sprite.zIndex = interp.y;
+
+        const remoteAnimKey = getAnimationKey(interp.facing, interp.isMoving);
+        setPlayerAnimation(data, remoteAnimKey);
       }
     }
 
@@ -562,9 +618,7 @@ async function main(): Promise<void> {
   });
 
   // ── Connect to Server ─────────────────────────────────────────────────
-  const wsUrl = import.meta.env.DEV
-    ? 'ws://localhost:9001'
-    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+  const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
   const displayName = `Explorer-${Math.floor(Math.random() * 9999)
     .toString()
@@ -574,7 +628,7 @@ async function main(): Promise<void> {
 
   console.info('─────────────────────────────────────────────────');
   console.info('  🏰 Labyrinth 2D Client');
-  console.info('  Step 7: Labyrinth + Camera Follow');
+  console.info('  Step 8: Pixel-Art Sprites & Textured Tiles');
   console.info(`  Map: ${MAZE_SIZE}×${MAZE_SIZE} tiles (${mapPixelW}×${mapPixelH} px)`);
   console.info(`  Internal: ${INTERNAL_WIDTH}×${INTERNAL_HEIGHT}`);
   console.info(`  Scale: ${getIntegerScale(window.innerWidth, window.innerHeight)}×`);

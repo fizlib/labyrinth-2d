@@ -18,6 +18,7 @@ import {
   generateMaze,
   SPAWN_POINTS,
   applyInputWithCollision,
+  type FacingDirection,
   type TileMapData,
   type GameState,
   type PlayerInfo,
@@ -105,6 +106,8 @@ export class Room {
       displayName,
       x: spawnX,
       y: spawnY,
+      facing: 'down',
+      isMoving: false,
       lastProcessedInput: 0,
     };
     this.state.players.push(playerInfo);
@@ -207,6 +210,21 @@ export class Room {
         if (input.sequenceNumber > player.lastProcessedInput) {
           player.lastProcessedInput = input.sequenceNumber;
         }
+      }
+
+      // Derive facing & isMoving from the LAST input in the queue
+      const lastInput = queue[queue.length - 1];
+      const hasMovement = lastInput.up || lastInput.down || lastInput.left || lastInput.right;
+      player.isMoving = hasMovement;
+
+      if (hasMovement) {
+        // Priority: down > up > right > left (arbitrary but consistent)
+        let newFacing: FacingDirection = player.facing;
+        if (lastInput.left) newFacing = 'left';
+        if (lastInput.right) newFacing = 'right';
+        if (lastInput.up) newFacing = 'up';
+        if (lastInput.down) newFacing = 'down';
+        player.facing = newFacing;
       }
 
       queue.length = 0;

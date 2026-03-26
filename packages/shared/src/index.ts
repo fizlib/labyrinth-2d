@@ -87,11 +87,16 @@ export interface PlayerInputMessage {
 
 // ── Server → Client Messages ────────────────────────────────────────────────
 
+/** Valid facing directions for player sprites. */
+export type FacingDirection = 'up' | 'down' | 'left' | 'right';
+
 export interface PlayerInfo {
   id: string;
   displayName: string;
   x: number;
   y: number;
+  facing: FacingDirection;
+  isMoving: boolean;
   lastProcessedInput: number;
 }
 

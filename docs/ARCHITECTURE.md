@@ -1,7 +1,7 @@
 # Labyrinth 2D — Architecture Specification
 
 > **Living document.** Updated as the project evolves.  
-> Last updated: 2026-03-25 — Step 7 (Labyrinth Structure & Spawn Logic)
+> Last updated: 2026-03-25 — Step 8 (Pixel-Art Sprites & Textured Tiles)
 
 ---
 
@@ -112,7 +112,9 @@ Each player in `GameState.players[]` carries:
 |---|---|---|
 | `id` | `string` | Server-assigned unique ID |
 | `displayName` | `string` | Player-chosen name |
-| `x`, `y` | `number` | Pixel position (top-left of 16×16 sprite) |
+| `x`, `y` | `number` | Pixel position (top-left of 16×16 hitbox area) |
+| `facing` | `FacingDirection` | Current facing direction (`'up'`/`'down'`/`'left'`/`'right'`). Derived by server from last input. |
+| `isMoving` | `boolean` | Whether the player was moving in their last input. Derived by server. |
 | `lastProcessedInput` | `number` | Highest acknowledged input sequence for reconciliation |
 
 ---
@@ -193,16 +195,22 @@ The map (91×91 = 1456×1456 px) is larger than the viewport (480×270). A `worl
 2. Clamps to map boundaries so no area outside the map is visible.
 3. Rounds to integer pixels for pixel-perfect rendering.
 
-### 6.2 Current Rendering (Primitives)
+### 6.2 Rendering (Sprite-Based)
 
-All visuals are currently **PixiJS Graphics primitives** (no textures yet):
+All visuals now use **PixiJS Sprite / AnimatedSprite** objects with textures:
 
 | Element | Rendering |
 |---|---|
-| Wall tiles | Gray (`#4a4a68`) filled rectangles with beveled edges (highlight top-left, shadow bottom-right) |
-| Floor tiles | Dark navy (`#1e1e32`) with subtle grid lines |
-| Local player | Green (`#00e676`) 16×16 square |
-| Remote players | Red (`#ff5252`) 16×16 squares |
+| Wall tiles | 16×16 brick-patterned sprite (fallback: procedurally generated) |
+| Floor tiles | 16×16 dark stone sprite (fallback: procedurally generated) |
+| Local player | 16×32 AnimatedSprite, animation driven by immediate keyboard input (prediction) |
+| Remote players | 16×32 AnimatedSprite, animation driven by server `facing`/`isMoving` via interpolation |
+
+**Asset loading:** The client attempts to load `assets/tiles.png` and `assets/player.png`. If either fails, it falls back to procedurally generated textures via `FallbackTextures.ts`.
+
+**Animations:** 8 animation keys: `idle-up`, `idle-down`, `idle-left`, `idle-right`, `walk-up`, `walk-down`, `walk-left`, `walk-right`.
+
+**Y-Sorting:** The player layer uses `sortableChildren = true` with `sprite.zIndex = sprite.y` for correct visual overlap (2.5D top-down illusion).
 
 ---
 
@@ -215,15 +223,19 @@ labyrinth-2d/
 ├── packages/
 │   ├── client/                      ← Vite + PixiJS browser client
 │   │   ├── public/
-│   │   │   └── tilesets/            ← (future) tileset PNGs
+│   │   │   └── assets/              ← (optional) tiles.png, player.png
 │   │   ├── src/
 │   │   │   ├── main.ts              ← App bootstrap, game loop, camera, rendering
+│   │   │   ├── assets/
+│   │   │   │   ├── AssetLoader.ts    ← Load PNGs with fallback to generated textures
+│   │   │   │   └── FallbackTextures.ts ← Procedural texture generator (walls, floors, player)
 │   │   │   └── net/
 │   │   │       ├── NetworkManager.ts ← WebSocket client, message dispatch
 │   │   │       └── SnapshotBuffer.ts ← Timestamped snapshot storage for interpolation
 │   │   ├── index.html
 │   │   ├── style.css
 │   │   ├── vite.config.ts
+│   │   ├── vite-env.d.ts            ← Vite type declarations
 │   │   ├── tsconfig.json
 │   │   └── package.json
 │   ├── server/                      ← Node.js + uWebSockets.js server
