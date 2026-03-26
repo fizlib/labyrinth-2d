@@ -206,6 +206,143 @@ export function generateCliffTopTexture(): Texture {
   return canvasToTexture(canvas);
 }
 
+// ── Cliff Bottom Edge Texture (16×16) ───────────────────────────────────────
+
+export function generateCliffBottomTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  // Dark rock base (same family as cliff body)
+  ctx.fillStyle = '#2a2a38';
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Bottom edge highlight — lighter strip at bottom to mark the edge
+  ctx.fillStyle = '#4a4a58';
+  ctx.fillRect(0, 13, TILE, 3);
+
+  // Subtle strata
+  ctx.fillStyle = '#242432';
+  ctx.fillRect(0, 4, TILE, 1);
+  ctx.fillRect(0, 9, TILE, 1);
+
+  // Edge detail
+  ctx.fillStyle = '#5a5a6a';
+  ctx.fillRect(0, 15, TILE, 1);
+
+  return canvasToTexture(canvas);
+}
+
+// ── Cliff Top Edge Texture (16×16 rock rim, NOT the grassy overhang) ────────
+
+export function generateTopEdgeTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  // Dark rock base (same family as cliff body)
+  ctx.fillStyle = '#2a2a38';
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Top edge highlight — lighter strip at top to mark the rim
+  ctx.fillStyle = '#4a4a58';
+  ctx.fillRect(0, 0, TILE, 3);
+
+  // Subtle strata
+  ctx.fillStyle = '#242432';
+  ctx.fillRect(0, 7, TILE, 1);
+  ctx.fillRect(0, 12, TILE, 1);
+
+  // Bright top edge detail
+  ctx.fillStyle = '#5a5a6a';
+  ctx.fillRect(0, 0, TILE, 1);
+
+  return canvasToTexture(canvas);
+}
+
+// ── Corner Textures (16×16 each) ────────────────────────────────────────────
+
+export function generateCornerTLTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  // Dark body base
+  ctx.fillStyle = '#2a2a38';
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Top edge highlight (like wall top)
+  ctx.fillStyle = '#5a5a6a';
+  ctx.fillRect(0, 0, TILE, 2);
+
+  // Left edge highlight
+  ctx.fillStyle = '#3a3a4a';
+  ctx.fillRect(0, 0, 2, TILE);
+
+  // Corner accent
+  ctx.fillStyle = '#6a6a7a';
+  ctx.fillRect(0, 0, 3, 3);
+
+  return canvasToTexture(canvas);
+}
+
+export function generateCornerTRTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  ctx.fillStyle = '#2a2a38';
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Top edge
+  ctx.fillStyle = '#5a5a6a';
+  ctx.fillRect(0, 0, TILE, 2);
+
+  // Right edge
+  ctx.fillStyle = '#3a3a4a';
+  ctx.fillRect(14, 0, 2, TILE);
+
+  // Corner accent
+  ctx.fillStyle = '#6a6a7a';
+  ctx.fillRect(13, 0, 3, 3);
+
+  return canvasToTexture(canvas);
+}
+
+export function generateCornerBLTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  ctx.fillStyle = '#2a2a38';
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Bottom edge
+  ctx.fillStyle = '#4a4a58';
+  ctx.fillRect(0, 14, TILE, 2);
+
+  // Left edge
+  ctx.fillStyle = '#3a3a4a';
+  ctx.fillRect(0, 0, 2, TILE);
+
+  // Corner accent
+  ctx.fillStyle = '#5a5a6a';
+  ctx.fillRect(0, 13, 3, 3);
+
+  return canvasToTexture(canvas);
+}
+
+export function generateCornerBRTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+
+  ctx.fillStyle = '#2a2a38';
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Bottom edge
+  ctx.fillStyle = '#4a4a58';
+  ctx.fillRect(0, 14, TILE, 2);
+
+  // Right edge
+  ctx.fillStyle = '#3a3a4a';
+  ctx.fillRect(14, 0, 2, TILE);
+
+  // Corner accent
+  ctx.fillStyle = '#5a5a6a';
+  ctx.fillRect(13, 13, 3, 3);
+
+  return canvasToTexture(canvas);
+}
+
 // ── Player Spritesheet (64×128 — 4 cols × 4 rows, each frame 16×32) ────────
 // Layout: 4 directions × 2 frames (idle + walk step)
 // Row 0: walk-down  frame 0, walk-down  frame 1, idle-down  frame 0, idle-down  frame 1

@@ -173,6 +173,14 @@ Maps are generated in `@labyrinth/shared` so both client and server use the same
 | `2` | `TILE_CLIFF_FACE` | Vertical rock wall | **solid** | Main (`depth = bottom Y`) |
 | `3` | `TILE_CLIFF_TOP` | Grassy overhang | **solid** | Background (`depth = -100`) |
 | `4` | `TILE_CLIFF_BODY` | Dark interior/non-south wall | **solid** | Background (`depth = -100`) |
+| `5` | `TILE_WALL_SIDE_LEFT` | Left vertical edge of cliff | **solid** | Main (`depth = bottom Y`) |
+| `6` | `TILE_WALL_SIDE_RIGHT` | Right vertical edge of cliff | **solid** | Main (`depth = bottom Y`) |
+| `7` | `TILE_WALL_BOTTOM` | Bottom horizontal edge of cliff | **solid** | Main (`depth = bottom Y`) |
+| `8` | `TILE_WALL_CORNER_TL` | Outer corner: top-left | **solid** | Main (`depth = bottom Y`) |
+| `9` | `TILE_WALL_CORNER_TR` | Outer corner: top-right | **solid** | Main (`depth = bottom Y`) |
+| `10` | `TILE_WALL_CORNER_BL` | Outer corner: bottom-left | **solid** | Main (`depth = bottom Y`) |
+| `11` | `TILE_WALL_CORNER_BR` | Outer corner: bottom-right | **solid** | Main (`depth = bottom Y`) |
+| `12` | `TILE_WALL_TOP_EDGE` | Top rock rim (north-facing edge) | **solid** | Main (`depth = bottom Y`) |
 
 Post-processing passes convert the raw maze output: walls→cliff face, floor near cliff→dirt, floor above cliff→cliff top.
 

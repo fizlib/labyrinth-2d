@@ -14,6 +14,12 @@ import {
   generateCliffFaceTexture,
   generateCliffBodyTexture,
   generateCliffTopTexture,
+  generateCliffBottomTexture,
+  generateCornerTLTexture,
+  generateCornerTRTexture,
+  generateCornerBLTexture,
+  generateCornerBRTexture,
+  generateTopEdgeTexture,
   generatePlayerSpritesheet,
 } from './FallbackTextures';
 
@@ -25,6 +31,12 @@ export interface GameAssets {
   wallInteriorTexture: Texture;
   wallSideLeftTexture: Texture;
   wallSideRightTexture: Texture;
+  wallBottomTexture: Texture;
+  wallCornerTLTexture: Texture;
+  wallCornerTRTexture: Texture;
+  wallCornerBLTexture: Texture;
+  wallCornerBRTexture: Texture;
+  wallTopEdgeTexture: Texture;
   playerAnimations: Record<string, Texture[]>;
 }
 
@@ -36,6 +48,12 @@ export async function loadAssets(): Promise<GameAssets> {
   let wallInteriorTexture: Texture;
   let wallSideLeftTexture: Texture;
   let wallSideRightTexture: Texture;
+  let wallBottomTexture: Texture;
+  let wallCornerTLTexture: Texture;
+  let wallCornerTRTexture: Texture;
+  let wallCornerBLTexture: Texture;
+  let wallCornerBRTexture: Texture;
+  let wallTopEdgeTexture: Texture;
   let playerAnimations: Record<string, Texture[]>;
 
   try {
@@ -49,8 +67,14 @@ export async function loadAssets(): Promise<GameAssets> {
     wallInteriorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(64, 0, 16, 16) });
     wallSideLeftTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(80, 0, 16, 16) });
     wallSideRightTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(96, 0, 16, 16) });
+    wallBottomTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(112, 0, 16, 16) });
+    wallCornerTLTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(128, 0, 16, 16) });
+    wallCornerTRTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(144, 0, 16, 16) });
+    wallCornerBLTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(160, 0, 16, 16) });
+    wallCornerBRTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(176, 0, 16, 16) });
+    wallTopEdgeTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(192, 0, 16, 16) });
 
-    console.info('[Assets] Loaded tiles.png (7 tile types)');
+    console.info('[Assets] Loaded tiles.png (13 tile types)');
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
     // Map existing fallback generators to the new semantic naming
@@ -61,6 +85,12 @@ export async function loadAssets(): Promise<GameAssets> {
     wallInteriorTexture = generateCliffBodyTexture();
     wallSideLeftTexture = generateCliffBodyTexture();
     wallSideRightTexture = generateCliffBodyTexture();
+    wallBottomTexture = generateCliffBottomTexture();
+    wallCornerTLTexture = generateCornerTLTexture();
+    wallCornerTRTexture = generateCornerTRTexture();
+    wallCornerBLTexture = generateCornerBLTexture();
+    wallCornerBRTexture = generateCornerBRTexture();
+    wallTopEdgeTexture = generateTopEdgeTexture();
   }
 
   // ── Player spritesheet ─────────────────────────────────────────────────
@@ -110,6 +140,12 @@ export async function loadAssets(): Promise<GameAssets> {
     wallInteriorTexture,
     wallSideLeftTexture,
     wallSideRightTexture,
+    wallBottomTexture,
+    wallCornerTLTexture,
+    wallCornerTRTexture,
+    wallCornerBLTexture,
+    wallCornerBRTexture,
+    wallTopEdgeTexture,
     playerAnimations,
   };
 }

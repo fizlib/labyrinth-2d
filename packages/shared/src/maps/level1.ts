@@ -57,6 +57,24 @@ export const TILE_WALL_SIDE_LEFT = 5;
 /** Right vertical edge of a cliff mass — solid, Y-sorted. */
 export const TILE_WALL_SIDE_RIGHT = 6;
 
+/** Bottom horizontal edge of a cliff mass — solid, Y-sorted. */
+export const TILE_WALL_BOTTOM = 7;
+
+/** Outer corner: top-left of cliff mass — solid, Y-sorted. */
+export const TILE_WALL_CORNER_TL = 8;
+
+/** Outer corner: top-right of cliff mass — solid, Y-sorted. */
+export const TILE_WALL_CORNER_TR = 9;
+
+/** Outer corner: bottom-left of cliff mass — solid, Y-sorted. */
+export const TILE_WALL_CORNER_BL = 10;
+
+/** Outer corner: bottom-right of cliff mass — solid, Y-sorted. */
+export const TILE_WALL_CORNER_BR = 11;
+
+/** Top horizontal edge (rock rim) of cliff body — solid, Y-sorted. Distinct from WALL_TOP (grassy overhang). */
+export const TILE_WALL_TOP_EDGE = 12;
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const CELL_SIZE = 6;
@@ -344,31 +362,50 @@ function generateMazeData(seed: number): number[] {
   }
 
   // Step 3: Cap all other exposed interior edges with a directional border
+  //         including bottom edges and outer corners.
   const snap2 = data.slice();
+
+  // Helper: is a tile "open" (walkable, a visible edge, or the cap of a south-facing wall)?
+  const isOpen = (id: number) =>
+    id === TILE_FLOOR ||
+    id === TILE_FLOOR_SHADOW ||
+    id === TILE_WALL_FACE ||
+    id === TILE_WALL_TOP;
+
   for (let y = 1; y < MAP_SIZE - 1; y++) {
     for (let x = 1; x < MAP_SIZE - 1; x++) {
       const idx = y * MAP_SIZE + x;
-      if (snap2[idx] === TILE_WALL_INTERIOR) {
+      if (snap2[idx] !== TILE_WALL_INTERIOR) continue;
 
-        // Helper to check if a neighbor is empty space (floor or a drop)
-        const isExposed = (neighborIdx: number) =>
-          snap2[neighborIdx] === TILE_FLOOR ||
-          snap2[neighborIdx] === TILE_FLOOR_SHADOW ||
-          snap2[neighborIdx] === TILE_WALL_FACE;
+      const left   = snap2[idx - 1];
+      const right  = snap2[idx + 1];
+      const top    = snap2[idx - MAP_SIZE];
+      const bottom = snap2[idx + MAP_SIZE];
 
-        const exposedLeft = isExposed(idx - 1);
-        const exposedRight = isExposed(idx + 1);
-        const exposedTop = isExposed(idx - MAP_SIZE);
-        // Note: Bottom exposure is handled by Step 2 (South facing walls)
+      const eL = isOpen(left);
+      const eR = isOpen(right);
+      const eT = isOpen(top);
+      const eB = isOpen(bottom);
 
-        // Assign specific side textures based on which way the wall is exposed
-        if (exposedLeft) {
-          data[idx] = TILE_WALL_SIDE_LEFT;
-        } else if (exposedRight) {
-          data[idx] = TILE_WALL_SIDE_RIGHT;
-        } else if (exposedTop) {
-          data[idx] = TILE_WALL_TOP; // Top edge rim
-        }
+      // ── Corners (two adjacent exposed sides) ──────────────────────
+      if (eT && eL) {
+        data[idx] = TILE_WALL_CORNER_TL;
+      } else if (eT && eR) {
+        data[idx] = TILE_WALL_CORNER_TR;
+      } else if (eB && eL) {
+        data[idx] = TILE_WALL_CORNER_BL;
+      } else if (eB && eR) {
+        data[idx] = TILE_WALL_CORNER_BR;
+      }
+      // ── Straight edges ────────────────────────────────────────────
+      else if (eL) {
+        data[idx] = TILE_WALL_SIDE_LEFT;
+      } else if (eR) {
+        data[idx] = TILE_WALL_SIDE_RIGHT;
+      } else if (eB) {
+        data[idx] = TILE_WALL_BOTTOM;
+      } else if (eT) {
+        data[idx] = TILE_WALL_TOP_EDGE;
       }
     }
   }

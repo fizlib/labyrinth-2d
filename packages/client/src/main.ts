@@ -17,6 +17,12 @@ import {
   TILE_WALL_INTERIOR,
   TILE_WALL_SIDE_LEFT,
   TILE_WALL_SIDE_RIGHT,
+  TILE_WALL_BOTTOM,
+  TILE_WALL_CORNER_TL,
+  TILE_WALL_CORNER_TR,
+  TILE_WALL_CORNER_BL,
+  TILE_WALL_CORNER_BR,
+  TILE_WALL_TOP_EDGE,
   generateMaze,
   applyInputWithCollision,
 } from '@labyrinth/shared';
@@ -362,6 +368,12 @@ async function main(): Promise<void> {
             case TILE_WALL_INTERIOR: tex = assets.wallInteriorTexture; isSolid = true; break;
             case TILE_WALL_SIDE_LEFT: tex = assets.wallSideLeftTexture; isSolid = true; break;
             case TILE_WALL_SIDE_RIGHT: tex = assets.wallSideRightTexture; isSolid = true; break;
+            case TILE_WALL_BOTTOM: tex = assets.wallBottomTexture; isSolid = true; break;
+            case TILE_WALL_CORNER_TL: tex = assets.wallCornerTLTexture; isSolid = true; break;
+            case TILE_WALL_CORNER_TR: tex = assets.wallCornerTRTexture; isSolid = true; break;
+            case TILE_WALL_CORNER_BL: tex = assets.wallCornerBLTexture; isSolid = true; break;
+            case TILE_WALL_CORNER_BR: tex = assets.wallCornerBRTexture; isSolid = true; break;
+            case TILE_WALL_TOP_EDGE: tex = assets.wallTopEdgeTexture; isSolid = true; break;
             default: tex = assets.floorTexture; break;
           }
 
