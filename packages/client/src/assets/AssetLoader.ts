@@ -4,7 +4,7 @@
 // Attempts to load real PNG assets; if they fail, uses procedurally generated
 // textures from FallbackTextures.ts so the game always works.
 //
-// Step 9: 4 tile textures — grass, dirt, cliff face, cliff top.
+// Step 9: 5 tile textures — floor, floor shadow, wall face, wall top, wall interior.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Assets, Texture, Rectangle } from 'pixi.js';
@@ -17,74 +17,49 @@ import {
   generatePlayerSpritesheet,
 } from './FallbackTextures';
 
-/** All game assets needed for rendering. */
 export interface GameAssets {
-  grassTexture: Texture;
-  dirtTexture: Texture;
-  cliffFaceTexture: Texture;
-  cliffBodyTexture: Texture;
-  cliffTopTexture: Texture;
-  /** Named animation → array of frame textures. */
+  floorTexture: Texture;
+  floorShadowTexture: Texture;
+  wallFaceTexture: Texture;
+  wallTopTexture: Texture;
+  wallInteriorTexture: Texture;
   playerAnimations: Record<string, Texture[]>;
 }
 
-/**
- * Load game assets with fallback support.
- * Tries loading real PNGs first; on failure, generates textures procedurally.
- */
 export async function loadAssets(): Promise<GameAssets> {
-  let grassTexture: Texture;
-  let dirtTexture: Texture;
-  let cliffFaceTexture: Texture;
-  let cliffBodyTexture: Texture;
-  let cliffTopTexture: Texture;
+  let floorTexture: Texture;
+  let floorShadowTexture: Texture;
+  let wallFaceTexture: Texture;
+  let wallTopTexture: Texture;
+  let wallInteriorTexture: Texture;
   let playerAnimations: Record<string, Texture[]>;
 
-  // ── Tile textures ──────────────────────────────────────────────────────
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
     tilesheet.source.scaleMode = 'nearest';
-    
-    // Assumes 80×16 layout: 5 tiles × 16px each
-    // col 0 = grass, col 1 = dirt, col 2 = cliff face, col 3 = cliff top, col 4 = cliff body
-    grassTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(0, 0, 16, 16),
-    });
-    dirtTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(16, 0, 16, 16),
-    });
-    cliffFaceTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(32, 0, 16, 16),
-    });
-    cliffTopTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(48, 0, 16, 16),
-    });
-    cliffBodyTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(64, 0, 16, 16),
-    });
+
+    floorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(0, 0, 16, 16) });
+    floorShadowTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(16, 0, 16, 16) });
+    wallFaceTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(32, 0, 16, 16) });
+    wallTopTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(48, 0, 16, 16) });
+    wallInteriorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(64, 0, 16, 16) });
+
     console.info('[Assets] Loaded tiles.png (5 tile types)');
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
-    grassTexture = generateGrassTexture();
-    dirtTexture = generateDirtTexture();
-    cliffFaceTexture = generateCliffFaceTexture();
-    cliffBodyTexture = generateCliffBodyTexture();
-    cliffTopTexture = generateCliffTopTexture();
+    // Map existing fallback generators to the new semantic naming
+    floorTexture = generateGrassTexture();
+    floorShadowTexture = generateDirtTexture();
+    wallFaceTexture = generateCliffFaceTexture();
+    wallTopTexture = generateCliffTopTexture();
+    wallInteriorTexture = generateCliffBodyTexture();
   }
 
   // ── Player spritesheet ─────────────────────────────────────────────────
   try {
     const _playerSheet = await Assets.load<Texture>('assets/player.png');
     _playerSheet.source.scaleMode = 'nearest';
-    
-    // If real player.png found, slice it into animation frames.
-    // Expected layout: 4 cols × 4 rows, each frame 16×32
-    // Same layout as fallback spritesheet.
+
     const dirOrder = ['down', 'left', 'right', 'up'] as const;
     const FW = 16;
     const FH = 32;
@@ -119,5 +94,5 @@ export async function loadAssets(): Promise<GameAssets> {
     playerAnimations = animations;
   }
 
-  return { grassTexture, dirtTexture, cliffFaceTexture, cliffBodyTexture, cliffTopTexture, playerAnimations };
+  return { floorTexture, floorShadowTexture, wallFaceTexture, wallTopTexture, wallInteriorTexture, playerAnimations };
 }

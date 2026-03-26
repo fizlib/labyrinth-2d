@@ -17,17 +17,18 @@ export {
 
 // ── Re-export map data ──────────────────────────────────────────────────────
 export {
-  generateMaze,
+  TILE_FLOOR,
+  TILE_FLOOR_SHADOW,
+  TILE_WALL_FACE,
+  TILE_WALL_TOP,
+  TILE_WALL_INTERIOR,
   MAZE_SIZE,
   SPAWN_POINTS,
-  TILE_GRASS,
-  TILE_DIRT,
-  TILE_CLIFF_FACE,
-  TILE_CLIFF_TOP,
-  TILE_CLIFF_BODY,
+  generateMaze,
   type TileMapData,
   type SpawnPoint,
 } from './maps/level1.js';
+
 
 // ── Game Constants ──────────────────────────────────────────────────────────
 

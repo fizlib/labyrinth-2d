@@ -10,33 +10,12 @@
 // centered horizontally at x and extending upward from y.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { TILE_CLIFF_FACE, TILE_CLIFF_TOP, TILE_CLIFF_BODY, type TileMapData } from './maps/level1.js';
+import { TILE_WALL_FACE, TILE_WALL_TOP, TILE_WALL_INTERIOR, type TileMapData } from './maps/level1.js';
 
-/** Player movement speed in pixels per second. */
 export const PLAYER_SPEED = 150;
-
-/**
- * Width of the feet-based collision box in pixels.
- * Centered horizontally at the player's x position.
- */
 export const FEET_HITBOX_W = 8;
-
-/**
- * Height of the feet-based collision box in pixels.
- * Extends upward from the player's y position.
- */
 export const FEET_HITBOX_H = 12;
 
-/**
- * Apply a single input to a position, returning the new position.
- * Used identically on both client (prediction) and server (authoritative).
- *
- * @param x     Current X position (bottom-center of sprite)
- * @param y     Current Y position (bottom-center of sprite)
- * @param input Movement direction flags
- * @param dt    Delta time in seconds
- * @returns     New { x, y } after applying movement
- */
 export function applyInput(
   x: number,
   y: number,
@@ -54,50 +33,27 @@ export function applyInput(
   return { x: newX, y: newY };
 }
 
-/**
- * Check if a tile at grid coordinates (tileX, tileY) is solid (blocks movement).
- * Returns true if out of bounds (treat out-of-bounds as solid).
- * Solid tiles: TILE_CLIFF_FACE (2) and TILE_CLIFF_TOP (3).
- * Cliff tops are solid to prevent players from walking behind/on top of cliffs.
- */
 function isSolidTile(tileX: number, tileY: number, map: TileMapData): boolean {
   if (tileX < 0 || tileX >= map.width || tileY < 0 || tileY >= map.height) {
     return true; // Out of bounds = impassable
   }
   const tile = map.data[tileY * map.width + tileX];
-  return tile === TILE_CLIFF_FACE || tile === TILE_CLIFF_TOP || tile === TILE_CLIFF_BODY;
+  return tile === TILE_WALL_FACE || tile === TILE_WALL_TOP || tile === TILE_WALL_INTERIOR;
 }
 
-/**
- * Check if a position is valid (no wall collision) using feet-based AABB.
- *
- * The player's feet hitbox is FEET_HITBOX_W × FEET_HITBOX_H, centered
- * horizontally at x and extending upward from y (bottom-center anchor).
- *
- * We check all tile grid cells that the feet hitbox overlaps. If ANY of them
- * are solid tiles, the position is invalid.
- *
- * @param x   Player X position (bottom-center of sprite)
- * @param y   Player Y position (bottom-center of sprite)
- * @param map The tile map to check against
- * @returns   true if the position is valid (no solid tile overlap)
- */
 export function isPositionValid(x: number, y: number, map: TileMapData): boolean {
   const ts = map.tileSize;
 
-  // Feet hitbox bounds (pixel coords)
   const left = x - FEET_HITBOX_W / 2;
   const top = y - FEET_HITBOX_H;
-  const right = left + FEET_HITBOX_W - 1; // inclusive pixel
-  const bottom = y - 1;                    // inclusive pixel (y is one past the bottom)
+  const right = left + FEET_HITBOX_W - 1;
+  const bottom = y - 1;
 
-  // Convert to tile grid coords
   const tileLeft = Math.floor(left / ts);
   const tileTop = Math.floor(top / ts);
   const tileRight = Math.floor(right / ts);
   const tileBottom = Math.floor(bottom / ts);
 
-  // Check all overlapping tiles
   for (let ty = tileTop; ty <= tileBottom; ty++) {
     for (let tx = tileLeft; tx <= tileRight; tx++) {
       if (isSolidTile(tx, ty, map)) {
@@ -109,20 +65,6 @@ export function isPositionValid(x: number, y: number, map: TileMapData): boolean
   return true;
 }
 
-/**
- * Apply a single input WITH collision detection (axis-independent sliding).
- *
- * Instead of rejecting the entire movement when hitting a wall, we try
- * each axis independently. This allows the player to "slide" along walls
- * rather than getting stuck when pressing into a corner.
- *
- * @param x     Current X position (bottom-center of sprite)
- * @param y     Current Y position (bottom-center of sprite)
- * @param input Movement direction flags
- * @param dt    Delta time in seconds
- * @param map   The tile map for collision checking
- * @returns     New { x, y } after applying movement with collision
- */
 export function applyInputWithCollision(
   x: number,
   y: number,
@@ -133,7 +75,6 @@ export function applyInputWithCollision(
   let newX = x;
   let newY = y;
 
-  // Calculate desired deltas
   let dx = 0;
   let dy = 0;
   if (input.up) dy -= PLAYER_SPEED * dt;
@@ -141,7 +82,6 @@ export function applyInputWithCollision(
   if (input.left) dx -= PLAYER_SPEED * dt;
   if (input.right) dx += PLAYER_SPEED * dt;
 
-  // Try X axis independently
   if (dx !== 0) {
     const candidateX = x + dx;
     if (isPositionValid(candidateX, y, map)) {
@@ -149,7 +89,6 @@ export function applyInputWithCollision(
     }
   }
 
-  // Try Y axis independently (using the potentially updated X)
   if (dy !== 0) {
     const candidateY = y + dy;
     if (isPositionValid(newX, candidateY, map)) {
