@@ -19,7 +19,7 @@ import {
   type TileMapData,
 } from './maps/level1.js';
 
-export const PLAYER_SPEED = 150;
+export const PLAYER_SPEED = 80;
 export const FEET_HITBOX_W = 8;
 export const FEET_HITBOX_H = 12;
 

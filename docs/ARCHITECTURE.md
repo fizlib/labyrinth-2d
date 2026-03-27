@@ -129,7 +129,7 @@ Player `(x, y)` = **bottom-center** of sprite (feet position). The collision hit
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `PLAYER_SPEED` | 150 px/s | Movement speed |
+| `PLAYER_SPEED` | 80 px/s | Movement speed |
 | `FEET_HITBOX_W` | 8 px | Width of feet collision box, centered at x |
 | `FEET_HITBOX_H` | 12 px | Height of feet collision box, extends upward from y |
 | `SERVER_TICK_S` | 0.05 s | One server tick duration |
@@ -231,9 +231,9 @@ All visuals use **PixiJS Sprite / AnimatedSprite** objects with textures. The ti
 
 **Sprite anchors:** All player sprites use bottom-center anchor `(0.5, 1.0)`. The `x,y` coordinate = feet position.
 
-**Asset loading:** The client attempts to load `assets/tiles.png` (4 tiles: grass, dirt, cliff face, cliff top) and `assets/player.png`. If either fails, it falls back to procedurally generated textures via `FallbackTextures.ts`.
+**Asset loading:** The client attempts to load `assets/tiles.png` (13 tile types) and `assets/player.png` (128×128, 8 cols × 4 rows of 16×32 frames). If either fails, it falls back to procedurally generated textures via `FallbackTextures.ts`.
 
-**Animations:** 8 animation keys: `idle-up`, `idle-down`, `idle-left`, `idle-right`, `walk-up`, `walk-down`, `walk-left`, `walk-right`.
+**Animations:** 8 animation keys: `idle-up`, `idle-down`, `idle-left`, `idle-right`, `walk-up`, `walk-down`, `walk-left`, `walk-right`. Walk animations use 6 frames per direction; idle uses 2 frames.
 
 **Y-Sorting:** The world container uses `sortableChildren = true`. Cliff face tiles depth = bottom Y of tile. Player depth = `sprite.y`. This creates correct overlap: players walk behind cliffs when below them, in front when above.
 

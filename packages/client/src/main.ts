@@ -296,7 +296,7 @@ async function main(): Promise<void> {
     const animKey = 'idle-down';
     const frames = assets.playerAnimations[animKey];
     const sprite = new AnimatedSprite(frames);
-    sprite.animationSpeed = 0.1;
+    sprite.animationSpeed = 0.15;
     sprite.loop = true;
     sprite.play();
     sprite.width = PLAYER_SPRITE_W;

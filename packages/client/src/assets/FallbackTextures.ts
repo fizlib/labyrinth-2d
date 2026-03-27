@@ -343,17 +343,18 @@ export function generateCornerBRTexture(): Texture {
   return canvasToTexture(canvas);
 }
 
-// ── Player Spritesheet (64×128 — 4 cols × 4 rows, each frame 16×32) ────────
-// Layout: 4 directions × 2 frames (idle + walk step)
-// Row 0: walk-down  frame 0, walk-down  frame 1, idle-down  frame 0, idle-down  frame 1
-// Row 1: walk-left  frame 0, walk-left  frame 1, idle-left  frame 0, idle-left  frame 1
-// Row 2: walk-right frame 0, walk-right frame 1, idle-right frame 0, idle-right frame 1
-// Row 3: walk-up    frame 0, walk-up    frame 1, idle-up    frame 0, idle-up    frame 1
+// ── Player Spritesheet (128×128 — 8 cols × 4 rows, each frame 16×32) ───────
+// Layout: 4 directions × (6 walk frames + 2 idle frames)
+// Cols 0-5: walk frames, Cols 6-7: idle frames
+// Row 0: down, Row 1: left, Row 2: right, Row 3: up
 
 const FRAME_W = 16;
 const FRAME_H = 32;
-const SHEET_COLS = 4;
+const SHEET_COLS = 8;
 const SHEET_ROWS = 4;
+const WALK_COLS = 6;
+const IDLE_START = 6;
+const IDLE_COLS = 2;
 
 interface EyePos { lx: number; ly: number; rx: number; ry: number }
 
@@ -432,8 +433,8 @@ export function generatePlayerSpritesheet(): {
     for (let col = 0; col < SHEET_COLS; col++) {
       const ox = col * FRAME_W;
       const oy = row * FRAME_H;
-      const isWalk = col < 2;
-      const frameIdx = col % 2;
+      const isWalk = col < WALK_COLS;
+      const frameIdx = col % WALK_COLS;
       drawCharacter(ctx, ox, oy, dir, isWalk, frameIdx);
     }
   }
@@ -446,9 +447,9 @@ export function generatePlayerSpritesheet(): {
   for (let row = 0; row < SHEET_ROWS; row++) {
     const dir = DIR_ORDER[row];
 
-    // Walk frames: col 0, 1
+    // Walk frames: cols 0–5
     const walkFrames: Texture[] = [];
-    for (let col = 0; col < 2; col++) {
+    for (let col = 0; col < WALK_COLS; col++) {
       const frame = new Texture({
         source: sheetTexture.source,
         frame: new Rectangle(
@@ -462,9 +463,9 @@ export function generatePlayerSpritesheet(): {
     }
     animations[`walk-${dir}`] = walkFrames;
 
-    // Idle frames: col 2, 3
+    // Idle frames: cols 6–7
     const idleFrames: Texture[] = [];
-    for (let col = 2; col < 4; col++) {
+    for (let col = IDLE_START; col < IDLE_START + IDLE_COLS; col++) {
       const frame = new Texture({
         source: sheetTexture.source,
         frame: new Rectangle(

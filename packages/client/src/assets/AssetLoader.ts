@@ -93,7 +93,8 @@ export async function loadAssets(): Promise<GameAssets> {
     wallTopEdgeTexture = generateTopEdgeTexture();
   }
 
-  // ── Player spritesheet ─────────────────────────────────────────────────
+  // ── Player spritesheet (128×128 — 8 cols × 4 rows, each frame 16×32) ──
+  // Cols 0-5: walk frames, Cols 6-7: idle frames
   try {
     const _playerSheet = await Assets.load<Texture>('assets/player.png');
     _playerSheet.source.scaleMode = 'nearest';
@@ -101,12 +102,17 @@ export async function loadAssets(): Promise<GameAssets> {
     const dirOrder = ['down', 'left', 'right', 'up'] as const;
     const FW = 16;
     const FH = 32;
+    const WALK_COLS = 6;
+    const IDLE_START = 6;
+    const IDLE_COLS = 2;
     const anims: Record<string, Texture[]> = {};
 
     for (let row = 0; row < 4; row++) {
       const dir = dirOrder[row];
+
+      // Walk frames: cols 0–5
       const walkFrames: Texture[] = [];
-      for (let col = 0; col < 2; col++) {
+      for (let col = 0; col < WALK_COLS; col++) {
         walkFrames.push(new Texture({
           source: _playerSheet.source,
           frame: new Rectangle(col * FW, row * FH, FW, FH),
@@ -114,8 +120,9 @@ export async function loadAssets(): Promise<GameAssets> {
       }
       anims[`walk-${dir}`] = walkFrames;
 
+      // Idle frames: cols 6–7
       const idleFrames: Texture[] = [];
-      for (let col = 2; col < 4; col++) {
+      for (let col = IDLE_START; col < IDLE_START + IDLE_COLS; col++) {
         idleFrames.push(new Texture({
           source: _playerSheet.source,
           frame: new Rectangle(col * FW, row * FH, FW, FH),
@@ -125,7 +132,7 @@ export async function loadAssets(): Promise<GameAssets> {
     }
 
     playerAnimations = anims;
-    console.info('[Assets] Loaded player.png');
+    console.info('[Assets] Loaded player.png (8-col spritesheet)');
   } catch {
     console.info('[Assets] player.png not found — using fallback spritesheet');
     const { animations } = generatePlayerSpritesheet();
