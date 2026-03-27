@@ -14,6 +14,8 @@ import {
   SERVER_TICK_MS,
   SERVER_TICK_S,
   MAX_PLAYERS_PER_ROOM,
+  PLAYERS_PER_TEAM,
+  MAX_TEAMS,
   TILE_SIZE,
   generateMaze,
   SPAWN_POINTS,
@@ -53,11 +55,6 @@ export class Room {
   private inputQueues: Map<string, QueuedInput[]> = new Map();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
 
-  /**
-   * Monotonically increasing join counter for round-robin spawn assignment.
-   * Never decremented — ensures even distribution even after disconnects.
-   */
-  private joinCounter = 0;
 
   /** Random seed used to generate this room's maze. */
   readonly mapSeed: number;
@@ -94,18 +91,31 @@ export class Room {
     this.sockets.set(playerId, ws);
     this.inputQueues.set(playerId, []);
 
-    // ── Round-Robin Spawn Assignment ────────────────────────────────
+    // ── Team Assignment ─────────────────────────────────────────────
+    // Find the first team (0…MAX_TEAMS-1) that has fewer than PLAYERS_PER_TEAM members.
+    let assignedTeam = -1;
+    for (let t = 0; t < MAX_TEAMS; t++) {
+      const count = this.state.players.filter((p) => p.teamId === t).length;
+      if (count < PLAYERS_PER_TEAM) {
+        assignedTeam = t;
+        break;
+      }
+    }
+
+    // Safety: should never happen because isFull guards beforehand,
+    // but fall back to team 0 just in case.
+    if (assignedTeam === -1) assignedTeam = 0;
+
+    // Each team spawns at the corresponding SPAWN_POINT
+    const spawnTile = SPAWN_POINTS[assignedTeam];
     // Player x,y = bottom-center of sprite (feet position)
-    const spawnIndex = this.joinCounter % SPAWN_POINTS.length;
-    const spawnTile = SPAWN_POINTS[spawnIndex];
-    // Center horizontally in the tile, bottom of tile vertically
     const spawnX = (spawnTile.x + 0.5) * TILE_SIZE;
     const spawnY = (spawnTile.y + 1) * TILE_SIZE;
-    this.joinCounter++;
 
     const playerInfo: PlayerInfo = {
       id: playerId,
       displayName,
+      teamId: assignedTeam,
       x: spawnX,
       y: spawnY,
       facing: 'down',
@@ -126,7 +136,7 @@ export class Room {
     this.send(ws, joinMsg);
 
     console.info(
-      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) at spawn ${spawnIndex} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
+      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) team ${assignedTeam} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
     );
 
     if (this.playerCount === 1) {

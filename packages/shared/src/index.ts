@@ -49,8 +49,14 @@ export const INTERNAL_HEIGHT = 270;
 /** Tile size in pixels (16×16 standard for Stardew-style). */
 export const TILE_SIZE = 16;
 
-/** Maximum players allowed per room. */
-export const MAX_PLAYERS_PER_ROOM = 10;
+/** Number of players per team. */
+export const PLAYERS_PER_TEAM = 3;
+
+/** Maximum number of teams per room. */
+export const MAX_TEAMS = 3;
+
+/** Maximum players allowed per room (MAX_TEAMS × PLAYERS_PER_TEAM). */
+export const MAX_PLAYERS_PER_ROOM = MAX_TEAMS * PLAYERS_PER_TEAM;
 
 /** Server simulation tick rate (ticks per second). */
 export const SERVER_TICK_RATE = 20;
@@ -107,6 +113,7 @@ export type FacingDirection = 'up' | 'down' | 'left' | 'right';
 export interface PlayerInfo {
   id: string;
   displayName: string;
+  teamId: number;
   x: number;
   y: number;
   facing: FacingDirection;

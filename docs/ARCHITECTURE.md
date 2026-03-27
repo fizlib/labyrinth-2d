@@ -7,7 +7,7 @@
 
 ## 1. Project Overview
 
-A co-op online 2D top-down pixel-art labyrinth game (Stardew Valley aesthetic) for groups of up to **10 players**. All players share one procedurally-generated maze instance and must cooperate to find the exit. The game runs entirely in the browser.
+A co-op online 2D top-down pixel-art labyrinth game (Stardew Valley aesthetic) for groups of up to **9 players** (3 teams of 3). All players share one procedurally-generated maze instance and must cooperate to find the exit. The game runs entirely in the browser.
 
 ---
 
@@ -112,6 +112,7 @@ Each player in `GameState.players[]` carries:
 |---|---|---|
 | `id` | `string` | Server-assigned unique ID |
 | `displayName` | `string` | Player-chosen name |
+| `teamId` | `number` | Team index (0, 1, or 2). Maps 1:1 with `SPAWN_POINTS[teamId]`. |
 | `x`, `y` | `number` | Pixel position (bottom-center of sprite / feet position) |
 | `facing` | `FacingDirection` | Current facing direction (`'up'`/`'down'`/`'left'`/`'right'`). Derived by server from last input. |
 | `isMoving` | `boolean` | Whether the player was moving in their last input. Derived by server. |
@@ -194,7 +195,7 @@ Post-processing passes convert the raw maze output: walls→cliff face, floor ne
 | 1 | `(21, 0)` | `(86, 2)` | Top-right corner |
 | 2 | `(0, 21)` | `(2, 86)` | Bottom-left corner |
 
-Server assigns spawns via **round-robin**: `SPAWN_POINTS[joinCounter % 3]`. The `joinCounter` only increments and never decrements, ensuring even distribution even after disconnects.
+Server assigns spawns via **team assignment**: each team (0, 1, 2) maps to `SPAWN_POINTS[teamId]`. When a player joins, they are assigned to the first team with fewer than `PLAYERS_PER_TEAM` (3) members. If no team has room, the room is full (max 3 teams × 3 players = 9).
 
 ---
 
