@@ -288,13 +288,20 @@ async function main(): Promise<void> {
   interface PlayerSpriteData {
     sprite: AnimatedSprite;
     currentAnimKey: string;
+    spriteIndex: number;
   }
 
   const playerSprites: Map<string, PlayerSpriteData> = new Map();
 
-  function createPlayerSprite(playerId: string): PlayerSpriteData {
+  /** Safely resolve animation set for a player sprite, falling back to set 0. */
+  function getAnimSet(spriteIndex: number): Record<string, Texture[]> {
+    return assets.playerAnimationSets[spriteIndex] ?? assets.playerAnimationSets[0];
+  }
+
+  function createPlayerSprite(playerId: string, spriteIndex: number): PlayerSpriteData {
+    const animSet = getAnimSet(spriteIndex);
     const animKey = 'idle-down';
-    const frames = assets.playerAnimations[animKey];
+    const frames = animSet[animKey];
     const sprite = new AnimatedSprite(frames);
     sprite.animationSpeed = 0.15;
     sprite.loop = true;
@@ -305,20 +312,21 @@ async function main(): Promise<void> {
     sprite.anchor.set(0.5, 1.0); // bottom-center anchor
     entityLayer.addChild(sprite); // Add directly to the sorted entity layer
 
-    const data: PlayerSpriteData = { sprite, currentAnimKey: animKey };
+    const data: PlayerSpriteData = { sprite, currentAnimKey: animKey, spriteIndex };
     playerSprites.set(playerId, data);
     return data;
   }
 
-  function ensurePlayerSprite(playerId: string): PlayerSpriteData {
+  function ensurePlayerSprite(playerId: string, spriteIndex: number): PlayerSpriteData {
     let data = playerSprites.get(playerId);
-    if (!data) data = createPlayerSprite(playerId);
+    if (!data) data = createPlayerSprite(playerId, spriteIndex);
     return data;
   }
 
   function setPlayerAnimation(data: PlayerSpriteData, animKey: string): void {
     if (data.currentAnimKey === animKey) return;
-    const frames = assets.playerAnimations[animKey];
+    const animSet = getAnimSet(data.spriteIndex);
+    const frames = animSet[animKey];
     if (!frames) return;
     data.sprite.textures = frames;
     data.sprite.play();
@@ -409,7 +417,7 @@ async function main(): Promise<void> {
 
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
-        const data = ensurePlayerSprite(player.id);
+        const data = ensurePlayerSprite(player.id, player.spriteIndex);
         data.sprite.x = Math.round(player.x);
         data.sprite.y = Math.round(player.y);
         data.sprite.zIndex = Math.round(player.y) + 1;
@@ -428,7 +436,7 @@ async function main(): Promise<void> {
 
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
-        const data = ensurePlayerSprite(localPlayerData.id);
+        const data = ensurePlayerSprite(localPlayerData.id, localPlayerData.spriteIndex);
         localX = localPlayerData.x;
         localY = localPlayerData.y;
 
@@ -451,7 +459,7 @@ async function main(): Promise<void> {
       for (const player of gameState.players) {
         if (player.id !== localPlayerId) {
           knownRemotePlayers.add(player.id);
-          ensurePlayerSprite(player.id);
+          ensurePlayerSprite(player.id, player.spriteIndex);
         }
       }
 

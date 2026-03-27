@@ -112,10 +112,28 @@ export class Room {
     const spawnX = (spawnTile.x + 0.5) * TILE_SIZE;
     const spawnY = (spawnTile.y + 1) * TILE_SIZE;
 
+    // ── Per-player sprite assignment ─────────────────────────────────
+    // Available sprite count (must match client's PLAYER_FILES array length)
+    const SPRITE_COUNT = 3;
+    const usedSprites = new Set(this.state.players.map((p) => p.spriteIndex));
+    let spriteIndex = -1;
+    // Try to assign a unique sprite first
+    for (let s = 0; s < SPRITE_COUNT; s++) {
+      if (!usedSprites.has(s)) {
+        spriteIndex = s;
+        break;
+      }
+    }
+    // If all sprites are taken, assign randomly
+    if (spriteIndex === -1) {
+      spriteIndex = Math.floor(Math.random() * SPRITE_COUNT);
+    }
+
     const playerInfo: PlayerInfo = {
       id: playerId,
       displayName,
       teamId: assignedTeam,
+      spriteIndex,
       x: spawnX,
       y: spawnY,
       facing: 'down',
@@ -136,7 +154,7 @@ export class Room {
     this.send(ws, joinMsg);
 
     console.info(
-      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) team ${assignedTeam} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
+      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) team ${assignedTeam} sprite ${spriteIndex} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
     );
 
     if (this.playerCount === 1) {
@@ -204,7 +222,10 @@ export class Room {
 
     for (const player of this.state.players) {
       const queue = this.inputQueues.get(player.id);
-      if (!queue || queue.length === 0) continue;
+      if (!queue || queue.length === 0) {
+        player.isMoving = false;
+        continue;
+      }
 
       const dtPerInput = SERVER_TICK_S / queue.length;
 

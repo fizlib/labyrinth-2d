@@ -37,7 +37,8 @@ export interface GameAssets {
   wallCornerBLTexture: Texture;
   wallCornerBRTexture: Texture;
   wallTopEdgeTexture: Texture;
-  playerAnimations: Record<string, Texture[]>;
+  /** Per-team animation sets. Access via playerAnimationSets[teamId]. */
+  playerAnimationSets: Record<string, Texture[]>[];
 }
 
 export async function loadAssets(): Promise<GameAssets> {
@@ -54,7 +55,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let wallCornerBLTexture: Texture;
   let wallCornerBRTexture: Texture;
   let wallTopEdgeTexture: Texture;
-  let playerAnimations: Record<string, Texture[]>;
+  const playerAnimationSets: Record<string, Texture[]>[] = [];
 
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
@@ -93,50 +94,52 @@ export async function loadAssets(): Promise<GameAssets> {
     wallTopEdgeTexture = generateTopEdgeTexture();
   }
 
-  // ── Player spritesheet (128×128 — 8 cols × 4 rows, each frame 16×32) ──
-  // Cols 0-5: walk frames, Cols 6-7: idle frames
-  try {
-    const _playerSheet = await Assets.load<Texture>('assets/player.png');
-    _playerSheet.source.scaleMode = 'nearest';
+  // ── Player spritesheets (128×128 — 8 cols × 4 rows, each frame 16×32) ──
+  // One file per team: player_0.png, player_1.png, …
+  // Teams without a dedicated file reuse team 0's animations.
+  const PLAYER_FILES = ['assets/player_0.png', 'assets/player_1.png', 'assets/player_2.png'];
+  const dirOrder = ['down', 'left', 'right', 'up'] as const;
+  const FW = 16;
+  const FH = 32;
+  const WALK_COLS = 6;
+  const IDLE_START = 6;
+  const IDLE_COLS = 2;
 
-    const dirOrder = ['down', 'left', 'right', 'up'] as const;
-    const FW = 16;
-    const FH = 32;
-    const WALK_COLS = 6;
-    const IDLE_START = 6;
-    const IDLE_COLS = 2;
-    const anims: Record<string, Texture[]> = {};
+  for (let i = 0; i < PLAYER_FILES.length; i++) {
+    try {
+      const sheet = await Assets.load<Texture>(PLAYER_FILES[i]);
+      sheet.source.scaleMode = 'nearest';
 
-    for (let row = 0; row < 4; row++) {
-      const dir = dirOrder[row];
+      const anims: Record<string, Texture[]> = {};
+      for (let row = 0; row < 4; row++) {
+        const dir = dirOrder[row];
 
-      // Walk frames: cols 0–5
-      const walkFrames: Texture[] = [];
-      for (let col = 0; col < WALK_COLS; col++) {
-        walkFrames.push(new Texture({
-          source: _playerSheet.source,
-          frame: new Rectangle(col * FW, row * FH, FW, FH),
-        }));
+        const walkFrames: Texture[] = [];
+        for (let col = 0; col < WALK_COLS; col++) {
+          walkFrames.push(new Texture({
+            source: sheet.source,
+            frame: new Rectangle(col * FW, row * FH, FW, FH),
+          }));
+        }
+        anims[`walk-${dir}`] = walkFrames;
+
+        const idleFrames: Texture[] = [];
+        for (let col = IDLE_START; col < IDLE_START + IDLE_COLS; col++) {
+          idleFrames.push(new Texture({
+            source: sheet.source,
+            frame: new Rectangle(col * FW, row * FH, FW, FH),
+          }));
+        }
+        anims[`idle-${dir}`] = idleFrames;
       }
-      anims[`walk-${dir}`] = walkFrames;
 
-      // Idle frames: cols 6–7
-      const idleFrames: Texture[] = [];
-      for (let col = IDLE_START; col < IDLE_START + IDLE_COLS; col++) {
-        idleFrames.push(new Texture({
-          source: _playerSheet.source,
-          frame: new Rectangle(col * FW, row * FH, FW, FH),
-        }));
-      }
-      anims[`idle-${dir}`] = idleFrames;
+      playerAnimationSets.push(anims);
+      console.info(`[Assets] Loaded ${PLAYER_FILES[i]}`);
+    } catch {
+      console.info(`[Assets] ${PLAYER_FILES[i]} not found — using fallback`);
+      const { animations } = generatePlayerSpritesheet();
+      playerAnimationSets.push(animations);
     }
-
-    playerAnimations = anims;
-    console.info('[Assets] Loaded player.png (8-col spritesheet)');
-  } catch {
-    console.info('[Assets] player.png not found — using fallback spritesheet');
-    const { animations } = generatePlayerSpritesheet();
-    playerAnimations = animations;
   }
 
   return {
@@ -153,6 +156,6 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture,
     wallCornerBRTexture,
     wallTopEdgeTexture,
-    playerAnimations,
+    playerAnimationSets,
   };
 }

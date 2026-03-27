@@ -232,9 +232,9 @@ All visuals use **PixiJS Sprite / AnimatedSprite** objects with textures. The ti
 
 **Sprite anchors:** All player sprites use bottom-center anchor `(0.5, 1.0)`. The `x,y` coordinate = feet position.
 
-**Asset loading:** The client attempts to load `assets/tiles.png` (13 tile types) and `assets/player.png` (128×128, 8 cols × 4 rows of 16×32 frames). If either fails, it falls back to procedurally generated textures via `FallbackTextures.ts`.
+**Asset loading:** The client attempts to load `assets/tiles.png` (13 tile types) and per-team player spritesheets `assets/player_0.png`, `assets/player_1.png` (128×128, 8 cols × 4 rows of 16×32 frames each). Teams without a dedicated file fall back to team 0's sprite. If assets fail entirely, procedural fallback textures are used via `FallbackTextures.ts`.
 
-**Animations:** 8 animation keys: `idle-up`, `idle-down`, `idle-left`, `idle-right`, `walk-up`, `walk-down`, `walk-left`, `walk-right`. Walk animations use 6 frames per direction; idle uses 2 frames.
+**Animations:** 8 animation keys: `idle-up`, `idle-down`, `idle-left`, `idle-right`, `walk-up`, `walk-down`, `walk-left`, `walk-right`. Walk animations use 6 frames per direction; idle uses 2 frames. Each team has its own set of animation textures.
 
 **Y-Sorting:** The world container uses `sortableChildren = true`. Cliff face tiles depth = bottom Y of tile. Player depth = `sprite.y`. This creates correct overlap: players walk behind cliffs when below them, in front when above.
 

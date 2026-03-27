@@ -114,6 +114,8 @@ export interface PlayerInfo {
   id: string;
   displayName: string;
   teamId: number;
+  /** Index into the client's playerAnimationSets array (0-based). */
+  spriteIndex: number;
   x: number;
   y: number;
   facing: FacingDirection;
