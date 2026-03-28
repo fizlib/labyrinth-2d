@@ -23,6 +23,7 @@ import {
   TILE_WALL_CORNER_BL,
   TILE_WALL_CORNER_BR,
   TILE_WALL_TOP_EDGE,
+  TILE_TREE,
   generateMaze,
   applyInputWithCollision,
 } from '@labyrinth/shared';
@@ -382,6 +383,29 @@ async function main(): Promise<void> {
             case TILE_WALL_CORNER_BL: tex = assets.wallCornerBLTexture; isSolid = true; break;
             case TILE_WALL_CORNER_BR: tex = assets.wallCornerBRTexture; isSolid = true; break;
             case TILE_WALL_TOP_EDGE: tex = assets.wallTopEdgeTexture; isSolid = true; break;
+            case TILE_TREE: {
+              // Tree is a tall sprite (16×32) — render specially
+              // First lay down a floor tile underneath
+              const floorSprite = new Sprite(assets.floorShadowTexture);
+              floorSprite.x = x * ts;
+              floorSprite.y = y * ts;
+              floorSprite.width = ts;
+              floorSprite.height = ts;
+              backgroundLayer.addChild(floorSprite);
+              tilemapSprites.push(floorSprite);
+
+              // Tree sprite — anchored at bottom-center, 16×32, Y-sorted
+              const treeSprite = new Sprite(assets.treeTexture);
+              treeSprite.anchor.set(0.5, 1.0);
+              treeSprite.x = x * ts + ts / 2;
+              treeSprite.y = (y + 1) * ts;
+              treeSprite.width = ts;
+              treeSprite.height = ts * 2;
+              treeSprite.zIndex = (y + 1) * ts;
+              entityLayer.addChild(treeSprite);
+              tilemapSprites.push(treeSprite);
+              continue; // skip normal sprite creation below
+            }
             default: tex = assets.floorTexture; break;
           }
 

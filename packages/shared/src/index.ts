@@ -30,8 +30,9 @@ export {
   TILE_WALL_CORNER_BL,
   TILE_WALL_CORNER_BR,
   TILE_WALL_TOP_EDGE,
+  TILE_TREE,
   MAZE_SIZE,
-  SPAWN_POINTS,
+  computeSpawnPoints,
   generateMaze,
   type TileMapData,
   type SpawnPoint,
@@ -54,6 +55,13 @@ export const PLAYERS_PER_TEAM = 3;
 
 /** Maximum number of teams per room. */
 export const MAX_TEAMS = 3;
+
+/**
+ * Spawn distance from the center hub, measured in maze cell-steps.
+ * All teams spawn at exactly this BFS distance through the maze.
+ * Valid range: 1–12 (center of the 15×15 cell grid is ~7 cells from edges).
+ */
+export const SPAWN_DISTANCE = 10;
 
 /** Maximum players allowed per room (MAX_TEAMS × PLAYERS_PER_TEAM). */
 export const MAX_PLAYERS_PER_ROOM = MAX_TEAMS * PLAYERS_PER_TEAM;

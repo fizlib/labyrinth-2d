@@ -187,15 +187,23 @@ Post-processing passes convert the raw maze output: walls→cliff face, floor ne
 
 ### 5.3 Spawn Points
 
-3 spawn points at maze corners (tile coordinates, center of the 3×3 corner cell):
+Spawn points are **dynamically computed per-room** so that all teams walk the same distance to reach the center hub.
 
-| Index | Cell | Tile Coords | Description |
-|---|---|---|---|
-| 0 | `(0, 0)` | `(2, 2)` | Top-left corner |
-| 1 | `(21, 0)` | `(86, 2)` | Top-right corner |
-| 2 | `(0, 21)` | `(2, 86)` | Bottom-left corner |
+| Property | Value |
+|---|---|
+| **Algorithm** | BFS on the 15×15 cell graph from hub cells |
+| **`SPAWN_DISTANCE`** | Configurable (default: **7** cell-steps). Set in `index.ts`. Valid range: 1–12. |
+| **Selection** | 360° divided into `MAX_TEAMS` angular sectors; one spawn per sector |
+| **Fallback** | Distance widens ±1, ±2, … until enough candidates; corner cells as last resort |
+| **Hub entrances** | 4 (north, south, west, east) — ensures paths exist in all directions |
 
-Server assigns spawns via **team assignment**: each team (0, 1, 2) maps to `SPAWN_POINTS[teamId]`. When a player joins, they are assigned to the first team with fewer than `PLAYERS_PER_TEAM` (3) members. If no team has room, the room is full (max 3 teams × 3 players = 9).
+**How it works:**
+1. After maze generation, `computeSpawnPoints(data, distance, numTeams)` reconstructs cell connectivity from the tile array.
+2. Multi-source BFS floods outward from all hub cells (distance = 0).
+3. Candidate cells at exactly `SPAWN_DISTANCE` are collected.
+4. Candidates are binned into angular sectors (120° each for 3 teams) and the best per sector is selected — preferring exact distance, then closest to sector center.
+
+Server assigns spawns via **team assignment**: each team (0, 1, 2) maps to `spawnPoints[teamId]`. When a player joins, they are assigned to the first team with fewer than `PLAYERS_PER_TEAM` (3) members. If no team has room, the room is full (max 3 teams × 3 players = 9).
 
 ---
 

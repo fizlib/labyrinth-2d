@@ -16,6 +16,7 @@ import {
   TILE_WALL_CORNER_TL, TILE_WALL_CORNER_TR,
   TILE_WALL_CORNER_BL, TILE_WALL_CORNER_BR,
   TILE_WALL_TOP_EDGE,
+  TILE_TREE,
   type TileMapData,
 } from './maps/level1.js';
 
@@ -55,7 +56,8 @@ function isSolidTile(tileX: number, tileY: number, map: TileMapData): boolean {
          tile === TILE_WALL_CORNER_TR ||
          tile === TILE_WALL_CORNER_BL ||
          tile === TILE_WALL_CORNER_BR ||
-         tile === TILE_WALL_TOP_EDGE;
+         tile === TILE_WALL_TOP_EDGE ||
+         tile === TILE_TREE;
 }
 
 export function isPositionValid(x: number, y: number, map: TileMapData): boolean {

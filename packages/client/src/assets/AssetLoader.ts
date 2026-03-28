@@ -20,6 +20,7 @@ import {
   generateCornerBLTexture,
   generateCornerBRTexture,
   generateTopEdgeTexture,
+  generateTreeTexture,
   generatePlayerSpritesheet,
 } from './FallbackTextures';
 
@@ -37,6 +38,7 @@ export interface GameAssets {
   wallCornerBLTexture: Texture;
   wallCornerBRTexture: Texture;
   wallTopEdgeTexture: Texture;
+  treeTexture: Texture;
   /** Per-team animation sets. Access via playerAnimationSets[teamId]. */
   playerAnimationSets: Record<string, Texture[]>[];
 }
@@ -55,6 +57,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let wallCornerBLTexture: Texture;
   let wallCornerBRTexture: Texture;
   let wallTopEdgeTexture: Texture;
+  let treeTexture: Texture;
   const playerAnimationSets: Record<string, Texture[]>[] = [];
 
   try {
@@ -74,8 +77,9 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(160, 0, 16, 16) });
     wallCornerBRTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(176, 0, 16, 16) });
     wallTopEdgeTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(192, 0, 16, 16) });
+    treeTexture = generateTreeTexture(); // Tree is always procedural (tall 16×32 sprite)
 
-    console.info('[Assets] Loaded tiles.png (13 tile types)');
+    console.info('[Assets] Loaded tiles.png (13 tile types + procedural tree)');
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
     // Map existing fallback generators to the new semantic naming
@@ -92,6 +96,7 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture = generateCornerBLTexture();
     wallCornerBRTexture = generateCornerBRTexture();
     wallTopEdgeTexture = generateTopEdgeTexture();
+    treeTexture = generateTreeTexture();
   }
 
   // ── Player spritesheets (128×128 — 8 cols × 4 rows, each frame 16×32) ──
@@ -156,6 +161,7 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture,
     wallCornerBRTexture,
     wallTopEdgeTexture,
+    treeTexture,
     playerAnimationSets,
   };
 }

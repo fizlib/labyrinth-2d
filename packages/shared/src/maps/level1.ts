@@ -75,14 +75,20 @@ export const TILE_WALL_CORNER_BR = 11;
 /** Top horizontal edge (rock rim) of cliff body — solid, Y-sorted. Distinct from WALL_TOP (grassy overhang). */
 export const TILE_WALL_TOP_EDGE = 12;
 
+/** Decorative tree — solid, rendered as a taller sprite on the entity layer. */
+export const TILE_TREE = 13;
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const CELL_SIZE = 6;
+export const CELL_SIZE = 6;
 const WALL_SIZE = 6;
-const CELL_STEP = CELL_SIZE + WALL_SIZE;
-const GRID_CELLS = 15;
+export const CELL_STEP = CELL_SIZE + WALL_SIZE;
+export const GRID_CELLS = 15;
 export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 186
 const TILE_PX = 16;
+
+/** Size of the central hub room in tiles (square). 1.5× the original 9. */
+const HUB_SIZE = 13;
 
 // ── Seeded PRNG (mulberry32) ────────────────────────────────────────────────
 
@@ -178,7 +184,7 @@ function generateMazeData(seed: number): number[] {
   const data = new Array(MAP_SIZE * MAP_SIZE).fill(1);
 
   // ── Central Hub ─────────────────────────────────────────────────────────
-  const hubSize = 9;
+  const hubSize = HUB_SIZE;
   const hubTileX = Math.floor((MAP_SIZE - hubSize) / 2);
   const hubTileY = Math.floor((MAP_SIZE - hubSize) / 2);
 
@@ -321,6 +327,29 @@ function generateMazeData(seed: number): number[] {
     }
   }
 
+  // South entrance
+  {
+    const entranceCx = hubCenterCx;
+    const belowCy = hubBottomCy + 1;
+    if (belowCy < GRID_CELLS) {
+      const { tx, ty } = cellToTile(entranceCx, belowCy);
+      const wallY = ty - WALL_SIZE;
+      for (let wy = 0; wy < WALL_SIZE; wy++) {
+        for (let dx = 0; dx < CELL_SIZE; dx++) {
+          data[(wallY + wy) * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+        }
+      }
+      const hubBottom = hubTileY + hubSize;
+      for (let row = hubBottom - CELL_SIZE; row < wallY; row++) {
+        for (let dx = 0; dx < CELL_SIZE; dx++) {
+          if (row >= 0 && row < MAP_SIZE) {
+            data[row * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+          }
+        }
+      }
+    }
+  }
+
   // ── Post-processing: convert to Stardew-style 2.5D tiles ────────────────
 
   // Step 1: Convert ALL old walls (1) → Wall Interior (4) initially
@@ -429,28 +458,35 @@ function generateMazeData(seed: number): number[] {
     }
   }
 
+  // ── Step 5: Central hub decoration — dirt patch + tree ──────────────────
+  {
+    const hubCx = hubTileX + Math.floor(hubSize / 2);
+    const hubCy = hubTileY + Math.floor(hubSize / 2);
+
+    // Diamond-shaped dirt patch (Manhattan distance <= 3 from center)
+    const DIRT_RADIUS = 3;
+    for (let dy = -DIRT_RADIUS; dy <= DIRT_RADIUS; dy++) {
+      for (let dx = -DIRT_RADIUS; dx <= DIRT_RADIUS; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) <= DIRT_RADIUS) {
+          const tx = hubCx + dx;
+          const ty = hubCy + dy;
+          if (tx >= 0 && tx < MAP_SIZE && ty >= 0 && ty < MAP_SIZE) {
+            data[ty * MAP_SIZE + tx] = TILE_FLOOR_SHADOW;
+          }
+        }
+      }
+    }
+
+    // Tree at the exact center
+    data[hubCy * MAP_SIZE + hubCx] = TILE_TREE;
+  }
+
   return data;
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 export const MAZE_SIZE = MAP_SIZE;
-
-export const SPAWN_POINTS: SpawnPoint[] = (() => {
-  const points: SpawnPoint[] = [];
-  const cornerCells: Array<{ cx: number; cy: number }> = [
-    { cx: 0, cy: 0 },
-    { cx: GRID_CELLS - 1, cy: 0 },
-    { cx: 0, cy: GRID_CELLS - 1 },
-  ];
-
-  for (const cell of cornerCells) {
-    const { tx, ty } = cellToTile(cell.cx, cell.cy);
-    points.push({ x: tx + Math.floor(CELL_SIZE / 2), y: ty + Math.floor(CELL_SIZE / 2) });
-  }
-
-  return points;
-})();
 
 export function generateMaze(seed: number): TileMapData {
   return {
@@ -459,4 +495,189 @@ export function generateMaze(seed: number): TileMapData {
     tileSize: TILE_PX,
     data: generateMazeData(seed),
   };
+}
+
+// ── BFS-Based Equidistant Spawn Point Computation ───────────────────────────
+
+/**
+ * Check whether two adjacent cells (cx1,cy1) ↔ (cx2,cy2) are connected
+ * by inspecting the wall strip between them in the tile data.
+ * Two cells are connected if ANY tile in the wall strip is walkable (floor).
+ */
+function areCellsConnected(
+  data: number[],
+  cx1: number, cy1: number,
+  cx2: number, cy2: number,
+): boolean {
+  const { tx: tx1, ty: ty1 } = cellToTile(cx1, cy1);
+
+  if (cy1 === cy2) {
+    // Horizontal neighbors — check the vertical wall strip between them
+    const wallX = Math.min(tx1, cellToTile(cx2, cy2).tx) + CELL_SIZE;
+    const topY = ty1;
+    for (let wy = 0; wy < CELL_SIZE; wy++) {
+      for (let wx = 0; wx < WALL_SIZE; wx++) {
+        const tile = data[(topY + wy) * MAP_SIZE + (wallX + wx)];
+        if (tile === TILE_FLOOR || tile === TILE_FLOOR_SHADOW) return true;
+      }
+    }
+  } else {
+    // Vertical neighbors — check the horizontal wall strip between them
+    const wallY = Math.min(ty1, cellToTile(cx2, cy2).ty) + CELL_SIZE;
+    const leftX = tx1;
+    for (let wy = 0; wy < WALL_SIZE; wy++) {
+      for (let wx = 0; wx < CELL_SIZE; wx++) {
+        const tile = data[(wallY + wy) * MAP_SIZE + (leftX + wx)];
+        if (tile === TILE_FLOOR || tile === TILE_FLOOR_SHADOW) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Compute equidistant spawn points for `numTeams` teams.
+ *
+ * Algorithm:
+ *   1. Build a cell-level adjacency graph from the generated tile data.
+ *   2. BFS from all hub cells (distance 0) to compute shortest cell-path
+ *      distance to every reachable cell.
+ *   3. Collect candidate cells at the target distance.
+ *   4. Divide 360° into `numTeams` angular sectors around the map center
+ *      and pick the best candidate per sector.
+ *   5. Fallback: if exact distance yields too few candidates, widen ±1, ±2, …
+ *
+ * @param data       Flat tile array from generateMaze
+ * @param distance   Target cell-step distance from hub
+ * @param numTeams   Number of spawn points to generate (default 3)
+ * @returns          Array of SpawnPoint in pixel coordinates
+ */
+export function computeSpawnPoints(
+  data: number[],
+  distance: number,
+  numTeams: number = 3,
+): SpawnPoint[] {
+  // ── 1. Identify hub cells ───────────────────────────────────────────
+  const hubTileX = Math.floor((MAP_SIZE - HUB_SIZE) / 2);
+  const hubTileY = Math.floor((MAP_SIZE - HUB_SIZE) / 2);
+  const hubCells = getHubCells(hubTileX, hubTileY, HUB_SIZE);
+
+  // ── 2. BFS on cell graph ────────────────────────────────────────────
+  const cellDist = new Array(GRID_CELLS * GRID_CELLS).fill(-1);
+
+  const queue: Array<{ cx: number; cy: number }> = [];
+  for (const key of hubCells) {
+    const [cx, cy] = key.split(',').map(Number);
+    cellDist[cy * GRID_CELLS + cx] = 0;
+    queue.push({ cx, cy });
+  }
+
+  let head = 0;
+  while (head < queue.length) {
+    const { cx, cy } = queue[head++];
+    const d = cellDist[cy * GRID_CELLS + cx];
+
+    for (const dir of DIRS) {
+      const nx = cx + dir.dx;
+      const ny = cy + dir.dy;
+      if (nx < 0 || nx >= GRID_CELLS || ny < 0 || ny >= GRID_CELLS) continue;
+      if (cellDist[ny * GRID_CELLS + nx] !== -1) continue; // already visited
+      if (!areCellsConnected(data, cx, cy, nx, ny)) continue;
+
+      cellDist[ny * GRID_CELLS + nx] = d + 1;
+      queue.push({ cx: nx, cy: ny });
+    }
+  }
+
+  // ── 3. Collect candidates at target distance (with fallback) ────────
+  const hubCenterX = MAP_SIZE / 2;
+  const hubCenterY = MAP_SIZE / 2;
+
+  let candidates: Array<{ cx: number; cy: number; angle: number }> = [];
+
+  // Try exact distance first, then widen progressively
+  for (let spread = 0; spread <= distance && candidates.length < numTeams; spread++) {
+    candidates = [];
+    for (let cy = 0; cy < GRID_CELLS; cy++) {
+      for (let cx = 0; cx < GRID_CELLS; cx++) {
+        const d = cellDist[cy * GRID_CELLS + cx];
+        if (d === -1) continue; // unreachable
+        if (d < distance - spread || d > distance + spread) continue;
+        if (hubCells.has(`${cx},${cy}`)) continue; // skip hub cells
+
+        const { tx, ty } = cellToTile(cx, cy);
+        const pixX = tx + CELL_SIZE / 2;
+        const pixY = ty + CELL_SIZE / 2;
+        const angle = Math.atan2(pixY - hubCenterY, pixX - hubCenterX);
+        candidates.push({ cx, cy, angle });
+      }
+    }
+  }
+
+  // ── 4. Select one candidate per angular sector ──────────────────────
+  const sectorSize = (2 * Math.PI) / numTeams;
+  const picked: SpawnPoint[] = [];
+
+  for (let i = 0; i < numTeams; i++) {
+    // Sector center angle: evenly spaced, starting from -PI (left)
+    const sectorCenter = -Math.PI + sectorSize * (i + 0.5);
+    const sectorMin = sectorCenter - sectorSize / 2;
+    const sectorMax = sectorCenter + sectorSize / 2;
+
+    // Normalize angle difference helper
+    const angleDiff = (a: number, center: number) => {
+      let diff = a - center;
+      while (diff > Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      return Math.abs(diff);
+    };
+
+    // Filter candidates within this sector
+    const inSector = candidates.filter((c) => {
+      const diff = angleDiff(c.angle, sectorCenter);
+      return diff <= sectorSize / 2;
+    });
+
+    // Pick the candidate closest to the exact target distance,
+    // breaking ties by closest to sector center angle
+    let best = inSector[0] ?? candidates[0]; // fallback to any candidate
+    if (inSector.length > 1) {
+      best = inSector.reduce((a, b) => {
+        const aDist = Math.abs(cellDist[a.cy * GRID_CELLS + a.cx] - distance);
+        const bDist = Math.abs(cellDist[b.cy * GRID_CELLS + b.cx] - distance);
+        if (aDist !== bDist) return aDist < bDist ? a : b;
+        return angleDiff(a.angle, sectorCenter) < angleDiff(b.angle, sectorCenter) ? a : b;
+      });
+    }
+
+    if (best) {
+      const { tx, ty } = cellToTile(best.cx, best.cy);
+      picked.push({
+        x: tx + Math.floor(CELL_SIZE / 2),
+        y: ty + Math.floor(CELL_SIZE / 2),
+      });
+      // Remove this candidate so other sectors don't reuse it
+      candidates = candidates.filter((c) => c.cx !== best.cx || c.cy !== best.cy);
+    }
+  }
+
+  // ── 5. Fallback if we still don't have enough points ────────────────
+  // Use corner cells as last resort
+  const fallbackCorners = [
+    { cx: 0, cy: 0 },
+    { cx: GRID_CELLS - 1, cy: 0 },
+    { cx: 0, cy: GRID_CELLS - 1 },
+    { cx: GRID_CELLS - 1, cy: GRID_CELLS - 1 },
+  ];
+  let fi = 0;
+  while (picked.length < numTeams && fi < fallbackCorners.length) {
+    const fc = fallbackCorners[fi++];
+    const { tx, ty } = cellToTile(fc.cx, fc.cy);
+    picked.push({
+      x: tx + Math.floor(CELL_SIZE / 2),
+      y: ty + Math.floor(CELL_SIZE / 2),
+    });
+  }
+
+  return picked.slice(0, numTeams);
 }

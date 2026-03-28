@@ -343,6 +343,59 @@ export function generateCornerBRTexture(): Texture {
   return canvasToTexture(canvas);
 }
 
+// ── Tree Texture (16×32 — tall sprite, anchored at bottom-center) ───────────
+
+export function generateTreeTexture(): Texture {
+  const TREE_W = 16;
+  const TREE_H = 32;
+  const [canvas, ctx] = makeCanvas(TREE_W, TREE_H);
+
+  // Clear with transparency
+  ctx.clearRect(0, 0, TREE_W, TREE_H);
+
+  // Trunk (centered, 4px wide, 10px tall at bottom)
+  ctx.fillStyle = '#5a3a1a';
+  ctx.fillRect(6, 22, 4, 10);
+  // Bark detail
+  ctx.fillStyle = '#4a2a0a';
+  ctx.fillRect(7, 24, 1, 6);
+  ctx.fillStyle = '#6a4a2a';
+  ctx.fillRect(9, 23, 1, 4);
+
+  // Canopy — layered circles of green for a lush look
+  // Bottom canopy layer (widest)
+  ctx.fillStyle = '#1a5a0a';
+  ctx.fillRect(1, 14, 14, 10);
+  // Middle canopy layer
+  ctx.fillStyle = '#2a7a1a';
+  ctx.fillRect(2, 8, 12, 12);
+  // Top canopy layer
+  ctx.fillStyle = '#3a8a2a';
+  ctx.fillRect(3, 4, 10, 10);
+  // Crown
+  ctx.fillStyle = '#4a9a3a';
+  ctx.fillRect(5, 1, 6, 6);
+
+  // Canopy highlights (sunlit spots)
+  ctx.fillStyle = '#5aaa4a';
+  ctx.fillRect(4, 6, 3, 3);
+  ctx.fillRect(9, 3, 2, 3);
+  ctx.fillRect(6, 11, 4, 2);
+
+  // Canopy shadow details
+  ctx.fillStyle = '#0a4a00';
+  ctx.fillRect(3, 18, 3, 3);
+  ctx.fillRect(10, 16, 3, 4);
+  ctx.fillRect(6, 20, 2, 2);
+
+  // Small highlight dots
+  setPixel(ctx, 5, 2, '#6aba5a');
+  setPixel(ctx, 11, 7, '#6aba5a');
+  setPixel(ctx, 3, 12, '#5aaa4a');
+
+  return canvasToTexture(canvas);
+}
+
 // ── Player Spritesheet (128×128 — 8 cols × 4 rows, each frame 16×32) ───────
 // Layout: 4 directions × (6 walk frames + 2 idle frames)
 // Cols 0-5: walk frames, Cols 6-7: idle frames

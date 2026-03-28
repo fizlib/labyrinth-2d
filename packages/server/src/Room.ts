@@ -2,8 +2,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Room — Manages one maze instance and its connected players.
 //
-// Step 7 changes:
-//   - Players spawn at one of 3 SPAWN_POINTS using round-robin assignment.
+// Spawn system:
+//   - Teams spawn at dynamically computed equidistant points (BFS from hub).
+//   - Distance configurable via SPAWN_DISTANCE constant.
 //   - Tile coordinates converted to pixel coordinates (tile.x * tileSize).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -17,11 +18,13 @@ import {
   PLAYERS_PER_TEAM,
   MAX_TEAMS,
   TILE_SIZE,
+  SPAWN_DISTANCE,
   generateMaze,
-  SPAWN_POINTS,
+  computeSpawnPoints,
   applyInputWithCollision,
   type FacingDirection,
   type TileMapData,
+  type SpawnPoint,
   type GameState,
   type PlayerInfo,
   type PlayerInputMessage,
@@ -62,15 +65,25 @@ export class Room {
   /** The generated maze tile map for this room. */
   private readonly map: TileMapData;
 
+  /** Dynamically computed equidistant spawn points (one per team). */
+  private readonly spawnPoints: SpawnPoint[];
+
   constructor(id: string) {
     this.id = id;
     this.mapSeed = Math.floor(Math.random() * 2147483647);
     this.map = generateMaze(this.mapSeed);
+    this.spawnPoints = computeSpawnPoints(this.map.data, SPAWN_DISTANCE, MAX_TEAMS);
     this.state = {
       tick: 0,
       players: [],
     };
-    console.info(`[Room:${this.id}] Created with maze seed ${this.mapSeed}`);
+    console.info(
+      `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
+    );
+    for (let i = 0; i < this.spawnPoints.length; i++) {
+      const sp = this.spawnPoints[i];
+      console.info(`  Team ${i} spawn: tile (${sp.x}, ${sp.y}) → px (${(sp.x + 0.5) * TILE_SIZE}, ${(sp.y + 1) * TILE_SIZE})`);
+    }
   }
 
   // ── Player Management ─────────────────────────────────────────────────
@@ -106,8 +119,8 @@ export class Room {
     // but fall back to team 0 just in case.
     if (assignedTeam === -1) assignedTeam = 0;
 
-    // Each team spawns at the corresponding SPAWN_POINT
-    const spawnTile = SPAWN_POINTS[assignedTeam];
+    // Each team spawns at its corresponding dynamic spawn point
+    const spawnTile = this.spawnPoints[assignedTeam] ?? this.spawnPoints[0];
     // Player x,y = bottom-center of sprite (feet position)
     const spawnX = (spawnTile.x + 0.5) * TILE_SIZE;
     const spawnY = (spawnTile.y + 1) * TILE_SIZE;
