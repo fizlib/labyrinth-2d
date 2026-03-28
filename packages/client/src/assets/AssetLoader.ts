@@ -77,9 +77,8 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(160, 0, 16, 16) });
     wallCornerBRTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(176, 0, 16, 16) });
     wallTopEdgeTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(192, 0, 16, 16) });
-    treeTexture = generateTreeTexture(); // Tree is always procedural (tall 16×32 sprite)
 
-    console.info('[Assets] Loaded tiles.png (13 tile types + procedural tree)');
+    console.info('[Assets] Loaded tiles.png (13 tile types)');
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
     // Map existing fallback generators to the new semantic naming
@@ -96,6 +95,15 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture = generateCornerBLTexture();
     wallCornerBRTexture = generateCornerBRTexture();
     wallTopEdgeTexture = generateTopEdgeTexture();
+  }
+
+  // ── Tree asset (separate from tilesheet — different dimensions) ──────────
+  try {
+    treeTexture = await Assets.load<Texture>('assets/oak-tree.png');
+    treeTexture.source.scaleMode = 'nearest';
+    console.info(`[Assets] Loaded oak-tree.png (${treeTexture.width}×${treeTexture.height})`);
+  } catch {
+    console.info('[Assets] oak-tree.png not found — using fallback tree');
     treeTexture = generateTreeTexture();
   }
 

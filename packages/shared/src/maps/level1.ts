@@ -458,24 +458,10 @@ function generateMazeData(seed: number): number[] {
     }
   }
 
-  // ── Step 5: Central hub decoration — dirt patch + tree ──────────────────
+  // ── Step 5: Central hub decoration — tree ────────────────────────────────
   {
     const hubCx = hubTileX + Math.floor(hubSize / 2);
     const hubCy = hubTileY + Math.floor(hubSize / 2);
-
-    // Diamond-shaped dirt patch (Manhattan distance <= 3 from center)
-    const DIRT_RADIUS = 3;
-    for (let dy = -DIRT_RADIUS; dy <= DIRT_RADIUS; dy++) {
-      for (let dx = -DIRT_RADIUS; dx <= DIRT_RADIUS; dx++) {
-        if (Math.abs(dx) + Math.abs(dy) <= DIRT_RADIUS) {
-          const tx = hubCx + dx;
-          const ty = hubCy + dy;
-          if (tx >= 0 && tx < MAP_SIZE && ty >= 0 && ty < MAP_SIZE) {
-            data[ty * MAP_SIZE + tx] = TILE_FLOOR_SHADOW;
-          }
-        }
-      }
-    }
 
     // Tree at the exact center
     data[hubCy * MAP_SIZE + hubCx] = TILE_TREE;

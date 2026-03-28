@@ -31,6 +31,7 @@ import type { GameState, TileMapData, FacingDirection } from '@labyrinth/shared'
 import { NetworkManager } from './net/NetworkManager';
 import { SnapshotBuffer, INTERPOLATION_DELAY } from './net/SnapshotBuffer';
 import { loadAssets, type GameAssets } from './assets/AssetLoader';
+import { DebugSettings } from './config/DebugSettings';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 
@@ -74,6 +75,9 @@ let localX = 0;
 let localY = 0;
 let localPlayerInitialized = false;
 let localFacing: FacingDirection = 'down';
+
+/** When true, server reconciliation is skipped so debug teleport position sticks. */
+let debugTeleportActive = false;
 
 let currentMap: TileMapData | null = null;
 const snapshotBuffer = new SnapshotBuffer();
@@ -191,6 +195,7 @@ function deriveFacingFromKeys(): FacingDirection {
 function createDebugUI(): void {
   const debugDiv = document.createElement('div');
   debugDiv.id = 'debug-ui';
+  const flags = DebugSettings.getFlags();
   debugDiv.innerHTML = `
     <h1>🏰 Labyrinth 2D — Network Debug</h1>
     <div class="status" id="connection-status">⏳ Connecting...</div>
@@ -210,8 +215,42 @@ function createDebugUI(): void {
     </div>
     <h2>Players</h2>
     <ul id="player-list"></ul>
+    <h2>Debug Settings</h2>
+    <div class="debug-toggles">
+      <label class="debug-toggle" id="toggle-master">
+        <input type="checkbox" ${flags.masterEnabled ? 'checked' : ''} data-flag="masterEnabled">
+        <span>Master Enable</span>
+      </label>
+      <label class="debug-toggle" id="toggle-scroll-zoom">
+        <input type="checkbox" ${flags.scrollZoom ? 'checked' : ''} data-flag="scrollZoom">
+        <span>Scroll Zoom</span>
+      </label>
+      <label class="debug-toggle" id="toggle-zoom-toggle">
+        <input type="checkbox" ${flags.zoomToggle ? 'checked' : ''} data-flag="zoomToggle">
+        <span>Zoom Toggle (−)</span>
+      </label>
+      <label class="debug-toggle" id="toggle-click-teleport">
+        <input type="checkbox" ${flags.clickTeleport ? 'checked' : ''} data-flag="clickTeleport">
+        <span>Click Teleport</span>
+      </label>
+    </div>
   `;
   document.body.appendChild(debugDiv);
+}
+
+function setupDebugToggles(): void {
+  const debugUI = document.getElementById('debug-ui');
+  if (!debugUI) return;
+
+  // Allow pointer events on the toggles area
+  debugUI.style.pointerEvents = 'auto';
+
+  debugUI.addEventListener('change', (e: Event) => {
+    const target = e.target as HTMLInputElement;
+    const flag = target.dataset.flag as keyof ReturnType<typeof DebugSettings.getFlags>;
+    if (!flag) return;
+    DebugSettings.setFlag(flag, target.checked);
+  });
 }
 
 function updateDebugUI(state: GameState, playerId: string | null): void {
@@ -281,7 +320,13 @@ async function main(): Promise<void> {
   const ZOOM_STEP = 0.05;
   let zoomLevel = MAX_ZOOM;
 
+  // Zoom-toggle state: cycles default → zoomed-out → zoomed-in
+  type ZoomToggleState = 'default' | 'zoomed-out' | 'zoomed-in';
+  let zoomToggleState: ZoomToggleState = 'default';
+  const savedZoomBeforeToggle = zoomLevel;
+
   createDebugUI();
+  setupDebugToggles();
   const statusEl = document.getElementById('connection-status');
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
@@ -384,9 +429,10 @@ async function main(): Promise<void> {
             case TILE_WALL_CORNER_BR: tex = assets.wallCornerBRTexture; isSolid = true; break;
             case TILE_WALL_TOP_EDGE: tex = assets.wallTopEdgeTexture; isSolid = true; break;
             case TILE_TREE: {
-              // Tree is a tall sprite (16×32) — render specially
-              // First lay down a floor tile underneath
-              const floorSprite = new Sprite(assets.floorShadowTexture);
+              // Tree sprite rendered at native pixel size (e.g. 80×86)
+              // Collision is only on this single tile (trunk base)
+              // First lay down a dirt tile underneath
+              const floorSprite = new Sprite(assets.floorTexture);
               floorSprite.x = x * ts;
               floorSprite.y = y * ts;
               floorSprite.width = ts;
@@ -394,13 +440,14 @@ async function main(): Promise<void> {
               backgroundLayer.addChild(floorSprite);
               tilemapSprites.push(floorSprite);
 
-              // Tree sprite — anchored at bottom-center, 16×32, Y-sorted
-              const treeSprite = new Sprite(assets.treeTexture);
+              // Tree sprite — anchored at bottom-center, native size, Y-sorted
+              const treeTex = assets.treeTexture;
+              const treeSprite = new Sprite(treeTex);
               treeSprite.anchor.set(0.5, 1.0);
-              treeSprite.x = x * ts + ts / 2;
-              treeSprite.y = (y + 1) * ts;
-              treeSprite.width = ts;
-              treeSprite.height = ts * 2;
+              treeSprite.x = x * ts + ts / 2;  // center on the tile
+              treeSprite.y = (y + 1) * ts;      // bottom of the tile
+              treeSprite.width = treeTex.width;  // native width (80)
+              treeSprite.height = treeTex.height; // native height (86)
               treeSprite.zIndex = (y + 1) * ts;
               entityLayer.addChild(treeSprite);
               tilemapSprites.push(treeSprite);
@@ -461,17 +508,22 @@ async function main(): Promise<void> {
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
         const data = ensurePlayerSprite(localPlayerData.id, localPlayerData.spriteIndex);
-        localX = localPlayerData.x;
-        localY = localPlayerData.y;
 
-        pendingInputs = pendingInputs.filter(
-          (input) => input.sequenceNumber > localPlayerData.lastProcessedInput,
-        );
+        // Skip entire server reconciliation while a debug teleport is active —
+        // the server doesn't know about the teleport so its position is stale.
+        if (!debugTeleportActive) {
+          localX = localPlayerData.x;
+          localY = localPlayerData.y;
 
-        for (const input of pendingInputs) {
-          const result = applyInputWithCollision(localX, localY, input, input.dt, currentMap!);
-          localX = result.x;
-          localY = result.y;
+          pendingInputs = pendingInputs.filter(
+            (input) => input.sequenceNumber > localPlayerData.lastProcessedInput,
+          );
+
+          for (const input of pendingInputs) {
+            const result = applyInputWithCollision(localX, localY, input, input.dt, currentMap!);
+            localX = result.x;
+            localY = result.y;
+          }
         }
 
         data.sprite.x = Math.round(localX);
@@ -592,9 +644,69 @@ async function main(): Promise<void> {
   // ── Mousewheel Zoom (debug) ───────────────────────────────────────────
   app.canvas.addEventListener('wheel', (e: WheelEvent) => {
     e.preventDefault();
+    if (!DebugSettings.isEnabled('scrollZoom')) return;
     if (e.deltaY < 0) zoomLevel = Math.min(MAX_ZOOM, zoomLevel + ZOOM_STEP);
     else zoomLevel = Math.max(MIN_ZOOM, zoomLevel - ZOOM_STEP);
+    zoomToggleState = 'default'; // manual scroll resets the toggle cycle
   }, { passive: false });
+
+  // ── Minus-key Zoom Toggle (debug) ─────────────────────────────────────
+  // Cycles:  default → fully zoomed-out → fully zoomed-in → default
+  window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.code !== 'Minus' && e.code !== 'NumpadSubtract') return;
+    if (!DebugSettings.isEnabled('zoomToggle')) return;
+
+    switch (zoomToggleState) {
+      case 'default':
+        zoomLevel = MIN_ZOOM;
+        zoomToggleState = 'zoomed-out';
+        break;
+      case 'zoomed-out':
+        zoomLevel = MAX_ZOOM;
+        zoomToggleState = 'zoomed-in';
+        break;
+      case 'zoomed-in':
+        zoomLevel = savedZoomBeforeToggle;
+        zoomToggleState = 'default';
+        break;
+    }
+  });
+
+  // ── Click-to-Teleport (debug) ─────────────────────────────────────────
+  app.canvas.addEventListener('click', (e: MouseEvent) => {
+    if (!DebugSettings.isEnabled('clickTeleport')) return;
+    if (!localPlayerInitialized || !currentMap) return;
+
+    // Convert screen click → internal resolution → world coordinates
+    const rect = app.canvas.getBoundingClientRect();
+    const scaleX = INTERNAL_WIDTH / rect.width;
+    const scaleY = INTERNAL_HEIGHT / rect.height;
+
+    const screenX = (e.clientX - rect.left) * scaleX;
+    const screenY = (e.clientY - rect.top) * scaleY;
+
+    // Invert camera transform: worldPos = (screenPos - container.position) / zoom
+    const worldX = (screenX - worldContainer.x) / zoomLevel;
+    const worldY = (screenY - worldContainer.y) / zoomLevel;
+
+    // Clamp to map bounds
+    const clampedX = Math.max(0, Math.min(mapPixelW, worldX));
+    const clampedY = Math.max(0, Math.min(mapPixelH, worldY));
+
+    localX = clampedX;
+    localY = clampedY;
+    debugTeleportActive = true; // prevent server reconciliation from snapping back
+
+    // Immediately update sprite
+    const localData = playerSprites.get(net.playerId!);
+    if (localData) {
+      localData.sprite.x = Math.round(localX);
+      localData.sprite.y = Math.round(localY);
+      localData.sprite.zIndex = Math.round(localY) + 1;
+    }
+
+    console.info(`[Debug] Teleported to (${Math.round(clampedX)}, ${Math.round(clampedY)})`);
+  });
 
   // ── Keyboard Input ────────────────────────────────────────────────────
   window.addEventListener('keydown', (e: KeyboardEvent) => {

@@ -188,3 +188,73 @@ canvas {
   font-weight: bold;
   margin-left: auto;
 }
+
+/* ── Debug Settings Toggles ────────────────────────────────────────────── */
+
+.debug-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #2a2a4a;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  color: #c8d6e5;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  pointer-events: auto;
+}
+
+.debug-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: #3a3a6a;
+}
+
+.debug-toggle input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #555;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.debug-toggle input[type="checkbox"]:checked {
+  background: #6a5acd;
+  border-color: #7b6bde;
+}
+
+.debug-toggle input[type="checkbox"]:checked::after {
+  content: '✓';
+  position: absolute;
+  top: -1px;
+  left: 1px;
+  font-size: 0.65rem;
+  color: #fff;
+  font-weight: bold;
+}
+
+.debug-toggle span {
+  user-select: none;
+}
+
+/* Master toggle gets a subtle accent */
+#toggle-master {
+  border-color: #4a3a6a;
+}
+
+#toggle-master span {
+  color: #f0e68c;
+  font-weight: bold;
+}
