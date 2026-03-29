@@ -418,7 +418,18 @@ async function main(): Promise<void> {
           let isSolid = false;
 
           switch (tileId) {
-            case TILE_FLOOR: tex = assets.floorTexture; break;
+            case TILE_FLOOR: {
+              // Deterministic grass variation based on tile position.
+              // Hash: simple mix of x,y coords → stable per-tile variant.
+              const h = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+              // 0-46: variant 0 (47%), 47-93: variant 1 (47%)
+              // 94-96: flower variant 2 (3%), 97-99: flower variant 3 (3%)
+              if (h < 47) tex = assets.grassVariantTextures[0];
+              else if (h < 94) tex = assets.grassVariantTextures[1];
+              else if (h < 97) tex = assets.grassVariantTextures[2];
+              else tex = assets.grassVariantTextures[3];
+              break;
+            }
             case TILE_FLOOR_SHADOW: tex = assets.floorShadowTexture; break;
             case TILE_WALL_FACE: tex = assets.wallFaceTexture; isSolid = true; break;
             case TILE_WALL_TOP: tex = assets.wallTopTexture; isSolid = true; break;
@@ -434,8 +445,13 @@ async function main(): Promise<void> {
             case TILE_TREE: {
               // Tree sprite rendered at native pixel size (e.g. 80×86)
               // Collision is only on this single tile (trunk base)
-              // First lay down a dirt tile underneath
-              const floorSprite = new Sprite(assets.floorTexture);
+              // First lay down a grass variant tile underneath
+              const th = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+              const grassTex = th < 47 ? assets.grassVariantTextures[0]
+                : th < 94 ? assets.grassVariantTextures[1]
+                : th < 97 ? assets.grassVariantTextures[2]
+                : assets.grassVariantTextures[3];
+              const floorSprite = new Sprite(grassTex);
               floorSprite.x = x * ts;
               floorSprite.y = y * ts;
               floorSprite.width = ts;
@@ -456,7 +472,7 @@ async function main(): Promise<void> {
               tilemapSprites.push(treeSprite);
               continue; // skip normal sprite creation below
             }
-            default: tex = assets.floorTexture; break;
+            default: tex = assets.grassVariantTextures[0]; break;
           }
 
           const sprite = new Sprite(tex);

@@ -38,6 +38,8 @@ export interface GameAssets {
   wallCornerBLTexture: Texture;
   wallCornerBRTexture: Texture;
   wallTopEdgeTexture: Texture;
+  /** 4 grass variant textures: [0-1] plain grass, [2-3] flower grass (rarer). */
+  grassVariantTextures: Texture[];
   treeTexture: Texture;
   /** Per-team animation sets. Access via playerAnimationSets[teamId]. */
   playerAnimationSets: Record<string, Texture[]>[];
@@ -57,6 +59,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let wallCornerBLTexture: Texture;
   let wallCornerBRTexture: Texture;
   let wallTopEdgeTexture: Texture;
+  let grassVariantTextures: Texture[] = [];
   let treeTexture: Texture;
   const playerAnimationSets: Record<string, Texture[]>[] = [];
 
@@ -78,7 +81,14 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBRTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(176, 0, 16, 16) });
     wallTopEdgeTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(192, 0, 16, 16) });
 
-    console.info('[Assets] Loaded tiles.png (13 tile types)');
+    // 4 grass variant textures at positions 13–16 (208–272 px)
+    for (let i = 0; i < 4; i++) {
+      grassVariantTextures.push(
+        new Texture({ source: tilesheet.source, frame: new Rectangle(208 + i * 16, 0, 16, 16) }),
+      );
+    }
+
+    console.info('[Assets] Loaded tiles.png (17 tile types)');
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
     // Map existing fallback generators to the new semantic naming
@@ -95,6 +105,8 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture = generateCornerBLTexture();
     wallCornerBRTexture = generateCornerBRTexture();
     wallTopEdgeTexture = generateTopEdgeTexture();
+    // Fallback: reuse the same grass texture for all variants
+    grassVariantTextures = [floorTexture, floorTexture, floorTexture, floorTexture];
   }
 
   // ── Tree asset (separate from tilesheet — different dimensions) ──────────
@@ -169,6 +181,7 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture,
     wallCornerBRTexture,
     wallTopEdgeTexture,
+    grassVariantTextures,
     treeTexture,
     playerAnimationSets,
   };
