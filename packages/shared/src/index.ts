@@ -31,6 +31,9 @@ export {
   TILE_WALL_CORNER_BR,
   TILE_WALL_TOP_EDGE,
   TILE_TREE,
+  TILE_RUNESTONE_1,
+  TILE_RUNESTONE_2,
+  TILE_RUNESTONE_3,
   MAZE_SIZE,
   computeSpawnPoints,
   generateMaze,
@@ -88,11 +91,14 @@ export enum MessageType {
   // ── Client → Server ──
   JoinRoom = 'JOIN_ROOM',
   PlayerInput = 'PLAYER_INPUT',
+  ActivateRunestone = 'ACTIVATE_RUNESTONE',
+  DebugTeleport = 'DEBUG_TELEPORT',
 
   // ── Server → Client ──
   RoomJoined = 'ROOM_JOINED',
   TickUpdate = 'TICK_UPDATE',
   PlayerLeft = 'PLAYER_LEFT',
+  RunestoneActivated = 'RUNESTONE_ACTIVATED',
   Error = 'ERROR',
 }
 
@@ -111,6 +117,18 @@ export interface PlayerInputMessage {
   down: boolean;
   left: boolean;
   right: boolean;
+}
+
+export interface ActivateRunestoneMessage {
+  type: MessageType.ActivateRunestone;
+  /** Runestone index: 0, 1, or 2. */
+  runestoneIndex: number;
+}
+
+export interface DebugTeleportMessage {
+  type: MessageType.DebugTeleport;
+  x: number;
+  y: number;
 }
 
 // ── Server → Client Messages ────────────────────────────────────────────────
@@ -149,10 +167,29 @@ export interface PlayerLeftMessage {
   playerId: string;
 }
 
+export interface RunestoneActivatedMessage {
+  type: MessageType.RunestoneActivated;
+  /** Index of the activated runestone (0, 1, or 2). */
+  runestoneIndex: number;
+}
+
 export interface ErrorMessage {
   type: MessageType.Error;
   code: string;
   message: string;
+}
+
+// ── Runestone State ─────────────────────────────────────────────────────────
+
+export interface RunestoneInfo {
+  /** Runestone index (0, 1, or 2). */
+  index: number;
+  /** Tile X coordinate. */
+  tileX: number;
+  /** Tile Y coordinate. */
+  tileY: number;
+  /** Whether this runestone has been activated. */
+  activated: boolean;
 }
 
 // ── Game State ──────────────────────────────────────────────────────────────
@@ -160,14 +197,16 @@ export interface ErrorMessage {
 export interface GameState {
   tick: number;
   players: PlayerInfo[];
+  runestones: RunestoneInfo[];
 }
 
 // ── Union Types ─────────────────────────────────────────────────────────────
 
-export type ClientToServerMessage = JoinRoomMessage | PlayerInputMessage;
+export type ClientToServerMessage = JoinRoomMessage | PlayerInputMessage | ActivateRunestoneMessage | DebugTeleportMessage;
 
 export type ServerToClientMessage =
   | RoomJoinedMessage
   | TickUpdateMessage
   | PlayerLeftMessage
+  | RunestoneActivatedMessage
   | ErrorMessage;

@@ -52,6 +52,8 @@ export interface GameAssets {
   shadowCornerTexture: Texture;
   /** Per-team animation sets. Access via playerAnimationSets[teamId]. */
   playerAnimationSets: Record<string, Texture[]>[];
+  /** Runestone textures: 3 pairs of [inactive, active]. Access via runestoneTextures[index][0|1]. */
+  runestoneTextures: [Texture, Texture][];
 }
 
 export async function loadAssets(): Promise<GameAssets> {
@@ -74,6 +76,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let shadowLeftTexture: Texture;
   let shadowCornerTexture: Texture;
   const playerAnimationSets: Record<string, Texture[]>[] = [];
+  let runestoneTextures: [Texture, Texture][] = [];
 
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
@@ -195,6 +198,54 @@ export async function loadAssets(): Promise<GameAssets> {
     }
   }
 
+  // ── Runestone spritesheet (96×32 — 6 cols × 1 row, each frame 16×32) ──────
+  // Layout: [inactive0, active0, inactive1, active1, inactive2, active2]
+  try {
+    const rsSheet = await Assets.load<Texture>('assets/runestones.png');
+    rsSheet.source.scaleMode = 'nearest';
+
+    runestoneTextures = [];
+    for (let i = 0; i < 3; i++) {
+      const inactive = new Texture({
+        source: rsSheet.source,
+        frame: new Rectangle(i * 2 * 16, 0, 16, 32),
+      });
+      const active = new Texture({
+        source: rsSheet.source,
+        frame: new Rectangle((i * 2 + 1) * 16, 0, 16, 32),
+      });
+      runestoneTextures.push([inactive, active]);
+    }
+    console.info('[Assets] Loaded runestones.png (3 pairs)');
+  } catch {
+    console.info('[Assets] runestones.png not found — using fallback runestone textures');
+    // Procedural fallback: simple colored rectangles
+    runestoneTextures = [];
+    const colors = ['#6a6a8a', '#7a5a4a', '#5a7a5a'];
+    for (let i = 0; i < 3; i++) {
+      const makeFallback = (color: string, glow: boolean): Texture => {
+        const c = document.createElement('canvas');
+        c.width = 16;
+        c.height = 32;
+        const ctx = c.getContext('2d')!;
+        ctx.imageSmoothingEnabled = false;
+        ctx.clearRect(0, 0, 16, 32);
+        // Stone body
+        ctx.fillStyle = color;
+        ctx.fillRect(4, 4, 8, 26);
+        ctx.fillRect(3, 8, 10, 18);
+        if (glow) {
+          ctx.fillStyle = '#44ff88';
+          ctx.fillRect(6, 10, 4, 4);
+        }
+        const tex = Texture.from(c);
+        tex.source.scaleMode = 'nearest';
+        return tex;
+      };
+      runestoneTextures.push([makeFallback(colors[i], false), makeFallback(colors[i], true)]);
+    }
+  }
+
   return {
     floorTexture,
     floorShadowTexture,
@@ -215,5 +266,6 @@ export async function loadAssets(): Promise<GameAssets> {
     shadowLeftTexture,
     shadowCornerTexture,
     playerAnimationSets,
+    runestoneTextures,
   };
 }

@@ -78,6 +78,15 @@ export const TILE_WALL_TOP_EDGE = 12;
 /** Decorative tree — solid, rendered as a taller sprite on the entity layer. */
 export const TILE_TREE = 13;
 
+/** Runestone 1 (Obelisk) — solid, 16×32 sprite, interactive. */
+export const TILE_RUNESTONE_1 = 14;
+
+/** Runestone 2 (Shrine) — solid, 16×32 sprite, interactive. */
+export const TILE_RUNESTONE_2 = 15;
+
+/** Runestone 3 (Jagged) — solid, 16×32 sprite, interactive. */
+export const TILE_RUNESTONE_3 = 16;
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 export const CELL_SIZE = 6;
@@ -441,13 +450,18 @@ function generateMazeData(seed: number): number[] {
 
   // (Step 4 removed — shadows are now handled client-side via directional overlays)
 
-  // ── Step 5: Central hub decoration — tree ────────────────────────────────
+  // ── Step 5: Central hub decoration — tree + runestones ───────────────────
   {
     const hubCx = hubTileX + Math.floor(hubSize / 2);
     const hubCy = hubTileY + Math.floor(hubSize / 2);
 
     // Tree at the exact center
     data[hubCy * MAP_SIZE + hubCx] = TILE_TREE;
+
+    // 3 runestones in a semi-circle in front of (below) the tree
+    data[(hubCy + 3) * MAP_SIZE + (hubCx - 2)] = TILE_RUNESTONE_1; // obelisk — left
+    data[(hubCy + 4) * MAP_SIZE + hubCx]       = TILE_RUNESTONE_2; // shrine  — center
+    data[(hubCy + 3) * MAP_SIZE + (hubCx + 2)] = TILE_RUNESTONE_3; // jagged  — right
   }
 
   return data;

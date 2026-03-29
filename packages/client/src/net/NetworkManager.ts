@@ -13,6 +13,8 @@ import {
   type GameState,
   type JoinRoomMessage,
   type PlayerInputMessage,
+  type ActivateRunestoneMessage,
+  type DebugTeleportMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -21,6 +23,7 @@ export interface NetworkCallbacks {
   onRoomJoined: (roomId: string, playerId: string, mapSeed: number, gameState: GameState) => void;
   onTickUpdate: (gameState: GameState) => void;
   onPlayerLeft: (playerId: string) => void;
+  onRunestoneActivated: (runestoneIndex: number) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
 }
@@ -124,6 +127,10 @@ export class NetworkManager {
         this.callbacks.onPlayerLeft(msg.playerId);
         break;
 
+      case MessageType.RunestoneActivated:
+        this.callbacks.onRunestoneActivated(msg.runestoneIndex);
+        break;
+
       case MessageType.Error:
         this.callbacks.onError(msg.code, msg.message);
         break;
@@ -153,6 +160,25 @@ export class NetworkManager {
       down,
       left,
       right,
+    };
+    this.send(msg);
+  }
+
+  /** Send a runestone activation request to the server. */
+  sendActivateRunestone(runestoneIndex: number): void {
+    const msg: ActivateRunestoneMessage = {
+      type: MessageType.ActivateRunestone,
+      runestoneIndex,
+    };
+    this.send(msg);
+  }
+
+  /** Send a debug teleport position to the server. */
+  sendDebugTeleport(x: number, y: number): void {
+    const msg: DebugTeleportMessage = {
+      type: MessageType.DebugTeleport,
+      x,
+      y,
     };
     this.send(msg);
   }

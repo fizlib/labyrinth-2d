@@ -19,6 +19,9 @@ import {
   MAX_TEAMS,
   TILE_SIZE,
   SPAWN_DISTANCE,
+  TILE_RUNESTONE_1,
+  TILE_RUNESTONE_2,
+  TILE_RUNESTONE_3,
   generateMaze,
   computeSpawnPoints,
   applyInputWithCollision,
@@ -27,10 +30,14 @@ import {
   type SpawnPoint,
   type GameState,
   type PlayerInfo,
+  type RunestoneInfo,
   type PlayerInputMessage,
+  type ActivateRunestoneMessage,
+  type DebugTeleportMessage,
   type RoomJoinedMessage,
   type TickUpdateMessage,
   type PlayerLeftMessage,
+  type RunestoneActivatedMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -51,12 +58,36 @@ interface QueuedInput {
   right: boolean;
 }
 
+/** Pixel distance threshold for runestone activation (1.5 tiles). */
+const RUNESTONE_ACTIVATION_RANGE = 28;
+
+/** Find all runestone tiles in the map data and return their positions. */
+function findRunestonePositions(map: TileMapData): RunestoneInfo[] {
+  const runestones: RunestoneInfo[] = [];
+  const tileTypes = [TILE_RUNESTONE_1, TILE_RUNESTONE_2, TILE_RUNESTONE_3];
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      const tile = map.data[y * map.width + x];
+      const idx = tileTypes.indexOf(tile);
+      if (idx !== -1) {
+        runestones.push({ index: idx, tileX: x, tileY: y, activated: false });
+      }
+    }
+  }
+  // Sort by index so slot 0/1/2 are in order
+  runestones.sort((a, b) => a.index - b.index);
+  return runestones;
+}
+
 export class Room {
   readonly id: string;
   private state: GameState;
   private sockets: Map<string, PlayerSocket> = new Map();
   private inputQueues: Map<string, QueuedInput[]> = new Map();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
+
+  /** Runestone activation state (server-authoritative). */
+  private runestones: RunestoneInfo[] = [];
 
 
   /** Random seed used to generate this room's maze. */
@@ -73,9 +104,11 @@ export class Room {
     this.mapSeed = Math.floor(Math.random() * 2147483647);
     this.map = generateMaze(this.mapSeed);
     this.spawnPoints = computeSpawnPoints(this.map.data, SPAWN_DISTANCE, MAX_TEAMS);
+    this.runestones = findRunestonePositions(this.map);
     this.state = {
       tick: 0,
       players: [],
+      runestones: this.runestones,
     };
     console.info(
       `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
@@ -210,6 +243,45 @@ export class Room {
     }
   }
 
+  /** Debug: teleport a player to an arbitrary position (updates authoritative state). */
+  handleDebugTeleport(playerId: string, msg: DebugTeleportMessage): void {
+    const player = this.state.players.find((p) => p.id === playerId);
+    if (!player) return;
+    player.x = msg.x;
+    player.y = msg.y;
+    console.info(`[Room:${this.id}] Debug teleport ${playerId} → (${Math.round(msg.x)}, ${Math.round(msg.y)})`);
+  }
+
+  /** Handle a runestone activation request. Validates proximity server-side. */
+  handleActivateRunestone(playerId: string, msg: ActivateRunestoneMessage): void {
+    const idx = msg.runestoneIndex;
+    const rs = this.runestones.find((r) => r.index === idx);
+    if (!rs || rs.activated) return; // invalid or already active
+
+    const player = this.state.players.find((p) => p.id === playerId);
+    if (!player) return;
+
+    // Server-side proximity check (anti-cheat)
+    const rsPxX = (rs.tileX + 0.5) * TILE_SIZE;
+    const rsPxY = (rs.tileY + 1) * TILE_SIZE;
+    const dx = player.x - rsPxX;
+    const dy = player.y - rsPxY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > RUNESTONE_ACTIVATION_RANGE) return; // too far
+
+    // Activate!
+    rs.activated = true;
+    console.info(`[Room:${this.id}] Runestone ${idx} activated by ${playerId}`);
+
+    // Broadcast to all clients immediately
+    const activatedMsg: RunestoneActivatedMessage = {
+      type: MessageType.RunestoneActivated,
+      runestoneIndex: idx,
+    };
+    this.broadcast(activatedMsg);
+  }
+
   // ── Game Loop ─────────────────────────────────────────────────────────
 
   private startLoop(): void {
@@ -300,6 +372,7 @@ export class Room {
     return {
       tick: this.state.tick,
       players: this.state.players.map((p) => ({ ...p })),
+      runestones: this.runestones.map((r) => ({ ...r })),
     };
   }
 

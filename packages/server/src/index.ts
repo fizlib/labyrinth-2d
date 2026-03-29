@@ -130,6 +130,26 @@ const app = uWS
             break;
           }
 
+          case MessageType.ActivateRunestone: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) {
+                room.handleActivateRunestone(data.id, msg);
+              }
+            }
+            break;
+          }
+
+          case MessageType.DebugTeleport: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) {
+                room.handleDebugTeleport(data.id, msg);
+              }
+            }
+            break;
+          }
+
           default:
             console.warn(`[WS] Unknown message type from ${data.id}`);
         }

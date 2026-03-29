@@ -4,7 +4,7 @@
 // Step 9: 2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application, Sprite, AnimatedSprite, Container, Texture } from 'pixi.js';
+import { Application, Sprite, AnimatedSprite, Container, Texture, Text, TextStyle } from 'pixi.js';
 import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
@@ -24,6 +24,9 @@ import {
   TILE_WALL_CORNER_BR,
   TILE_WALL_TOP_EDGE,
   TILE_TREE,
+  TILE_RUNESTONE_1,
+  TILE_RUNESTONE_2,
+  TILE_RUNESTONE_3,
   generateMaze,
   applyInputWithCollision,
 } from '@labyrinth/shared';
@@ -84,6 +87,21 @@ let currentMap: TileMapData | null = null;
 const snapshotBuffer = new SnapshotBuffer();
 
 let minimap: Minimap | null = null;
+
+// ── Runestone State ─────────────────────────────────────────────────────────
+
+interface RunestoneSpriteData {
+  sprite: Sprite;
+  index: number; // 0, 1, or 2
+  tileX: number;
+  tileY: number;
+  activated: boolean;
+}
+
+const runestoneSprites: RunestoneSpriteData[] = [];
+
+/** Floating "Press E" interaction prompt */
+let interactPrompt: Text | null = null;
 
 // ── Integer Scaling ─────────────────────────────────────────────────────────
 
@@ -485,6 +503,48 @@ async function main(): Promise<void> {
               tilemapSprites.push(treeSprite);
               continue; // skip normal sprite creation below
             }
+            case TILE_RUNESTONE_1:
+            case TILE_RUNESTONE_2:
+            case TILE_RUNESTONE_3: {
+              // Runestone — 16×32 sprite with grass underneath
+              const rsIdx = tileId === TILE_RUNESTONE_1 ? 0 : tileId === TILE_RUNESTONE_2 ? 1 : 2;
+
+              // Grass underneath
+              const rsh = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+              const rsGrassTex = rsh < 47 ? assets.grassVariantTextures[0]
+                : rsh < 94 ? assets.grassVariantTextures[1]
+                : rsh < 97 ? assets.grassVariantTextures[2]
+                : assets.grassVariantTextures[3];
+              const rsFloor = new Sprite(rsGrassTex);
+              rsFloor.x = x * ts;
+              rsFloor.y = y * ts;
+              rsFloor.width = ts;
+              rsFloor.height = ts;
+              backgroundLayer.addChild(rsFloor);
+              tilemapSprites.push(rsFloor);
+
+              // Runestone sprite — anchored at bottom-center, 16×32, Y-sorted
+              const rsTex = assets.runestoneTextures[rsIdx][0]; // start inactive
+              const rsSprite = new Sprite(rsTex);
+              rsSprite.anchor.set(0.5, 1.0);
+              rsSprite.x = x * ts + ts / 2;
+              rsSprite.y = (y + 1) * ts;
+              rsSprite.width = 16;
+              rsSprite.height = 32;
+              rsSprite.zIndex = (y + 1) * ts;
+              entityLayer.addChild(rsSprite);
+              tilemapSprites.push(rsSprite);
+
+              // Track for interaction
+              runestoneSprites.push({
+                sprite: rsSprite,
+                index: rsIdx,
+                tileX: x,
+                tileY: y,
+                activated: false,
+              });
+              continue; // skip normal sprite creation below
+            }
             default: tex = assets.grassVariantTextures[0]; break;
           }
 
@@ -572,6 +632,35 @@ async function main(): Promise<void> {
       minimap = new Minimap(currentMap!, INTERNAL_WIDTH, INTERNAL_HEIGHT);
       minimap.addToStage(app.stage);
 
+      // ── Sync runestone activation state from initial GameState ─────
+      for (const rsInfo of gameState.runestones) {
+        const rsData = runestoneSprites.find((r) => r.index === rsInfo.index);
+        if (rsData && rsInfo.activated && !rsData.activated) {
+          rsData.activated = true;
+          rsData.sprite.texture = assets.runestoneTextures[rsInfo.index][1];
+        }
+      }
+
+      // ── Interaction prompt ─────────────────────────────────────────
+      if (interactPrompt) {
+        worldContainer.removeChild(interactPrompt);
+        interactPrompt.destroy();
+      }
+      interactPrompt = new Text({
+        text: 'Press E',
+        style: new TextStyle({
+          fontFamily: 'monospace',
+          fontSize: 6,
+          fill: '#ffffff',
+          stroke: { color: '#000000', width: 2 },
+          align: 'center',
+        }),
+      });
+      interactPrompt.anchor.set(0.5, 1.0);
+      interactPrompt.visible = false;
+      interactPrompt.zIndex = 99999;
+      entityLayer.addChild(interactPrompt);
+
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const data = ensurePlayerSprite(player.id, player.spriteIndex);
@@ -641,6 +730,15 @@ async function main(): Promise<void> {
       console.info(`[Main] Player left: ${playerId}`);
       removePlayerSprite(playerId);
       knownRemotePlayers.delete(playerId);
+    },
+
+    onRunestoneActivated: (runestoneIndex) => {
+      console.info(`[Main] Runestone ${runestoneIndex} activated!`);
+      const rsData = runestoneSprites.find((r) => r.index === runestoneIndex);
+      if (rsData && !rsData.activated) {
+        rsData.activated = true;
+        rsData.sprite.texture = assets.runestoneTextures[runestoneIndex][1];
+      }
     },
 
     onError: (code, message) => {
@@ -728,6 +826,35 @@ async function main(): Promise<void> {
 
     // ── 4. Minimap ────────────────────────────────────────────────────
     if (minimap) minimap.update(localX, localY);
+
+    // ── 5. Runestone interaction prompt ──────────────────────────────
+    if (interactPrompt) {
+      let nearestRS: RunestoneSpriteData | null = null;
+      let nearestDist = Infinity;
+      const INTERACT_RANGE = 28; // ~1.75 tiles in pixels
+
+      for (const rs of runestoneSprites) {
+        if (rs.activated) continue;
+        const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
+        const rsCenterY = (rs.tileY + 1) * TILE_SIZE;
+        const dx = localX - rsCenterX;
+        const dy = localY - rsCenterY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < INTERACT_RANGE && dist < nearestDist) {
+          nearestDist = dist;
+          nearestRS = rs;
+        }
+      }
+
+      if (nearestRS) {
+        interactPrompt.visible = true;
+        interactPrompt.x = nearestRS.sprite.x;
+        interactPrompt.y = nearestRS.sprite.y - 34; // above the runestone
+        interactPrompt.zIndex = 99999;
+      } else {
+        interactPrompt.visible = false;
+      }
+    }
   });
 
   // ── Mousewheel Zoom (debug) ───────────────────────────────────────────
@@ -786,6 +913,9 @@ async function main(): Promise<void> {
     localY = clampedY;
     debugTeleportActive = true; // prevent server reconciliation from snapping back
 
+    // Notify server of the new position so proximity checks work
+    net.sendDebugTeleport(clampedX, clampedY);
+
     // Immediately update sprite
     const localData = playerSprites.get(net.playerId!);
     if (localData) {
@@ -801,6 +931,23 @@ async function main(): Promise<void> {
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     const dir = KEY_MAP[e.code];
     if (dir) keys[dir] = true;
+
+    // ── E key: runestone activation ──────────────────────────────────
+    if (e.code === 'KeyE' && localPlayerInitialized) {
+      const INTERACT_RANGE = 28;
+      for (const rs of runestoneSprites) {
+        if (rs.activated) continue;
+        const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
+        const rsCenterY = (rs.tileY + 1) * TILE_SIZE;
+        const dx = localX - rsCenterX;
+        const dy = localY - rsCenterY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < INTERACT_RANGE) {
+          net.sendActivateRunestone(rs.index);
+          break; // only activate one at a time
+        }
+      }
+    }
   });
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {
