@@ -1,0 +1,26 @@
+ISSUE: Hub "Cutting Corners"
+-----------------------------
+The central hub of the labyrinth is currently 13x13 tiles (`HUB_SIZE = 13` in `level1.ts`). 
+The maze grid uses a cell step of 12 tiles (6 tiles floor + 6 tiles wall).
+Because 13 is not a multiple of 12 (and not centered perfectly on a wall/cell boundary triplet), 
+the hub carving loop partially overlaps the 6x6 wall joints at the corners of the hub.
+This leaves L-shaped slivers of walls instead of clean boundaries.
+
+OBJECTIVE:
+----------
+Modify `level1.ts` so the hub does not "cut corners" of the walls.
+
+SUGGESTED FIX:
+--------------
+Change `HUB_SIZE` to a grid-aligned value:
+- `HUB_SIZE = 18` (covers 1 cell + both adjacent walls: 6+6+6)
+- `HUB_SIZE = 6` (covers exactly 1 cell)
+- Any value that follows the formula `N * CELL_SIZE + (N+1) * WALL_SIZE` or similar grid-snapping.
+
+FILES PROVIDED:
+---------------
+- level1.ts: Core maze generation and hub logic.
+- index.ts: Shared constants (SPAWN_DISTANCE, CELL_SIZE, etc).
+- physics.ts: Collision logic and solid tile definitions.
+- Room.ts: Server-side room management (calls generateMaze).
+- ARCHITECTURE.md: Project overview and rendering rules.

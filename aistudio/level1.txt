@@ -87,8 +87,8 @@ export const GRID_CELLS = 15;
 export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 186
 const TILE_PX = 16;
 
-/** Size of the central hub room in tiles. Matches CELL_SIZE to prevent cutting wall corners, resulting in a clean cross-shaped hub area. */
-const HUB_SIZE = 30;
+/** Size of the central hub room in tiles (square). 1.5× the original 9. */
+const HUB_SIZE = 13;
 
 // ── Seeded PRNG (mulberry32) ────────────────────────────────────────────────
 
@@ -406,9 +406,9 @@ function generateMazeData(seed: number): number[] {
       const idx = y * MAP_SIZE + x;
       if (snap2[idx] !== TILE_WALL_INTERIOR) continue;
 
-      const left = snap2[idx - 1];
-      const right = snap2[idx + 1];
-      const top = snap2[idx - MAP_SIZE];
+      const left   = snap2[idx - 1];
+      const right  = snap2[idx + 1];
+      const top    = snap2[idx - MAP_SIZE];
       const bottom = snap2[idx + MAP_SIZE];
 
       const eL = isOpen(left);
