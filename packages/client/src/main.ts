@@ -32,6 +32,7 @@ import { NetworkManager } from './net/NetworkManager';
 import { SnapshotBuffer, INTERPOLATION_DELAY } from './net/SnapshotBuffer';
 import { loadAssets, type GameAssets } from './assets/AssetLoader';
 import { DebugSettings } from './config/DebugSettings';
+import { Minimap } from './systems/Minimap';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 
@@ -81,6 +82,8 @@ let debugTeleportActive = false;
 
 let currentMap: TileMapData | null = null;
 const snapshotBuffer = new SnapshotBuffer();
+
+let minimap: Minimap | null = null;
 
 // ── Integer Scaling ─────────────────────────────────────────────────────────
 
@@ -486,6 +489,11 @@ async function main(): Promise<void> {
         localPlayerInitialized = true;
       }
 
+      // ── Minimap ──────────────────────────────────────────────────────
+      if (minimap) minimap.destroy();
+      minimap = new Minimap(currentMap!, INTERNAL_WIDTH, INTERNAL_HEIGHT);
+      minimap.addToStage(app.stage);
+
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const data = ensurePlayerSprite(player.id, player.spriteIndex);
@@ -639,6 +647,9 @@ async function main(): Promise<void> {
     // ── 3. Camera follow + zoom ─────────────────────────────────────
     worldContainer.scale.set(zoomLevel);
     updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
+
+    // ── 4. Minimap ────────────────────────────────────────────────────
+    if (minimap) minimap.update(localX, localY);
   });
 
   // ── Mousewheel Zoom (debug) ───────────────────────────────────────────
