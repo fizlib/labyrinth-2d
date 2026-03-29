@@ -22,6 +22,9 @@ import {
   generateTopEdgeTexture,
   generateTreeTexture,
   generatePlayerSpritesheet,
+  generateShadowTopTexture,
+  generateShadowLeftTexture,
+  generateShadowCornerTexture,
 } from './FallbackTextures';
 
 export interface GameAssets {
@@ -41,6 +44,12 @@ export interface GameAssets {
   /** 4 grass variant textures: [0-1] plain grass, [2-3] flower grass (rarer). */
   grassVariantTextures: Texture[];
   treeTexture: Texture;
+  /** Shadow overlay for tiles directly below a north wall. */
+  shadowTopTexture: Texture;
+  /** Shadow overlay for tiles directly right of a west wall. */
+  shadowLeftTexture: Texture;
+  /** Shadow overlay for inner corner tiles (below wall AND right of wall). */
+  shadowCornerTexture: Texture;
   /** Per-team animation sets. Access via playerAnimationSets[teamId]. */
   playerAnimationSets: Record<string, Texture[]>[];
 }
@@ -61,6 +70,9 @@ export async function loadAssets(): Promise<GameAssets> {
   let wallTopEdgeTexture: Texture;
   let grassVariantTextures: Texture[] = [];
   let treeTexture: Texture;
+  let shadowTopTexture: Texture;
+  let shadowLeftTexture: Texture;
+  let shadowCornerTexture: Texture;
   const playerAnimationSets: Record<string, Texture[]>[] = [];
 
   try {
@@ -117,6 +129,22 @@ export async function loadAssets(): Promise<GameAssets> {
   } catch {
     console.info('[Assets] oak-tree.png not found — using fallback tree');
     treeTexture = generateTreeTexture();
+  }
+
+  // ── Shadow overlay assets (16×16 semi-transparent PNGs) ───────────────────
+  try {
+    shadowTopTexture = await Assets.load<Texture>('assets/shadow_top.png');
+    shadowTopTexture.source.scaleMode = 'nearest';
+    shadowLeftTexture = await Assets.load<Texture>('assets/shadow_left.png');
+    shadowLeftTexture.source.scaleMode = 'nearest';
+    shadowCornerTexture = await Assets.load<Texture>('assets/shadow_corner.png');
+    shadowCornerTexture.source.scaleMode = 'nearest';
+    console.info('[Assets] Loaded shadow overlay textures (top, left, corner)');
+  } catch {
+    console.info('[Assets] Shadow overlay PNGs not found — using fallback');
+    shadowTopTexture = generateShadowTopTexture();
+    shadowLeftTexture = generateShadowLeftTexture();
+    shadowCornerTexture = generateShadowCornerTexture();
   }
 
   // ── Player spritesheets (128×128 — 8 cols × 4 rows, each frame 16×32) ──
@@ -183,6 +211,9 @@ export async function loadAssets(): Promise<GameAssets> {
     wallTopEdgeTexture,
     grassVariantTextures,
     treeTexture,
+    shadowTopTexture,
+    shadowLeftTexture,
+    shadowCornerTexture,
     playerAnimationSets,
   };
 }

@@ -250,7 +250,7 @@ export class Minimap {
   /** Get the minimap colour for a given tile ID. */
   private tileColor(id: number): readonly number[] {
     if (id === TILE_FLOOR) return COL_FLOOR;
-    if (id === TILE_FLOOR_SHADOW) return COL_DIRT;
+    if (id === TILE_FLOOR_SHADOW) return COL_FLOOR; // shadows are now overlays, base is grass
     return COL_WALL; // solid walls, trees, unknown
   }
 

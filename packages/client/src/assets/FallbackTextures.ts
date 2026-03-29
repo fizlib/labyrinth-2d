@@ -535,3 +535,62 @@ export function generatePlayerSpritesheet(): {
 
   return { texture: sheetTexture, animations };
 }
+
+// ── Shadow Overlay Textures (16×16 semi-transparent) ────────────────────────
+// Fallback procedural textures for directional shadow overlays.
+// These approximate what the real shadow_top.png / shadow_left.png /
+// shadow_corner.png assets look like — semi-transparent black gradients.
+
+/** Shadow cast by a north wall — gradient fading downward. */
+export function generateShadowTopTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+  ctx.clearRect(0, 0, TILE, TILE);
+
+  // Gradient: darker at top, fading to transparent at bottom
+  for (let y = 0; y < TILE; y++) {
+    const alpha = Math.max(0, 0.35 * (1 - y / TILE));
+    ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+    ctx.fillRect(0, y, TILE, 1);
+  }
+
+  return canvasToTexture(canvas);
+}
+
+/** Shadow cast by a west wall — gradient fading rightward. */
+export function generateShadowLeftTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+  ctx.clearRect(0, 0, TILE, TILE);
+
+  // Gradient: darker at left, fading to transparent at right
+  for (let x = 0; x < TILE; x++) {
+    const alpha = Math.max(0, 0.35 * (1 - x / TILE));
+    ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+    ctx.fillRect(x, 0, 1, TILE);
+  }
+
+  return canvasToTexture(canvas);
+}
+
+/** Shadow cast by an inner corner (north + west walls) — diagonal gradient. */
+export function generateShadowCornerTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+  ctx.clearRect(0, 0, TILE, TILE);
+
+  // Combined gradient: darker at top-left corner, fading diagonally
+  const imgData = ctx.createImageData(TILE, TILE);
+  for (let y = 0; y < TILE; y++) {
+    for (let x = 0; x < TILE; x++) {
+      const tFactor = 1 - y / TILE;
+      const lFactor = 1 - x / TILE;
+      const alpha = Math.max(0, 0.45 * Math.max(tFactor, lFactor));
+      const idx = (y * TILE + x) * 4;
+      imgData.data[idx] = 0;     // R
+      imgData.data[idx + 1] = 0; // G
+      imgData.data[idx + 2] = 0; // B
+      imgData.data[idx + 3] = Math.round(alpha * 255); // A
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  return canvasToTexture(canvas);
+}

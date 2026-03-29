@@ -308,12 +308,17 @@ async function main(): Promise<void> {
   const backgroundLayer = new Container();
   worldContainer.addChild(backgroundLayer);
 
+  // Shadow overlay layer — renders above ground grass, below players/walls/trees
+  const shadowOverlayLayer = new Container();
+  worldContainer.addChild(shadowOverlayLayer);
+
   // Entity layer globally Y-sorts players alongside 3D solid walls
   const entityLayer = new Container();
   entityLayer.sortableChildren = true;
   worldContainer.addChild(entityLayer);
 
   let tilemapSprites: Sprite[] = [];
+  let shadowOverlaySprites: Sprite[] = [];
 
   let mapPixelW = MAZE_SIZE * TILE_SIZE;
   let mapPixelH = MAZE_SIZE * TILE_SIZE;
@@ -430,7 +435,15 @@ async function main(): Promise<void> {
               else tex = assets.grassVariantTextures[3];
               break;
             }
-            case TILE_FLOOR_SHADOW: tex = assets.floorShadowTexture; break;
+            case TILE_FLOOR_SHADOW: {
+              // Legacy shadow tiles now render as regular grass (shadows handled by overlay layer)
+              const sh = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+              if (sh < 47) tex = assets.grassVariantTextures[0];
+              else if (sh < 94) tex = assets.grassVariantTextures[1];
+              else if (sh < 97) tex = assets.grassVariantTextures[2];
+              else tex = assets.grassVariantTextures[3];
+              break;
+            }
             case TILE_WALL_FACE: tex = assets.wallFaceTexture; isSolid = true; break;
             case TILE_WALL_TOP: tex = assets.wallTopTexture; isSolid = true; break;
             case TILE_WALL_INTERIOR: tex = assets.wallInteriorTexture; isSolid = true; break;
@@ -489,6 +502,55 @@ async function main(): Promise<void> {
             backgroundLayer.addChild(sprite);
           }
           tilemapSprites.push(sprite);
+        }
+      }
+
+      // ── Directional Shadow Overlay Pass ──────────────────────────────────
+      // Light source: top-left. Shadows cast to the right of west walls and
+      // below north walls. South/east wall edges receive no shadows.
+      //
+      // Helper: check if a tile is any solid wall type (IDs 2–13).
+      const isSolid = (tx: number, ty: number): boolean => {
+        if (tx < 0 || tx >= currentMap!.width || ty < 0 || ty >= currentMap!.height) return true;
+        const id = currentMap!.data[ty * currentMap!.width + tx];
+        return id >= 2 && id <= 13; // TILE_WALL_FACE(2) through TILE_TREE(13)
+      };
+
+      // Clean previous shadow overlays
+      shadowOverlaySprites.forEach((s) => s.destroy());
+      shadowOverlaySprites = [];
+
+      for (let y = 0; y < currentMap.height; y++) {
+        for (let x = 0; x < currentMap.width; x++) {
+          const tileId = currentMap.data[y * currentMap.width + x];
+          // Only place shadows on walkable ground tiles
+          if (tileId !== TILE_FLOOR && tileId !== TILE_FLOOR_SHADOW) continue;
+
+          const wallAbove = isSolid(x, y - 1);  // North neighbor is wall
+          const wallLeft  = isSolid(x - 1, y);  // West neighbor is wall
+
+          let shadowTex: Texture | null = null;
+
+          if (wallAbove && wallLeft) {
+            // Inner corner — shadow_corner replaces both top+left
+            shadowTex = assets.shadowCornerTexture;
+          } else if (wallAbove) {
+            // Below a north wall
+            shadowTex = assets.shadowTopTexture;
+          } else if (wallLeft) {
+            // Right of a west wall
+            shadowTex = assets.shadowLeftTexture;
+          }
+
+          if (shadowTex) {
+            const overlay = new Sprite(shadowTex);
+            overlay.x = x * ts;
+            overlay.y = y * ts;
+            overlay.width = ts;
+            overlay.height = ts;
+            shadowOverlayLayer.addChild(overlay);
+            shadowOverlaySprites.push(overlay);
+          }
         }
       }
 

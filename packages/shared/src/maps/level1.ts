@@ -439,24 +439,7 @@ function generateMazeData(seed: number): number[] {
     }
   }
 
-  // Step 4: Add dark dirt shadows around the base edges of the walkable areas
-  const snap3 = data.slice();
-  for (let y = 0; y < MAP_SIZE; y++) {
-    for (let x = 0; x < MAP_SIZE; x++) {
-      const idx = y * MAP_SIZE + x;
-      if (snap3[idx] === TILE_FLOOR) {
-        const isNearWall =
-          (x > 0 && snap3[idx - 1] !== TILE_FLOOR) ||
-          (x < MAP_SIZE - 1 && snap3[idx + 1] !== TILE_FLOOR) ||
-          (y > 0 && snap3[idx - MAP_SIZE] !== TILE_FLOOR) ||
-          (y < MAP_SIZE - 1 && snap3[idx + MAP_SIZE] !== TILE_FLOOR);
-
-        if (isNearWall) {
-          data[idx] = TILE_FLOOR_SHADOW;
-        }
-      }
-    }
-  }
+  // (Step 4 removed — shadows are now handled client-side via directional overlays)
 
   // ── Step 5: Central hub decoration — tree ────────────────────────────────
   {
