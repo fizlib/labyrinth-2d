@@ -1,0 +1,420 @@
+// packages/client/src/systems/TilemapRenderer.ts
+// ─────────────────────────────────────────────────────────────────────────────
+// Chunk-based tilemap renderer for optimal performance.
+//
+// Strategy:
+//   - Background (grass/dirt): baked into 32×32 2D chunks
+//   - Shadow overlays:         baked into 32×32 2D chunks
+//   - Wall tiles:              baked into 32×1 row chunks (preserves Y-sorting)
+//   - Trees / runestones:      individual sprites (Y-sorted in entity layer)
+//
+// All chunks use PixiJS 8 cacheAsTexture() to collapse many Sprites into a
+// single GPU texture, drastically reducing scene-graph nodes and draw calls.
+// Viewport culling hides off-screen chunks every frame.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { Container, Sprite, Texture, Renderer, Rectangle } from 'pixi.js';
+import type { TileMapData } from '@labyrinth/shared';
+import {
+  TILE_FLOOR,
+  TILE_FLOOR_SHADOW,
+  TILE_WALL_FACE,
+  TILE_WALL_TOP,
+  TILE_WALL_INTERIOR,
+  TILE_WALL_SIDE_LEFT,
+  TILE_WALL_SIDE_RIGHT,
+  TILE_WALL_BOTTOM,
+  TILE_WALL_CORNER_TL,
+  TILE_WALL_CORNER_TR,
+  TILE_WALL_CORNER_BL,
+  TILE_WALL_CORNER_BR,
+  TILE_WALL_TOP_EDGE,
+  TILE_TREE,
+  TILE_RUNESTONE_1,
+  TILE_RUNESTONE_2,
+  TILE_RUNESTONE_3,
+  INTERNAL_WIDTH,
+  INTERNAL_HEIGHT,
+} from '@labyrinth/shared';
+import type { GameAssets } from '../assets/AssetLoader';
+
+// ── Exported types ──────────────────────────────────────────────────────────
+
+export interface RunestoneSpriteData {
+  sprite: Sprite;
+  index: number;  // 0, 1, or 2
+  tileX: number;
+  tileY: number;
+  activated: boolean;
+}
+
+// ── Chunk configuration ─────────────────────────────────────────────────────
+
+/** Side length for 2D square chunks (background, shadows). */
+const BG_CHUNK_SIZE = 32;
+
+/** Width in tiles for wall row chunks (1 tile high). */
+const WALL_CHUNK_WIDTH = 32;
+
+// ── Internal chunk metadata ─────────────────────────────────────────────────
+
+interface ChunkMeta {
+  container: Container;
+  /** World-space bounding box for culling. */
+  worldLeft: number;
+  worldTop: number;
+  worldRight: number;
+  worldBottom: number;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Deterministic grass variant texture based on tile position. */
+function getGrassTexture(x: number, y: number, grassTextures: Texture[]): Texture {
+  const h = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+  if (h < 47) return grassTextures[0];
+  if (h < 94) return grassTextures[1];
+  if (h < 97) return grassTextures[2];
+  return grassTextures[3];
+}
+
+/** Returns true if tileId is a solid wall type (IDs 2–12, plus tree/runestones). */
+function isSolidWallTile(tileId: number): boolean {
+  return tileId >= TILE_WALL_FACE && tileId <= TILE_WALL_TOP_EDGE;
+}
+
+/** Returns the appropriate texture for a wall tile ID. */
+function getWallTexture(tileId: number, assets: GameAssets): Texture | null {
+  switch (tileId) {
+    case TILE_WALL_FACE:      return assets.wallFaceTexture;
+    case TILE_WALL_TOP:       return assets.wallTopTexture;
+    case TILE_WALL_INTERIOR:  return assets.wallInteriorTexture;
+    case TILE_WALL_SIDE_LEFT: return assets.wallSideLeftTexture;
+    case TILE_WALL_SIDE_RIGHT:return assets.wallSideRightTexture;
+    case TILE_WALL_BOTTOM:    return assets.wallBottomTexture;
+    case TILE_WALL_CORNER_TL: return assets.wallCornerTLTexture;
+    case TILE_WALL_CORNER_TR: return assets.wallCornerTRTexture;
+    case TILE_WALL_CORNER_BL: return assets.wallCornerBLTexture;
+    case TILE_WALL_CORNER_BR: return assets.wallCornerBRTexture;
+    case TILE_WALL_TOP_EDGE:  return assets.wallTopEdgeTexture;
+    default: return null;
+  }
+}
+
+/** Check if tile at (tx, ty) is any solid wall type (IDs 2–13) for shadow logic. */
+function isTileSolid(tx: number, ty: number, map: TileMapData): boolean {
+  if (tx < 0 || tx >= map.width || ty < 0 || ty >= map.height) return true;
+  const id = map.data[ty * map.width + tx];
+  return id >= 2 && id <= 13; // TILE_WALL_FACE(2) through TILE_TREE(13)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class TilemapRenderer {
+  // ── Public layers to attach to the scene graph ──────────────────────────
+  /** Background chunks (grass, dirt). Attach first in worldContainer. */
+  readonly backgroundLayer: Container;
+  /** Shadow overlay chunks. Attach after backgroundLayer. */
+  readonly shadowLayer: Container;
+
+  // ── Wall row chunks — add individually to entityLayer for Y-sorting ────
+  readonly wallRowChunks: Container[] = [];
+
+  // ── Extracted entities — add individually to entityLayer ────────────────
+  readonly treeSprites: Sprite[] = [];
+  readonly runestoneSprites: RunestoneSpriteData[] = [];
+
+  // ── Internal tracking for culling + cleanup ────────────────────────────
+  private allChunks: ChunkMeta[] = [];
+
+  // ──────────────────────────────────────────────────────────────────────
+
+  constructor(map: TileMapData, assets: GameAssets, renderer: Renderer) {
+    const ts = map.tileSize;
+
+    this.backgroundLayer = new Container();
+    this.shadowLayer = new Container();
+
+    // ── Step 1: Build 32×32 2D Chunks (Background + Shadows) ─────────
+
+    const bgChunkCols = Math.ceil(map.width / BG_CHUNK_SIZE);
+    const bgChunkRows = Math.ceil(map.height / BG_CHUNK_SIZE);
+
+    for (let cr = 0; cr < bgChunkRows; cr++) {
+      for (let cc = 0; cc < bgChunkCols; cc++) {
+        const startX = cc * BG_CHUNK_SIZE;
+        const startY = cr * BG_CHUNK_SIZE;
+        const endX = Math.min(startX + BG_CHUNK_SIZE, map.width);
+        const endY = Math.min(startY + BG_CHUNK_SIZE, map.height);
+
+        const bgChunk = new Container();
+        let bgHasContent = false;
+
+        const shadowChunk = new Container();
+        let shadowHasContent = false;
+
+        for (let y = startY; y < endY; y++) {
+          for (let x = startX; x < endX; x++) {
+            const tileId = map.data[y * map.width + x];
+            const localX = (x - startX) * ts;
+            const localY = (y - startY) * ts;
+
+            // ── Background tile ──────────────────────────────────
+            if (tileId === TILE_FLOOR || tileId === TILE_FLOOR_SHADOW ||
+                tileId === TILE_TREE ||
+                tileId === TILE_RUNESTONE_1 || tileId === TILE_RUNESTONE_2 || tileId === TILE_RUNESTONE_3) {
+              // All of these get a grass tile in the background
+              const grassTex = getGrassTexture(x, y, assets.grassVariantTextures);
+              const sprite = new Sprite(grassTex);
+              sprite.x = localX;
+              sprite.y = localY;
+              sprite.width = ts;
+              sprite.height = ts;
+              bgChunk.addChild(sprite);
+              bgHasContent = true;
+            }
+
+            // ── Shadow overlay ───────────────────────────────────
+            if (tileId === TILE_FLOOR || tileId === TILE_FLOOR_SHADOW) {
+              const wallAbove = isTileSolid(x, y - 1, map);
+              const wallLeft = isTileSolid(x - 1, y, map);
+
+              let shadowTex: Texture | null = null;
+              if (wallAbove && wallLeft) {
+                shadowTex = assets.shadowCornerTexture;
+              } else if (wallAbove) {
+                shadowTex = assets.shadowTopTexture;
+              } else if (wallLeft) {
+                shadowTex = assets.shadowLeftTexture;
+              }
+
+              if (shadowTex) {
+                const overlay = new Sprite(shadowTex);
+                overlay.x = localX;
+                overlay.y = localY;
+                overlay.width = ts;
+                overlay.height = ts;
+                shadowChunk.addChild(overlay);
+                shadowHasContent = true;
+              }
+            }
+          }
+        }
+
+        // Calculate the exact pixel dimensions of this chunk (handles map edges correctly)
+        const chunkPixelW = (endX - startX) * ts;
+        const chunkPixelH = (endY - startY) * ts;
+        const chunkFrame = new Rectangle(0, 0, chunkPixelW, chunkPixelH);
+
+        // Bake and register background chunk
+        if (bgHasContent) {
+          const tex = renderer.generateTexture({
+            target: bgChunk,
+            frame: chunkFrame, // <-- Force exact dimensions
+            resolution: 1,
+            antialias: false
+          });
+          tex.source.style.scaleMode = 'nearest';
+          tex.source.style.update(); // Force the GPU to apply the nearest filter
+
+          const bgSprite = new Sprite(tex);
+          bgSprite.x = startX * ts;
+          bgSprite.y = startY * ts;
+
+          this.backgroundLayer.addChild(bgSprite);
+          this.allChunks.push({
+            container: bgSprite,
+            worldLeft: startX * ts,
+            worldTop: startY * ts,
+            worldRight: endX * ts,
+            worldBottom: endY * ts,
+          });
+
+          bgChunk.destroy({ children: true }); // Free memory!
+        }
+
+        // Bake and register shadow chunk
+        if (shadowHasContent) {
+          const tex = renderer.generateTexture({
+            target: shadowChunk,
+            frame: chunkFrame, // <-- Force exact dimensions
+            resolution: 1,
+            antialias: false
+          });
+          tex.source.style.scaleMode = 'nearest';
+          tex.source.style.update();
+
+          const shadowSprite = new Sprite(tex);
+          shadowSprite.x = startX * ts;
+          shadowSprite.y = startY * ts;
+
+          this.shadowLayer.addChild(shadowSprite);
+          this.allChunks.push({
+            container: shadowSprite,
+            worldLeft: startX * ts,
+            worldTop: startY * ts,
+            worldRight: endX * ts,
+            worldBottom: endY * ts,
+          });
+
+          shadowChunk.destroy({ children: true }); // Free memory!
+        }
+      }
+    }
+
+    // ── Step 2: Build 32×1 Row Chunks (Walls) ────────────────────────
+
+    const wallChunkCols = Math.ceil(map.width / WALL_CHUNK_WIDTH);
+
+    for (let y = 0; y < map.height; y++) {
+      for (let wc = 0; wc < wallChunkCols; wc++) {
+        const startX = wc * WALL_CHUNK_WIDTH;
+        const endX = Math.min(startX + WALL_CHUNK_WIDTH, map.width);
+
+        const rowContainer = new Container();
+        let hasWalls = false;
+
+        for (let x = startX; x < endX; x++) {
+          const tileId = map.data[y * map.width + x];
+
+          if (isSolidWallTile(tileId)) {
+            const tex = getWallTexture(tileId, assets);
+            if (tex) {
+              const sprite = new Sprite(tex);
+              sprite.x = (x - startX) * ts;
+              sprite.y = 0;
+              sprite.width = ts;
+              sprite.height = ts;
+              rowContainer.addChild(sprite);
+              hasWalls = true;
+            }
+          }
+        }
+
+        if (hasWalls) {
+          const wallPixelW = (endX - startX) * ts;
+          const wallFrame = new Rectangle(0, 0, wallPixelW, ts);
+
+          // Manually bake texture
+          const tex = renderer.generateTexture({
+            target: rowContainer,
+            frame: wallFrame, // <-- Force exact dimensions
+            resolution: 1,
+            antialias: false
+          });
+          tex.source.style.scaleMode = 'nearest';
+          tex.source.style.update();
+
+          const rowSprite = new Sprite(tex);
+          rowSprite.x = startX * ts;
+          rowSprite.y = y * ts;
+          rowSprite.zIndex = (y + 1) * ts; // Precise per-row Y-sort on the Sprite
+
+          this.wallRowChunks.push(rowSprite);
+          this.allChunks.push({
+            container: rowSprite,
+            worldLeft: startX * ts,
+            worldTop: y * ts,
+            worldRight: endX * ts,
+            worldBottom: (y + 1) * ts,
+          });
+
+          rowContainer.destroy({ children: true }); // Free memory!
+        }
+      }
+    }
+
+    // ── Step 3: Extract Special Entities ──────────────────────────────
+
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        const tileId = map.data[y * map.width + x];
+
+        if (tileId === TILE_TREE) {
+          const treeTex = assets.treeTexture;
+          const treeSprite = new Sprite(treeTex);
+          treeSprite.anchor.set(0.5, 1.0);
+          treeSprite.x = x * ts + ts / 2;
+          treeSprite.y = (y + 1) * ts;
+          treeSprite.width = treeTex.width;
+          treeSprite.height = treeTex.height;
+          treeSprite.zIndex = (y + 1) * ts;
+          this.treeSprites.push(treeSprite);
+        }
+
+        if (tileId === TILE_RUNESTONE_1 || tileId === TILE_RUNESTONE_2 || tileId === TILE_RUNESTONE_3) {
+          const rsIdx = tileId === TILE_RUNESTONE_1 ? 0 : tileId === TILE_RUNESTONE_2 ? 1 : 2;
+          const rsTex = assets.runestoneTextures[rsIdx][0]; // start inactive
+          const rsSprite = new Sprite(rsTex);
+          rsSprite.anchor.set(0.5, 1.0);
+          rsSprite.x = x * ts + ts / 2;
+          rsSprite.y = (y + 1) * ts;
+          rsSprite.width = 16;
+          rsSprite.height = 32;
+          rsSprite.zIndex = (y + 1) * ts;
+
+          this.runestoneSprites.push({
+            sprite: rsSprite,
+            index: rsIdx,
+            tileX: x,
+            tileY: y,
+            activated: false,
+          });
+        }
+      }
+    }
+  }
+
+  // ── Per-frame viewport culling ────────────────────────────────────────
+
+  /**
+   * Hide chunks that are entirely outside the camera viewport.
+   * Call every frame after updating the camera.
+   *
+   * @param camX  worldContainer.x (negative when camera moves right)
+   * @param camY  worldContainer.y (negative when camera moves right)
+   * @param zoom  Current zoom scale applied to worldContainer
+   */
+  updateVisibility(camX: number, camY: number, zoom: number): void {
+    // Camera viewport in world-space coordinates
+    const viewL = -camX / zoom;
+    const viewT = -camY / zoom;
+    const viewR = viewL + INTERNAL_WIDTH / zoom;
+    const viewB = viewT + INTERNAL_HEIGHT / zoom;
+
+    for (let i = 0; i < this.allChunks.length; i++) {
+      const chunk = this.allChunks[i];
+      chunk.container.visible =
+        chunk.worldRight >= viewL && chunk.worldLeft <= viewR &&
+        chunk.worldBottom >= viewT && chunk.worldTop <= viewB;
+    }
+  }
+
+  // ── Cleanup ───────────────────────────────────────────────────────────
+
+  /** Remove all chunks from the scene and free GPU resources. */
+  destroy(): void {
+    this.backgroundLayer.destroy({ children: true });
+    this.shadowLayer.destroy({ children: true });
+
+    for (const chunk of this.wallRowChunks) {
+      chunk.parent?.removeChild(chunk);
+      chunk.destroy({ children: true });
+    }
+
+    for (const tree of this.treeSprites) {
+      tree.parent?.removeChild(tree);
+      tree.destroy();
+    }
+
+    for (const rs of this.runestoneSprites) {
+      rs.sprite.parent?.removeChild(rs.sprite);
+      rs.sprite.destroy();
+    }
+
+    this.wallRowChunks.length = 0;
+    this.treeSprites.length = 0;
+    this.runestoneSprites.length = 0;
+    this.allChunks.length = 0;
+  }
+}
