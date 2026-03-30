@@ -4,7 +4,7 @@
 // Step 9: 2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application, Sprite, AnimatedSprite, Container, Texture } from 'pixi.js';
+import { Application, Sprite, AnimatedSprite, Container, Texture, Text, TextStyle } from 'pixi.js';
 import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
@@ -24,6 +24,9 @@ import {
   TILE_WALL_CORNER_BR,
   TILE_WALL_TOP_EDGE,
   TILE_TREE,
+  TILE_RUNESTONE_1,
+  TILE_RUNESTONE_2,
+  TILE_RUNESTONE_3,
   generateMaze,
   applyInputWithCollision,
 } from '@labyrinth/shared';
@@ -84,6 +87,21 @@ let currentMap: TileMapData | null = null;
 const snapshotBuffer = new SnapshotBuffer();
 
 let minimap: Minimap | null = null;
+
+// ── Runestone State ─────────────────────────────────────────────────────────
+
+interface RunestoneSpriteData {
+  sprite: Sprite;
+  index: number; // 0, 1, or 2
+  tileX: number;
+  tileY: number;
+  activated: boolean;
+}
+
+const runestoneSprites: RunestoneSpriteData[] = [];
+
+/** Floating "Press E" interaction prompt */
+let interactPrompt: Text | null = null;
 
 // ── Integer Scaling ─────────────────────────────────────────────────────────
 
@@ -308,12 +326,17 @@ async function main(): Promise<void> {
   const backgroundLayer = new Container();
   worldContainer.addChild(backgroundLayer);
 
+  // Shadow overlay layer — renders above ground grass, below players/walls/trees
+  const shadowOverlayLayer = new Container();
+  worldContainer.addChild(shadowOverlayLayer);
+
   // Entity layer globally Y-sorts players alongside 3D solid walls
   const entityLayer = new Container();
   entityLayer.sortableChildren = true;
   worldContainer.addChild(entityLayer);
 
   let tilemapSprites: Sprite[] = [];
+  let shadowOverlaySprites: Sprite[] = [];
 
   let mapPixelW = MAZE_SIZE * TILE_SIZE;
   let mapPixelH = MAZE_SIZE * TILE_SIZE;
@@ -418,8 +441,27 @@ async function main(): Promise<void> {
           let isSolid = false;
 
           switch (tileId) {
-            case TILE_FLOOR: tex = assets.floorTexture; break;
-            case TILE_FLOOR_SHADOW: tex = assets.floorShadowTexture; break;
+            case TILE_FLOOR: {
+              // Deterministic grass variation based on tile position.
+              // Hash: simple mix of x,y coords → stable per-tile variant.
+              const h = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+              // 0-46: variant 0 (47%), 47-93: variant 1 (47%)
+              // 94-96: flower variant 2 (3%), 97-99: flower variant 3 (3%)
+              if (h < 47) tex = assets.grassVariantTextures[0];
+              else if (h < 94) tex = assets.grassVariantTextures[1];
+              else if (h < 97) tex = assets.grassVariantTextures[2];
+              else tex = assets.grassVariantTextures[3];
+              break;
+            }
+            case TILE_FLOOR_SHADOW: {
+              // Legacy shadow tiles now render as regular grass (shadows handled by overlay layer)
+              const sh = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+              if (sh < 47) tex = assets.grassVariantTextures[0];
+              else if (sh < 94) tex = assets.grassVariantTextures[1];
+              else if (sh < 97) tex = assets.grassVariantTextures[2];
+              else tex = assets.grassVariantTextures[3];
+              break;
+            }
             case TILE_WALL_FACE: tex = assets.wallFaceTexture; isSolid = true; break;
             case TILE_WALL_TOP: tex = assets.wallTopTexture; isSolid = true; break;
             case TILE_WALL_INTERIOR: tex = assets.wallInteriorTexture; isSolid = true; break;
@@ -434,8 +476,13 @@ async function main(): Promise<void> {
             case TILE_TREE: {
               // Tree sprite rendered at native pixel size (e.g. 80×86)
               // Collision is only on this single tile (trunk base)
-              // First lay down a dirt tile underneath
-              const floorSprite = new Sprite(assets.floorTexture);
+              // First lay down a grass variant tile underneath
+              const th = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+              const grassTex = th < 47 ? assets.grassVariantTextures[0]
+                : th < 94 ? assets.grassVariantTextures[1]
+                : th < 97 ? assets.grassVariantTextures[2]
+                : assets.grassVariantTextures[3];
+              const floorSprite = new Sprite(grassTex);
               floorSprite.x = x * ts;
               floorSprite.y = y * ts;
               floorSprite.width = ts;
@@ -456,7 +503,49 @@ async function main(): Promise<void> {
               tilemapSprites.push(treeSprite);
               continue; // skip normal sprite creation below
             }
-            default: tex = assets.floorTexture; break;
+            case TILE_RUNESTONE_1:
+            case TILE_RUNESTONE_2:
+            case TILE_RUNESTONE_3: {
+              // Runestone — 16×32 sprite with grass underneath
+              const rsIdx = tileId === TILE_RUNESTONE_1 ? 0 : tileId === TILE_RUNESTONE_2 ? 1 : 2;
+
+              // Grass underneath
+              const rsh = ((x * 374761393 + y * 668265263) >>> 0) % 100;
+              const rsGrassTex = rsh < 47 ? assets.grassVariantTextures[0]
+                : rsh < 94 ? assets.grassVariantTextures[1]
+                : rsh < 97 ? assets.grassVariantTextures[2]
+                : assets.grassVariantTextures[3];
+              const rsFloor = new Sprite(rsGrassTex);
+              rsFloor.x = x * ts;
+              rsFloor.y = y * ts;
+              rsFloor.width = ts;
+              rsFloor.height = ts;
+              backgroundLayer.addChild(rsFloor);
+              tilemapSprites.push(rsFloor);
+
+              // Runestone sprite — anchored at bottom-center, 16×32, Y-sorted
+              const rsTex = assets.runestoneTextures[rsIdx][0]; // start inactive
+              const rsSprite = new Sprite(rsTex);
+              rsSprite.anchor.set(0.5, 1.0);
+              rsSprite.x = x * ts + ts / 2;
+              rsSprite.y = (y + 1) * ts;
+              rsSprite.width = 16;
+              rsSprite.height = 32;
+              rsSprite.zIndex = (y + 1) * ts;
+              entityLayer.addChild(rsSprite);
+              tilemapSprites.push(rsSprite);
+
+              // Track for interaction
+              runestoneSprites.push({
+                sprite: rsSprite,
+                index: rsIdx,
+                tileX: x,
+                tileY: y,
+                activated: false,
+              });
+              continue; // skip normal sprite creation below
+            }
+            default: tex = assets.grassVariantTextures[0]; break;
           }
 
           const sprite = new Sprite(tex);
@@ -473,6 +562,55 @@ async function main(): Promise<void> {
             backgroundLayer.addChild(sprite);
           }
           tilemapSprites.push(sprite);
+        }
+      }
+
+      // ── Directional Shadow Overlay Pass ──────────────────────────────────
+      // Light source: top-left. Shadows cast to the right of west walls and
+      // below north walls. South/east wall edges receive no shadows.
+      //
+      // Helper: check if a tile is any solid wall type (IDs 2–13).
+      const isSolid = (tx: number, ty: number): boolean => {
+        if (tx < 0 || tx >= currentMap!.width || ty < 0 || ty >= currentMap!.height) return true;
+        const id = currentMap!.data[ty * currentMap!.width + tx];
+        return id >= 2 && id <= 13; // TILE_WALL_FACE(2) through TILE_TREE(13)
+      };
+
+      // Clean previous shadow overlays
+      shadowOverlaySprites.forEach((s) => s.destroy());
+      shadowOverlaySprites = [];
+
+      for (let y = 0; y < currentMap.height; y++) {
+        for (let x = 0; x < currentMap.width; x++) {
+          const tileId = currentMap.data[y * currentMap.width + x];
+          // Only place shadows on walkable ground tiles
+          if (tileId !== TILE_FLOOR && tileId !== TILE_FLOOR_SHADOW) continue;
+
+          const wallAbove = isSolid(x, y - 1);  // North neighbor is wall
+          const wallLeft  = isSolid(x - 1, y);  // West neighbor is wall
+
+          let shadowTex: Texture | null = null;
+
+          if (wallAbove && wallLeft) {
+            // Inner corner — shadow_corner replaces both top+left
+            shadowTex = assets.shadowCornerTexture;
+          } else if (wallAbove) {
+            // Below a north wall
+            shadowTex = assets.shadowTopTexture;
+          } else if (wallLeft) {
+            // Right of a west wall
+            shadowTex = assets.shadowLeftTexture;
+          }
+
+          if (shadowTex) {
+            const overlay = new Sprite(shadowTex);
+            overlay.x = x * ts;
+            overlay.y = y * ts;
+            overlay.width = ts;
+            overlay.height = ts;
+            shadowOverlayLayer.addChild(overlay);
+            shadowOverlaySprites.push(overlay);
+          }
         }
       }
 
@@ -493,6 +631,38 @@ async function main(): Promise<void> {
       if (minimap) minimap.destroy();
       minimap = new Minimap(currentMap!, INTERNAL_WIDTH, INTERNAL_HEIGHT);
       minimap.addToStage(app.stage);
+
+      // ── Sync runestone activation state from initial GameState ─────
+      for (const rsInfo of gameState.runestones) {
+        const rsData = runestoneSprites.find((r) => r.index === rsInfo.index);
+        if (rsData && rsInfo.activated && !rsData.activated) {
+          rsData.activated = true;
+          rsData.sprite.texture = assets.runestoneTextures[rsInfo.index][1];
+        }
+      }
+
+      // ── Interaction prompt ─────────────────────────────────────────
+      if (interactPrompt) {
+        worldContainer.removeChild(interactPrompt);
+        interactPrompt.destroy();
+      }
+      interactPrompt = new Text({
+        text: 'Press E',
+        style: new TextStyle({
+          fontFamily: 'PixelOperator8',
+          fontSize: 64, // High source resolution
+          fill: '#ffffff',
+          stroke: { color: '#000000', width: 8, join: 'round' }, // Thick at 64px scale
+          align: 'center',
+        }),
+        roundPixels: true,
+        resolution: 4, // High internal resolution
+      });
+      interactPrompt.scale.set(0.125); // Scale down to 8px (native) in world space
+      interactPrompt.anchor.set(0.5, 1.0);
+      interactPrompt.visible = false;
+      interactPrompt.zIndex = 99999;
+      entityLayer.addChild(interactPrompt);
 
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
@@ -563,6 +733,15 @@ async function main(): Promise<void> {
       console.info(`[Main] Player left: ${playerId}`);
       removePlayerSprite(playerId);
       knownRemotePlayers.delete(playerId);
+    },
+
+    onRunestoneActivated: (runestoneIndex) => {
+      console.info(`[Main] Runestone ${runestoneIndex} activated!`);
+      const rsData = runestoneSprites.find((r) => r.index === runestoneIndex);
+      if (rsData && !rsData.activated) {
+        rsData.activated = true;
+        rsData.sprite.texture = assets.runestoneTextures[runestoneIndex][1];
+      }
     },
 
     onError: (code, message) => {
@@ -650,6 +829,35 @@ async function main(): Promise<void> {
 
     // ── 4. Minimap ────────────────────────────────────────────────────
     if (minimap) minimap.update(localX, localY);
+
+    // ── 5. Runestone interaction prompt ──────────────────────────────
+    if (interactPrompt) {
+      let nearestRS: RunestoneSpriteData | null = null;
+      let nearestDist = Infinity;
+      const INTERACT_RANGE = 28; // ~1.75 tiles in pixels
+
+      for (const rs of runestoneSprites) {
+        if (rs.activated) continue;
+        const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
+        const rsCenterY = (rs.tileY + 1) * TILE_SIZE;
+        const dx = localX - rsCenterX;
+        const dy = localY - rsCenterY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < INTERACT_RANGE && dist < nearestDist) {
+          nearestDist = dist;
+          nearestRS = rs;
+        }
+      }
+
+      if (nearestRS) {
+        interactPrompt.visible = true;
+        interactPrompt.x = nearestRS.sprite.x;
+        interactPrompt.y = nearestRS.sprite.y - 34; // above the runestone
+        interactPrompt.zIndex = 99999;
+      } else {
+        interactPrompt.visible = false;
+      }
+    }
   });
 
   // ── Mousewheel Zoom (debug) ───────────────────────────────────────────
@@ -708,6 +916,9 @@ async function main(): Promise<void> {
     localY = clampedY;
     debugTeleportActive = true; // prevent server reconciliation from snapping back
 
+    // Notify server of the new position so proximity checks work
+    net.sendDebugTeleport(clampedX, clampedY);
+
     // Immediately update sprite
     const localData = playerSprites.get(net.playerId!);
     if (localData) {
@@ -723,6 +934,23 @@ async function main(): Promise<void> {
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     const dir = KEY_MAP[e.code];
     if (dir) keys[dir] = true;
+
+    // ── E key: runestone activation ──────────────────────────────────
+    if (e.code === 'KeyE' && localPlayerInitialized) {
+      const INTERACT_RANGE = 28;
+      for (const rs of runestoneSprites) {
+        if (rs.activated) continue;
+        const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
+        const rsCenterY = (rs.tileY + 1) * TILE_SIZE;
+        const dx = localX - rsCenterX;
+        const dy = localY - rsCenterY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < INTERACT_RANGE) {
+          net.sendActivateRunestone(rs.index);
+          break; // only activate one at a time
+        }
+      }
+    }
   });
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {

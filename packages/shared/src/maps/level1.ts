@@ -10,8 +10,8 @@
 //   4 = Wall Interior   (solid, entity layer — deep rock mass)
 //
 // Layout:
-//   - 186×186 tile grid at 16px/tile
-//   - 9×9 central hub room
+//   - 218×218 tile grid at 16px/tile
+//   - 30×30 central hub room
 //   - Recursive-backtracking maze fills the entire space
 //   - All corridors are 6 tiles wide
 //   - Hub has 3 entrances: north, west, east
@@ -90,10 +90,10 @@ export const TILE_RUNESTONE_3 = 16;
 // ── Constants ───────────────────────────────────────────────────────────────
 
 export const CELL_SIZE = 6;
-const WALL_SIZE = 6;
+const WALL_SIZE = 8;
 export const CELL_STEP = CELL_SIZE + WALL_SIZE;
 export const GRID_CELLS = 15;
-export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 186
+export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 218
 const TILE_PX = 16;
 
 /** Size of the central hub room in tiles. Matches CELL_SIZE to prevent cutting wall corners, resulting in a clean cross-shaped hub area. */
@@ -459,9 +459,9 @@ function generateMazeData(seed: number): number[] {
     data[hubCy * MAP_SIZE + hubCx] = TILE_TREE;
 
     // 3 runestones in a semi-circle in front of (below) the tree
-    data[(hubCy + 3) * MAP_SIZE + (hubCx - 2)] = TILE_RUNESTONE_1; // obelisk — left
+    data[(hubCy + 3) * MAP_SIZE + (hubCx - 6)] = TILE_RUNESTONE_1; // obelisk — left
     data[(hubCy + 4) * MAP_SIZE + hubCx]       = TILE_RUNESTONE_2; // shrine  — center
-    data[(hubCy + 3) * MAP_SIZE + (hubCx + 2)] = TILE_RUNESTONE_3; // jagged  — right
+    data[(hubCy + 3) * MAP_SIZE + (hubCx + 6)] = TILE_RUNESTONE_3; // jagged  — right
   }
 
   return data;

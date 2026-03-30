@@ -480,8 +480,8 @@ async function main(): Promise<void> {
               const th = ((x * 374761393 + y * 668265263) >>> 0) % 100;
               const grassTex = th < 47 ? assets.grassVariantTextures[0]
                 : th < 94 ? assets.grassVariantTextures[1]
-                : th < 97 ? assets.grassVariantTextures[2]
-                : assets.grassVariantTextures[3];
+                  : th < 97 ? assets.grassVariantTextures[2]
+                    : assets.grassVariantTextures[3];
               const floorSprite = new Sprite(grassTex);
               floorSprite.x = x * ts;
               floorSprite.y = y * ts;
@@ -513,8 +513,8 @@ async function main(): Promise<void> {
               const rsh = ((x * 374761393 + y * 668265263) >>> 0) % 100;
               const rsGrassTex = rsh < 47 ? assets.grassVariantTextures[0]
                 : rsh < 94 ? assets.grassVariantTextures[1]
-                : rsh < 97 ? assets.grassVariantTextures[2]
-                : assets.grassVariantTextures[3];
+                  : rsh < 97 ? assets.grassVariantTextures[2]
+                    : assets.grassVariantTextures[3];
               const rsFloor = new Sprite(rsGrassTex);
               rsFloor.x = x * ts;
               rsFloor.y = y * ts;
@@ -587,7 +587,7 @@ async function main(): Promise<void> {
           if (tileId !== TILE_FLOOR && tileId !== TILE_FLOOR_SHADOW) continue;
 
           const wallAbove = isSolid(x, y - 1);  // North neighbor is wall
-          const wallLeft  = isSolid(x - 1, y);  // West neighbor is wall
+          const wallLeft = isSolid(x - 1, y);  // West neighbor is wall
 
           let shadowTex: Texture | null = null;
 
@@ -647,15 +647,27 @@ async function main(): Promise<void> {
         interactPrompt.destroy();
       }
       interactPrompt = new Text({
-        text: 'Press E',
+        text: '[ E ]',
         style: new TextStyle({
-          fontFamily: 'monospace',
-          fontSize: 6,
+          fontFamily: 'PixelOperator8',
+          fontSize: 64, // Render huge so the canvas draws it perfectly sharp
           fill: '#ffffff',
-          stroke: { color: '#000000', width: 2 },
+          // A sharp, blocky drop shadow instead of a bubbly round stroke
+          dropShadow: {
+            alpha: 1,
+            blur: 0, // 0 blur keeps the shadow blocky
+            color: '#000000',
+            distance: 8, // 8px shadow becomes 1px thick when scaled down
+            angle: Math.PI / 4
+          },
           align: 'center',
         }),
+        roundPixels: true,
+        resolution: 2, // High resolution prevents any WebGL blur
       });
+
+      // Scale it back down to a native 8px height (64 * 0.125 = 8)
+      interactPrompt.scale.set(0.125);
       interactPrompt.anchor.set(0.5, 1.0);
       interactPrompt.visible = false;
       interactPrompt.zIndex = 99999;

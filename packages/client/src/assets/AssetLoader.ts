@@ -246,6 +246,19 @@ export async function loadAssets(): Promise<GameAssets> {
     }
   }
 
+  // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
+  try {
+    // Load the fonts so they are registered with the browser
+    await Assets.load([
+      'assets/pixel_operator/PixelOperator.ttf',
+      'assets/pixel_operator/PixelOperator8.ttf',
+    ]);
+    console.info('[Assets] Loaded Pixel Operator fonts');
+  } catch (err) {
+    console.warn('[Assets] Failed to load Pixel Operator fonts:', err);
+    // Fallback: standard system fonts will be used if these fail.
+  }
+
   return {
     floorTexture,
     floorShadowTexture,
