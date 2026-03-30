@@ -22,6 +22,7 @@ import { loadAssets, type GameAssets } from './assets/AssetLoader';
 import { DebugSettings } from './config/DebugSettings';
 import { Minimap } from './systems/Minimap';
 import { TilemapRenderer, type RunestoneSpriteData } from './systems/TilemapRenderer';
+import { Portal } from './systems/Portal';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 
@@ -77,6 +78,33 @@ let tilemapRenderer: TilemapRenderer | null = null;
 
 /** Floating "Press E" interaction prompt */
 let interactPrompt: Text | null = null;
+
+/** Portal instance (created when all runestones are activated). */
+let portal: Portal | null = null;
+
+// ── Screen Shake & Cinematic Camera State ───────────────────────────────────
+
+let shakeTimeRemaining = 0;
+const SHAKE_DURATION = 0.8;
+const SHAKE_MAX_INTENSITY = 3; // max ±px displacement
+
+/** Pending portal position to spawn after shake completes. */
+let pendingPortalPos: { x: number; y: number } | null = null;
+
+/**
+ * Camera cinematic state machine for the portal reveal sequence.
+ * Instant teleport to portal (no directional clues), watch appearance, then teleport back.
+ */
+type CinematicPhase = 'idle' | 'watch_portal';
+let cinematicPhase: CinematicPhase = 'idle';
+let cinematicElapsed = 0;
+
+/** Duration (seconds) to watch the portal appearance before returning. */
+const WATCH_DURATION = 1.6;
+
+/** Camera override target during cinematic (world pixel coords). */
+let cinematicTargetX = 0;
+let cinematicTargetY = 0;
 
 // ── Integer Scaling ─────────────────────────────────────────────────────────
 
@@ -447,6 +475,19 @@ async function main(): Promise<void> {
         }
       }
 
+      // ── Late-join portal sync ──────────────────────────────────────
+      if (gameState.portal && !portal) {
+        portal = new Portal(
+          gameState.portal.x,
+          gameState.portal.y,
+          assets.portalFrames,
+          assets.portalEmergenceCount,
+          entityLayer,
+          true, // skip emergence for late joiners
+        );
+        console.info(`[Main] Late-join: portal already active at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`);
+      }
+
       // ── Interaction prompt ─────────────────────────────────────────
       if (interactPrompt) {
         worldContainer.removeChild(interactPrompt);
@@ -559,6 +600,13 @@ async function main(): Promise<void> {
       }
     },
 
+    onAllRunestonesActivated: (portalX, portalY) => {
+      console.info(`[Main] All runestones activated! Portal at (${Math.round(portalX)}, ${Math.round(portalY)})`);
+      // Start screen shake — portal will spawn after shake completes
+      shakeTimeRemaining = SHAKE_DURATION;
+      pendingPortalPos = { x: portalX, y: portalY };
+    },
+
     onError: (code, message) => {
       console.error(`[Main] Server error [${code}]: ${message}`);
       if (statusEl) {
@@ -640,7 +688,15 @@ async function main(): Promise<void> {
 
     // ── 3. Camera follow + zoom ─────────────────────────────────────
     worldContainer.scale.set(zoomLevel);
-    updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
+
+    // Determine camera target: player normally, or cinematic override
+    let camTargetX = localX;
+    let camTargetY = localY;
+    if (cinematicPhase !== 'idle') {
+      camTargetX = cinematicTargetX;
+      camTargetY = cinematicTargetY;
+    }
+    updateCamera(worldContainer, camTargetX, camTargetY, mapPixelW, mapPixelH, zoomLevel);
 
     // ── 3b. Viewport culling — hide off-screen tilemap chunks ────────
     if (tilemapRenderer) {
@@ -649,6 +705,53 @@ async function main(): Promise<void> {
 
     // ── 4. Minimap ────────────────────────────────────────────────────
     if (minimap) minimap.update(localX, localY);
+
+    // ── 4b. Screen shake ────────────────────────────────────────────
+    if (shakeTimeRemaining > 0) {
+      shakeTimeRemaining -= dtSeconds;
+      // Exponentially decaying shake intensity
+      const progress = Math.max(0, shakeTimeRemaining / SHAKE_DURATION);
+      const intensity = SHAKE_MAX_INTENSITY * progress;
+      const shakeX = Math.round((Math.random() * 2 - 1) * intensity);
+      const shakeY = Math.round((Math.random() * 2 - 1) * intensity);
+      worldContainer.x += shakeX;
+      worldContainer.y += shakeY;
+
+      // When shake ends, instantly teleport camera to portal and spawn it
+      if (shakeTimeRemaining <= 0 && pendingPortalPos) {
+        // Spawn portal
+        portal?.destroy();
+        portal = new Portal(
+          pendingPortalPos.x,
+          pendingPortalPos.y,
+          assets.portalFrames,
+          assets.portalEmergenceCount,
+          entityLayer,
+          false, // play emergence animation
+        );
+        // Instant camera jump to portal (no directional clues)
+        cinematicPhase = 'watch_portal';
+        cinematicElapsed = 0;
+        cinematicTargetX = pendingPortalPos.x;
+        cinematicTargetY = pendingPortalPos.y;
+        pendingPortalPos = null;
+      }
+    }
+
+    // ── 4c. Cinematic camera: watch portal then snap back ───────────
+    if (cinematicPhase === 'watch_portal') {
+      cinematicElapsed += dtSeconds;
+      if (cinematicElapsed >= WATCH_DURATION) {
+        // Instant snap back to player
+        cinematicPhase = 'idle';
+        cinematicElapsed = 0;
+      }
+    }
+
+    // ── 4d. Portal animation ────────────────────────────────────────
+    if (portal) {
+      portal.update(dtSeconds);
+    }
 
     // ── 5. Runestone interaction prompt ──────────────────────────────
     if (interactPrompt && tilemapRenderer) {

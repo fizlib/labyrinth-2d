@@ -664,3 +664,122 @@ export function computeSpawnPoints(
 
   return picked.slice(0, numTeams);
 }
+
+// ── Portal Position Computation ─────────────────────────────────────────────
+
+/**
+ * Compute a portal spawn position that is farther from the hub than the
+ * player spawn points.
+ *
+ * Algorithm:
+ *   1. Build a cell-level adjacency graph (same as computeSpawnPoints).
+ *   2. BFS from all hub cells.
+ *   3. Find reachable floor cells at distance > spawnDistance.
+ *      Target distance = spawnDistance + 2, capped at GRID_CELLS - 1.
+ *   4. Pick the cell with the highest BFS distance (deepest in the maze).
+ *      Ties broken by closest to due-south direction from hub center.
+ *
+ * @param data           Flat tile array from generateMaze
+ * @param spawnDistance   The spawn distance used for teams (to ensure portal is farther)
+ * @returns              Pixel coordinates { x, y } of the portal center, or null if none found
+ */
+export function computePortalPosition(
+  data: number[],
+  spawnDistance: number,
+): SpawnPoint | null {
+  // ── 1. Identify hub cells ───────────────────────────────────────────
+  const hubTileX = Math.floor((MAP_SIZE - HUB_SIZE) / 2);
+  const hubTileY = Math.floor((MAP_SIZE - HUB_SIZE) / 2);
+  const hubCells = getHubCells(hubTileX, hubTileY, HUB_SIZE);
+
+  // ── 2. BFS on cell graph ────────────────────────────────────────────
+  const cellDist = new Array(GRID_CELLS * GRID_CELLS).fill(-1);
+
+  const queue: Array<{ cx: number; cy: number }> = [];
+  for (const key of hubCells) {
+    const [cx, cy] = key.split(',').map(Number);
+    cellDist[cy * GRID_CELLS + cx] = 0;
+    queue.push({ cx, cy });
+  }
+
+  let head = 0;
+  while (head < queue.length) {
+    const { cx, cy } = queue[head++];
+    const d = cellDist[cy * GRID_CELLS + cx];
+
+    for (const dir of DIRS) {
+      const nx = cx + dir.dx;
+      const ny = cy + dir.dy;
+      if (nx < 0 || nx >= GRID_CELLS || ny < 0 || ny >= GRID_CELLS) continue;
+      if (cellDist[ny * GRID_CELLS + nx] !== -1) continue;
+      if (!areCellsConnected(data, cx, cy, nx, ny)) continue;
+
+      cellDist[ny * GRID_CELLS + nx] = d + 1;
+      queue.push({ cx: nx, cy: ny });
+    }
+  }
+
+  // ── 3. Find candidates at distance > spawnDistance ──────────────────
+  const targetMinDist = spawnDistance + 1;
+  const targetMaxDist = Math.min(spawnDistance + 3, GRID_CELLS - 1);
+
+  const hubCenterX = MAP_SIZE / 2;
+  const hubCenterY = MAP_SIZE / 2;
+
+  interface Candidate { cx: number; cy: number; dist: number; angle: number }
+  let candidates: Candidate[] = [];
+
+  for (let cy = 0; cy < GRID_CELLS; cy++) {
+    for (let cx = 0; cx < GRID_CELLS; cx++) {
+      const d = cellDist[cy * GRID_CELLS + cx];
+      if (d === -1) continue;
+      if (d < targetMinDist || d > targetMaxDist) continue;
+      if (hubCells.has(`${cx},${cy}`)) continue;
+
+      const { tx, ty } = cellToTile(cx, cy);
+      const pixX = tx + CELL_SIZE / 2;
+      const pixY = ty + CELL_SIZE / 2;
+      const angle = Math.atan2(pixY - hubCenterY, pixX - hubCenterX);
+      candidates.push({ cx, cy, dist: d, angle });
+    }
+  }
+
+  // Widen search if no candidates found at target range
+  if (candidates.length === 0) {
+    for (let cy = 0; cy < GRID_CELLS; cy++) {
+      for (let cx = 0; cx < GRID_CELLS; cx++) {
+        const d = cellDist[cy * GRID_CELLS + cx];
+        if (d === -1 || d <= spawnDistance) continue;
+        if (hubCells.has(`${cx},${cy}`)) continue;
+
+        const { tx, ty } = cellToTile(cx, cy);
+        const pixX = tx + CELL_SIZE / 2;
+        const pixY = ty + CELL_SIZE / 2;
+        const angle = Math.atan2(pixY - hubCenterY, pixX - hubCenterX);
+        candidates.push({ cx, cy, dist: d, angle });
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  // ── 4. Pick the deepest cell, ties broken by angle closest to south ──
+  const southAngle = Math.PI / 2; // pointing down
+
+  candidates.sort((a, b) => {
+    // Prefer higher distance (deeper in maze)
+    if (b.dist !== a.dist) return b.dist - a.dist;
+    // Tiebreak: closer to due-south from hub center
+    const aDiff = Math.abs(a.angle - southAngle);
+    const bDiff = Math.abs(b.angle - southAngle);
+    return aDiff - bDiff;
+  });
+
+  const best = candidates[0];
+  const { tx, ty } = cellToTile(best.cx, best.cy);
+
+  return {
+    x: tx + Math.floor(CELL_SIZE / 2),
+    y: ty + Math.floor(CELL_SIZE / 2),
+  };
+}

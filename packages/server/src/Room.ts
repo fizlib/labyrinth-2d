@@ -24,6 +24,7 @@ import {
   TILE_RUNESTONE_3,
   generateMaze,
   computeSpawnPoints,
+  computePortalPosition,
   applyInputWithCollision,
   type FacingDirection,
   type TileMapData,
@@ -38,6 +39,7 @@ import {
   type TickUpdateMessage,
   type PlayerLeftMessage,
   type RunestoneActivatedMessage,
+  type AllRunestonesActivatedMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -89,6 +91,9 @@ export class Room {
   /** Runestone activation state (server-authoritative). */
   private runestones: RunestoneInfo[] = [];
 
+  /** Portal position (set when all runestones are activated). */
+  private portalPosition: { x: number; y: number } | null = null;
+
 
   /** Random seed used to generate this room's maze. */
   readonly mapSeed: number;
@@ -109,6 +114,7 @@ export class Room {
       tick: 0,
       players: [],
       runestones: this.runestones,
+      portal: null,
     };
     console.info(
       `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
@@ -280,6 +286,30 @@ export class Room {
       runestoneIndex: idx,
     };
     this.broadcast(activatedMsg);
+
+    // Check if ALL runestones are now activated → spawn portal
+    const allActivated = this.runestones.every((r) => r.activated);
+    if (allActivated && !this.portalPosition) {
+      const portalTile = computePortalPosition(this.map.data, SPAWN_DISTANCE);
+      if (portalTile) {
+        // Convert tile coordinates to pixel coordinates (center of cell)
+        const portalPxX = (portalTile.x + 0.5) * TILE_SIZE;
+        const portalPxY = (portalTile.y + 0.5) * TILE_SIZE;
+        this.portalPosition = { x: portalPxX, y: portalPxY };
+        this.state.portal = this.portalPosition;
+
+        console.info(`[Room:${this.id}] All runestones activated! Portal spawned at (${Math.round(portalPxX)}, ${Math.round(portalPxY)})`);
+
+        const portalMsg: AllRunestonesActivatedMessage = {
+          type: MessageType.AllRunestonesActivated,
+          portalX: portalPxX,
+          portalY: portalPxY,
+        };
+        this.broadcast(portalMsg);
+      } else {
+        console.warn(`[Room:${this.id}] All runestones activated but no valid portal position found!`);
+      }
+    }
   }
 
   // ── Game Loop ─────────────────────────────────────────────────────────
@@ -373,6 +403,7 @@ export class Room {
       tick: this.state.tick,
       players: this.state.players.map((p) => ({ ...p })),
       runestones: this.runestones.map((r) => ({ ...r })),
+      portal: this.portalPosition ? { ...this.portalPosition } : null,
     };
   }
 

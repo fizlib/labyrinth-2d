@@ -24,6 +24,7 @@ export interface NetworkCallbacks {
   onTickUpdate: (gameState: GameState) => void;
   onPlayerLeft: (playerId: string) => void;
   onRunestoneActivated: (runestoneIndex: number) => void;
+  onAllRunestonesActivated: (portalX: number, portalY: number) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
 }
@@ -129,6 +130,10 @@ export class NetworkManager {
 
       case MessageType.RunestoneActivated:
         this.callbacks.onRunestoneActivated(msg.runestoneIndex);
+        break;
+
+      case MessageType.AllRunestonesActivated:
+        this.callbacks.onAllRunestonesActivated(msg.portalX, msg.portalY);
         break;
 
       case MessageType.Error:

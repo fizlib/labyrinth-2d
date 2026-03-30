@@ -54,6 +54,10 @@ export interface GameAssets {
   playerAnimationSets: Record<string, Texture[]>[];
   /** Runestone textures: 3 pairs of [inactive, active]. Access via runestoneTextures[index][0|1]. */
   runestoneTextures: [Texture, Texture][];
+  /** Portal animation frames (row 1 emergence + row 2 idle, flattened). */
+  portalFrames: Texture[];
+  /** Number of emergence frames (the rest are idle). */
+  portalEmergenceCount: number;
 }
 
 export async function loadAssets(): Promise<GameAssets> {
@@ -77,6 +81,8 @@ export async function loadAssets(): Promise<GameAssets> {
   let shadowCornerTexture: Texture;
   const playerAnimationSets: Record<string, Texture[]>[] = [];
   let runestoneTextures: [Texture, Texture][] = [];
+  let portalFrames: Texture[] = [];
+  let portalEmergenceCount = 6;
 
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
@@ -246,6 +252,55 @@ export async function loadAssets(): Promise<GameAssets> {
     }
   }
 
+  // ── Portal spritesheet (2 rows: row 1 = emergence, row 2 = idle) ──────────
+  try {
+    const portalSheet = await Assets.load<Texture>('assets/portal_spritesheet.png');
+    portalSheet.source.scaleMode = 'nearest';
+
+    // Frame size: each row is half the sheet height, frames are square
+    const frameH = Math.floor(portalSheet.height / 2);
+    const frameW = frameH;
+    const framesPerRow = Math.floor(portalSheet.width / frameW);
+
+    portalFrames = [];
+    // Row 1 (y=0): emergence frames
+    for (let i = 0; i < framesPerRow; i++) {
+      portalFrames.push(new Texture({
+        source: portalSheet.source,
+        frame: new Rectangle(i * frameW, 0, frameW, frameH),
+      }));
+    }
+    const emergenceCount = framesPerRow;
+    portalEmergenceCount = emergenceCount;
+    // Row 2 (y=frameH): idle frames
+    for (let i = 0; i < framesPerRow; i++) {
+      portalFrames.push(new Texture({
+        source: portalSheet.source,
+        frame: new Rectangle(i * frameW, frameH, frameW, frameH),
+      }));
+    }
+    console.info(`[Assets] Loaded portal_spritesheet.png (${emergenceCount} emergence + ${framesPerRow} idle, ${frameW}×${frameH} each)`);
+  } catch {
+    console.info('[Assets] portal_spritesheet.png not found — using fallback portal textures');
+    portalFrames = [];
+    for (let i = 0; i < 12; i++) {
+      const c = document.createElement('canvas');
+      c.width = 32;
+      c.height = 32;
+      const ctx = c.getContext('2d')!;
+      ctx.clearRect(0, 0, 32, 32);
+      const alpha = i < 6 ? (i + 1) / 6 : 1;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#8844ff';
+      ctx.beginPath();
+      ctx.arc(16, 16, 10 + Math.sin(i * 0.5) * 3, 0, Math.PI * 2);
+      ctx.fill();
+      const tex = Texture.from(c);
+      tex.source.scaleMode = 'nearest';
+      portalFrames.push(tex);
+    }
+  }
+
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
   try {
     // Load the fonts so they are registered with the browser
@@ -280,5 +335,7 @@ export async function loadAssets(): Promise<GameAssets> {
     shadowCornerTexture,
     playerAnimationSets,
     runestoneTextures,
+    portalFrames,
+    portalEmergenceCount,
   };
 }

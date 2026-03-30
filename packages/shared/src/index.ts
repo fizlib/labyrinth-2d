@@ -36,6 +36,7 @@ export {
   TILE_RUNESTONE_3,
   MAZE_SIZE,
   computeSpawnPoints,
+  computePortalPosition,
   generateMaze,
   type TileMapData,
   type SpawnPoint,
@@ -99,6 +100,7 @@ export enum MessageType {
   TickUpdate = 'TICK_UPDATE',
   PlayerLeft = 'PLAYER_LEFT',
   RunestoneActivated = 'RUNESTONE_ACTIVATED',
+  AllRunestonesActivated = 'ALL_RUNESTONES_ACTIVATED',
   Error = 'ERROR',
 }
 
@@ -173,6 +175,14 @@ export interface RunestoneActivatedMessage {
   runestoneIndex: number;
 }
 
+export interface AllRunestonesActivatedMessage {
+  type: MessageType.AllRunestonesActivated;
+  /** Portal spawn X in pixel coordinates. */
+  portalX: number;
+  /** Portal spawn Y in pixel coordinates. */
+  portalY: number;
+}
+
 export interface ErrorMessage {
   type: MessageType.Error;
   code: string;
@@ -198,6 +208,8 @@ export interface GameState {
   tick: number;
   players: PlayerInfo[];
   runestones: RunestoneInfo[];
+  /** Portal position in pixel coordinates. null until all runestones are activated. */
+  portal: { x: number; y: number } | null;
 }
 
 // ── Union Types ─────────────────────────────────────────────────────────────
@@ -209,4 +221,5 @@ export type ServerToClientMessage =
   | TickUpdateMessage
   | PlayerLeftMessage
   | RunestoneActivatedMessage
+  | AllRunestonesActivatedMessage
   | ErrorMessage;
