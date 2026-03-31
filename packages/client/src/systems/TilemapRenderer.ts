@@ -78,15 +78,24 @@ function getGrassTexture(x: number, y: number, grassTextures: Texture[]): Textur
   return grassTextures[3];
 }
 
+/** Deterministic wall face variant texture based on tile position. */
+function getWallFaceTexture(x: number, y: number, wallFaceTextures: Texture[]): Texture {
+  const h = ((x * 2246822519 + y * 3266489917) >>> 0) % 100;
+  if (h < 70) return wallFaceTextures[0];
+  if (h < 80) return wallFaceTextures[1];
+  if (h < 90) return wallFaceTextures[2];
+  return wallFaceTextures[3];
+}
+
 /** Returns true if tileId is a solid wall type (IDs 2–12, plus tree/runestones). */
 function isSolidWallTile(tileId: number): boolean {
   return tileId >= TILE_WALL_FACE && tileId <= TILE_WALL_TOP_EDGE;
 }
 
 /** Returns the appropriate texture for a wall tile ID. */
-function getWallTexture(tileId: number, assets: GameAssets): Texture | null {
+function getWallTexture(tileId: number, x: number, y: number, assets: GameAssets): Texture | null {
   switch (tileId) {
-    case TILE_WALL_FACE:      return assets.wallFaceTexture;
+    case TILE_WALL_FACE:      return getWallFaceTexture(x, y, assets.wallFaceVariantTextures);
     case TILE_WALL_TOP:       return assets.wallTopTexture;
     case TILE_WALL_INTERIOR:  return assets.wallInteriorTexture;
     case TILE_WALL_SIDE_LEFT: return assets.wallSideLeftTexture;
@@ -278,7 +287,7 @@ export class TilemapRenderer {
           const tileId = map.data[y * map.width + x];
 
           if (isSolidWallTile(tileId)) {
-            const tex = getWallTexture(tileId, assets);
+            const tex = getWallTexture(tileId, x, y, assets);
             if (tex) {
               const sprite = new Sprite(tex);
               sprite.x = (x - startX) * ts;

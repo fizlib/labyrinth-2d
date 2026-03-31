@@ -4,7 +4,7 @@
 // Attempts to load real PNG assets; if they fail, uses procedurally generated
 // textures from FallbackTextures.ts so the game always works.
 //
-// Step 9: 5 tile textures — floor, floor shadow, wall face, wall top, wall interior.
+// Step 9: 5 tile textures — floor, floor shadow, wall face variants, wall top, wall interior.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Assets, Texture, Rectangle } from 'pixi.js';
@@ -31,7 +31,8 @@ import {
 export interface GameAssets {
   floorTexture: Texture;
   floorShadowTexture: Texture;
-  wallFaceTexture: Texture;
+  /** 4 wall face variant textures: [base, mixed, cracked, mossy]. */
+  wallFaceVariantTextures: Texture[];
   wallTopTexture: Texture;
   wallInteriorTexture: Texture;
   wallSideLeftTexture: Texture;
@@ -66,7 +67,7 @@ export interface GameAssets {
 export async function loadAssets(): Promise<GameAssets> {
   let floorTexture: Texture;
   let floorShadowTexture: Texture;
-  let wallFaceTexture: Texture;
+  let wallFaceVariantTextures: Texture[] = [];
   let wallTopTexture: Texture;
   let wallInteriorTexture: Texture;
   let wallSideLeftTexture: Texture;
@@ -94,7 +95,6 @@ export async function loadAssets(): Promise<GameAssets> {
 
     floorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(0, 0, 16, 16) });
     floorShadowTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(16, 0, 16, 16) });
-    wallFaceTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(32, 0, 16, 16) });
     wallTopTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(48, 0, 16, 16) });
     wallInteriorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(64, 0, 16, 16) });
     wallSideLeftTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(80, 0, 16, 16) });
@@ -113,13 +113,12 @@ export async function loadAssets(): Promise<GameAssets> {
       );
     }
 
-    console.info('[Assets] Loaded tiles.png (17 tile types)');
+    console.info('[Assets] Loaded tiles.png (preserved wall tiles + grass variants)');
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
     // Map existing fallback generators to the new semantic naming
     floorTexture = generateGrassTexture();
     floorShadowTexture = generateDirtTexture();
-    wallFaceTexture = generateCliffFaceTexture();
     wallTopTexture = generateCliffTopTexture();
     wallInteriorTexture = generateCliffBodyTexture();
     wallSideLeftTexture = generateCliffBodyTexture();
@@ -132,6 +131,28 @@ export async function loadAssets(): Promise<GameAssets> {
     wallTopEdgeTexture = generateTopEdgeTexture();
     // Fallback: reuse the same grass texture for all variants
     grassVariantTextures = [floorTexture, floorTexture, floorTexture, floorTexture];
+  }
+
+  try {
+    const wallFaceSheet = await Assets.load<Texture>('assets/wall_tiles.png');
+    wallFaceSheet.source.scaleMode = 'nearest';
+
+    for (let i = 0; i < 4; i++) {
+      wallFaceVariantTextures.push(
+        new Texture({ source: wallFaceSheet.source, frame: new Rectangle(i * 16, 0, 16, 16) }),
+      );
+    }
+
+    console.info('[Assets] Loaded wall_tiles.png (4 wall face variants)');
+  } catch {
+    console.info('[Assets] wall_tiles.png not found — using fallback wall face variants');
+    const fallbackWallFace = generateCliffFaceTexture();
+    wallFaceVariantTextures = [
+      fallbackWallFace,
+      fallbackWallFace,
+      fallbackWallFace,
+      fallbackWallFace,
+    ];
   }
 
   // ── Tree asset (separate from tilesheet — different dimensions) ──────────
@@ -330,7 +351,7 @@ export async function loadAssets(): Promise<GameAssets> {
   return {
     floorTexture,
     floorShadowTexture,
-    wallFaceTexture,
+    wallFaceVariantTextures,
     wallTopTexture,
     wallInteriorTexture,
     wallSideLeftTexture,
