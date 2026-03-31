@@ -636,8 +636,8 @@ export function computeSpawnPoints(
     if (best) {
       const { tx, ty } = cellToTile(best.cx, best.cy);
       picked.push({
-        x: tx + Math.floor(CELL_SIZE / 2),
-        y: ty + Math.floor(CELL_SIZE / 2),
+        x: tx + (CELL_SIZE - 1) / 2,
+        y: ty + (CELL_SIZE - 1) / 2,
       });
       // Remove this candidate so other sectors don't reuse it
       candidates = candidates.filter((c) => c.cx !== best.cx || c.cy !== best.cy);
@@ -779,7 +779,7 @@ export function computePortalPosition(
   const { tx, ty } = cellToTile(best.cx, best.cy);
 
   return {
-    x: tx + Math.floor(CELL_SIZE / 2),
-    y: ty + Math.floor(CELL_SIZE / 2),
+    x: tx + (CELL_SIZE - 1) / 2,
+    y: ty + (CELL_SIZE - 1) / 2,
   };
 }

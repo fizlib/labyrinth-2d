@@ -121,7 +121,7 @@ export class Room {
     );
     for (let i = 0; i < this.spawnPoints.length; i++) {
       const sp = this.spawnPoints[i];
-      console.info(`  Team ${i} spawn: tile (${sp.x}, ${sp.y}) → px (${(sp.x + 0.5) * TILE_SIZE}, ${(sp.y + 1) * TILE_SIZE})`);
+      console.info(`  Team ${i} spawn: tile (${sp.x}, ${sp.y}) → px (${(sp.x + 0.5) * TILE_SIZE}, ${(sp.y + 0.5) * TILE_SIZE})`);
     }
   }
 
@@ -162,7 +162,7 @@ export class Room {
     const spawnTile = this.spawnPoints[assignedTeam] ?? this.spawnPoints[0];
     // Player x,y = bottom-center of sprite (feet position)
     const spawnX = (spawnTile.x + 0.5) * TILE_SIZE;
-    const spawnY = (spawnTile.y + 1) * TILE_SIZE;
+    const spawnY = (spawnTile.y + 0.5) * TILE_SIZE;
 
     // ── Per-player sprite assignment ─────────────────────────────────
     // Available sprite count (must match client's PLAYER_FILES array length)
