@@ -26,11 +26,16 @@ import { TilemapRenderer, type RunestoneSpriteData } from './systems/TilemapRend
 import { Portal } from './systems/Portal';
 import { WisdomOrbHud } from './systems/WisdomOrbHud';
 import { WisdomArrow } from './systems/WisdomArrow';
+import { IntroDialogueHud } from './systems/IntroDialogueHud';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 
 const PLAYER_SPRITE_W = 16;
 const PLAYER_SPRITE_H = 32;
+const SPAWN_DIALOGUE_PAGES = [
+  'You have been cast into the Maze. Scattered and alone, find your way to the heart of the labyrinth — where other survivors await.',
+  'Together, activate the three ancient runes to unlock the portal and escape… before the Maze claims you forever.',
+];
 
 // ── Input State ─────────────────────────────────────────────────────────────
 
@@ -90,6 +95,9 @@ let wisdomOrbHud: WisdomOrbHud | null = null;
 
 /** Local-only world-space hint arrow shown after using a wisdom orb. */
 let wisdomArrow: WisdomArrow | null = null;
+
+/** Bottom-of-screen intro dialogue shown when the local player joins the maze. */
+let introDialogueHud: IntroDialogueHud | null = null;
 
 // ── Screen Shake & Cinematic Camera State ───────────────────────────────────
 
@@ -485,6 +493,13 @@ async function main(): Promise<void> {
 
       wisdomArrow?.destroy();
       wisdomArrow = new WisdomArrow(entityLayer);
+      introDialogueHud?.destroy();
+      introDialogueHud = new IntroDialogueHud(
+        INTERNAL_WIDTH,
+        INTERNAL_HEIGHT,
+        SPAWN_DIALOGUE_PAGES,
+      );
+      introDialogueHud.addToStage(app.stage);
 
       // ── Sync runestone activation state from initial GameState ─────
       for (const rsInfo of gameState.runestones) {
@@ -732,6 +747,7 @@ async function main(): Promise<void> {
 
     // ── 4. Minimap ────────────────────────────────────────────────────
     if (minimap) minimap.update(localX, localY);
+    introDialogueHud?.update(dtSeconds);
     wisdomArrow?.update(dtSeconds, localX, localY);
 
     // ── 4b. Screen shake ────────────────────────────────────────────
@@ -889,6 +905,11 @@ async function main(): Promise<void> {
 
     if (e.code === 'KeyQ' && !e.repeat && localPlayerInitialized) {
       net.sendUseWisdomOrb();
+    }
+
+    if (e.code === 'KeyE' && introDialogueHud?.isVisible()) {
+      if (!e.repeat) introDialogueHud.advance();
+      return;
     }
 
     // ── E key: runestone activation ──────────────────────────────────

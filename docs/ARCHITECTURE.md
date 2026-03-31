@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-03-31 - Protocol, map, HUD sync and wisdom orbs
+Last updated: 2026-03-31 - Typed spawn intro dialogue HUD
 
 ## Project Overview
 
@@ -248,6 +248,11 @@ The client currently has multiple UI subsystems, not just the minimap:
   - screen-space HUD in the top-left corner
   - shows `3` orb slots and the current remaining count
   - filled orbs are clickable
+- `IntroDialogueHud`
+  - screen-space dialogue panel centered along the bottom of the screen
+  - shows a two-step intro dialogue when the local player joins the maze
+  - reveals each page with a typewriter effect
+  - `E` or the clickable arrow skips the current typing animation first, then advances or dismisses
 - `WisdomArrow`
   - local-only world-space hint arrow above the local player
   - appears after a successful orb use
@@ -258,7 +263,9 @@ The client currently has multiple UI subsystems, not just the minimap:
 ### Input Handling
 
 - Movement: arrow keys or `WASD`
-- Runestone interaction: `E`
+- Intro dialogue advance: `E` or click the arrow button while the intro dialogue is visible
+- Intro dialogue skip: `E` or click the arrow button while the current page is still typing
+- Runestone interaction: `E` after the intro dialogue is dismissed
 - Wisdom orb use: `Q` or click a filled orb in the HUD
 - Debug-only tools can enable scroll zoom, zoom toggling, and click teleport
 
@@ -300,6 +307,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - minimap HUD
 - `packages/client/src/systems/WisdomOrbHud.ts`
   - top-left orb HUD and click handling
+- `packages/client/src/systems/IntroDialogueHud.ts`
+  - bottom-screen paged spawn dialogue HUD
 - `packages/client/src/systems/WisdomArrow.ts`
   - temporary world-space guidance arrow
 
