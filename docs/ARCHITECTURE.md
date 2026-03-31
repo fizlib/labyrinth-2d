@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-03-31 - Typed spawn intro dialogue HUD
+Last updated: 2026-03-31 - Spawn-route gate cells
 
 ## Project Overview
 
@@ -40,7 +40,7 @@ One room owns one maze instance. The server is authoritative for player state, r
 
 1. A client connects and sends `JOIN_ROOM`.
 2. The server creates or reuses the room and assigns the player to the first team with space.
-3. The room generates one maze from a random seed and computes team spawn points from that maze.
+3. The room generates one gated maze layout from a random seed and derives team spawn points from the ungated base maze.
 4. The room starts its fixed tick loop when the first player joins.
 5. The room stops and is destroyed when the last player leaves.
 
@@ -119,6 +119,7 @@ One room owns one maze instance. The server is authoritative for player state, r
 - Shared movement constants and collision helpers live in `packages/shared/src/physics.ts`.
 - Both client and server use the same feet-based collision logic.
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
+- Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
 - Collision also respects the spawned portal when present.
 
 ### Runestones and Portal Flow
@@ -136,6 +137,7 @@ One room owns one maze instance. The server is authoritative for player state, r
 - Shared phase-aware guidance lives in `packages/shared/src/navigation.ts`.
 - `computeHubDistanceField()` builds the phase 1 pathfield toward the central hub.
 - `computePortalDistanceField()` builds the phase 2 pathfield toward walkable portal-approach tiles around the blocked portal collider.
+- When a generated map contains closed gates, wisdom guidance falls back to tile-ray direction selection so hints do not point through a gated cell.
 - `getNavigationDirectionForPosition()` converts the player's feet position to a tile and returns one of:
   - `north`
   - `east`
@@ -167,12 +169,14 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 5. Open the four hub entrances into the surrounding maze.
 6. Post-process solid regions into the final 2.5D wall tile set.
 7. Place the hub tree and the three runestones.
+8. Compute spawn points from the ungated maze, then stamp one closed gate cell per team along the chosen spawn-to-hub routes when a qualifying straight corridor cell exists.
 
 ### Spawns and Objective Placement
 
 - Team spawn points are computed with BFS over the cell graph, not hardcoded coordinates.
 - `SPAWN_DISTANCE` is currently `10` cell-steps from the hub.
 - Spawn selection prefers angular separation around the map so teams begin in different sectors.
+- Closed gates are chosen from straight-through cells on spawn-to-hub paths and are rendered as one-tile-thick barriers through the middle of those cells.
 - Portal placement is also BFS-driven and prefers cells deeper in the maze than player spawns.
 
 ### Tile IDs
@@ -196,6 +200,8 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 | `14` | `TILE_RUNESTONE_1` | Runestone type 1 |
 | `15` | `TILE_RUNESTONE_2` | Runestone type 2 |
 | `16` | `TILE_RUNESTONE_3` | Runestone type 3 |
+| `17` | `TILE_GATE_HORIZONTAL` | Closed gate row across a cell midpoint |
+| `18` | `TILE_GATE_VERTICAL` | Closed gate column across a cell midpoint |
 
 ## Client Rendering and HUD
 
@@ -223,6 +229,7 @@ The loader attempts to load authored PNG assets first and falls back to generate
 
 - `assets/tiles.png`
 - `assets/oak-tree.png`
+- `assets/gates.png`
 - `assets/shadow_top.png`
 - `assets/shadow_left.png`
 - `assets/shadow_corner.png`
@@ -278,7 +285,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `packages/shared/src/physics.ts`
   - movement and collision helpers used by both client and server
 - `packages/shared/src/maps/level1.ts`
-  - procedural labyrinth generation, spawn selection, portal placement
+  - procedural labyrinth generation, gated layout stamping, spawn selection, portal placement
 - `packages/shared/src/navigation.ts`
   - hub-distance fields and wisdom-orb guidance
 

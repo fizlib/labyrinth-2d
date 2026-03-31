@@ -624,3 +624,55 @@ export function generateShadowCornerTexture(): Texture {
 
   return canvasToTexture(canvas);
 }
+
+export function generateGateHorizontalTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+  ctx.clearRect(0, 0, TILE, TILE);
+
+  ctx.fillStyle = '#22160d';
+  ctx.fillRect(0, 5, TILE, 6);
+
+  ctx.fillStyle = '#6d5231';
+  ctx.fillRect(0, 6, TILE, 4);
+
+  ctx.fillStyle = '#b39463';
+  ctx.fillRect(0, 6, TILE, 1);
+
+  ctx.fillStyle = '#d2d7de';
+  for (let x = 2; x < TILE; x += 4) {
+    ctx.fillRect(x, 3, 1, 10);
+  }
+
+  ctx.fillStyle = '#6f7986';
+  for (let x = 0; x < TILE; x += 8) {
+    ctx.fillRect(x, 7, 2, 2);
+  }
+
+  return canvasToTexture(canvas);
+}
+
+export function generateGateVerticalTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+  ctx.clearRect(0, 0, TILE, TILE);
+
+  ctx.fillStyle = '#22160d';
+  ctx.fillRect(5, 0, 6, TILE);
+
+  ctx.fillStyle = '#6d5231';
+  ctx.fillRect(6, 0, 4, TILE);
+
+  ctx.fillStyle = '#b39463';
+  ctx.fillRect(6, 0, 1, TILE);
+
+  ctx.fillStyle = '#d2d7de';
+  for (let y = 2; y < TILE; y += 4) {
+    ctx.fillRect(3, y, 10, 1);
+  }
+
+  ctx.fillStyle = '#6f7986';
+  for (let y = 0; y < TILE; y += 8) {
+    ctx.fillRect(7, y, 2, 2);
+  }
+
+  return canvasToTexture(canvas);
+}

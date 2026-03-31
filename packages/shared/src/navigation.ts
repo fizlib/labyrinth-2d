@@ -3,6 +3,7 @@ import {
   CELL_STEP,
   GRID_CELLS,
   getHubTileBounds,
+  isGateTileId,
   isSolidTileId,
   type TileMapData,
 } from './maps/level1.js';
@@ -133,6 +134,10 @@ export function getNavigationDirectionForTile(
   const currentTileDistance = distances.tileDistances[currentIndex];
   if (currentTileDistance <= 0) return null;
 
+  if (mapHasClosedGates(map)) {
+    return getTileRayDirection(tileX, tileY, map, distances);
+  }
+
   const region = classifyRegion(tileX, tileY, map);
   if (!region) {
     return getTileRayDirection(tileX, tileY, map, distances);
@@ -194,6 +199,10 @@ export function getNavigationDirectionForTile(
 
 export const getHubDirectionForPosition = getNavigationDirectionForPosition;
 export const getHubDirectionForTile = getNavigationDirectionForTile;
+
+function mapHasClosedGates(map: TileMapData): boolean {
+  return map.data.some((tile) => isGateTileId(tile));
+}
 
 function computeDistanceField(
   map: TileMapData,

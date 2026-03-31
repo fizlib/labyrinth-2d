@@ -34,6 +34,24 @@ export interface SpawnPoint {
   y: number;
 }
 
+export type GateOrientation = 'horizontal' | 'vertical';
+
+export interface GatePlacement {
+  teamIndex: number;
+  cellX: number;
+  cellY: number;
+  /** Barrier origin tile. Horizontal gates start at the left edge; vertical gates start at the top edge. */
+  tileX: number;
+  tileY: number;
+  orientation: GateOrientation;
+}
+
+export interface GeneratedMazeLayout {
+  map: TileMapData;
+  spawnPoints: SpawnPoint[];
+  gates: GatePlacement[];
+}
+
 // ── Tile ID Constants ───────────────────────────────────────────────────────
 
 /** Base floor — walkable, rendered on background layer. */
@@ -87,6 +105,12 @@ export const TILE_RUNESTONE_2 = 15;
 /** Runestone 3 (Jagged) — solid, 16×32 sprite, interactive. */
 export const TILE_RUNESTONE_3 = 16;
 
+/** Closed gate segment spanning left-to-right across a cell. */
+export const TILE_GATE_HORIZONTAL = 17;
+
+/** Closed gate segment spanning top-to-bottom across a cell. */
+export const TILE_GATE_VERTICAL = 18;
+
 // ── Constants ───────────────────────────────────────────────────────────────
 
 export const CELL_SIZE = 6;
@@ -117,6 +141,10 @@ export function getHubTileBounds(width: number = MAP_SIZE, height: number = MAP_
   };
 }
 
+export function isGateTileId(tile: number): boolean {
+  return tile === TILE_GATE_HORIZONTAL || tile === TILE_GATE_VERTICAL;
+}
+
 export function isSolidTileId(tile: number): boolean {
   return tile === TILE_WALL_FACE ||
     tile === TILE_WALL_TOP ||
@@ -132,7 +160,8 @@ export function isSolidTileId(tile: number): boolean {
     tile === TILE_TREE ||
     tile === TILE_RUNESTONE_1 ||
     tile === TILE_RUNESTONE_2 ||
-    tile === TILE_RUNESTONE_3;
+    tile === TILE_RUNESTONE_3 ||
+    isGateTileId(tile);
 }
 
 // ── Seeded PRNG (mulberry32) ────────────────────────────────────────────────
@@ -503,17 +532,185 @@ function generateMazeData(seed: number): number[] {
   return data;
 }
 
+interface CellCoord {
+  cx: number;
+  cy: number;
+}
+
+const DEFAULT_LAYOUT_SPAWN_DISTANCE = 10;
+const DEFAULT_LAYOUT_TEAM_COUNT = 3;
+const GATE_MIDPOINT_OFFSET = Math.floor(CELL_SIZE / 2);
+
+function isWalkableTileId(tile: number): boolean {
+  return tile === TILE_FLOOR || tile === TILE_FLOOR_SHADOW;
+}
+
+function spawnPointToCell(spawnPoint: SpawnPoint): CellCoord {
+  return {
+    cx: Math.round((spawnPoint.x - (CELL_SIZE - 1) / 2 - WALL_SIZE) / CELL_STEP),
+    cy: Math.round((spawnPoint.y - (CELL_SIZE - 1) / 2 - WALL_SIZE) / CELL_STEP),
+  };
+}
+
+function getGateOrientationForCell(data: number[], cx: number, cy: number): GateOrientation | null {
+  const northOpen = cy > 0 && areCellsConnected(data, cx, cy, cx, cy - 1);
+  const eastOpen = cx < GRID_CELLS - 1 && areCellsConnected(data, cx, cy, cx + 1, cy);
+  const southOpen = cy < GRID_CELLS - 1 && areCellsConnected(data, cx, cy, cx, cy + 1);
+  const westOpen = cx > 0 && areCellsConnected(data, cx, cy, cx - 1, cy);
+
+  if (northOpen && southOpen && !eastOpen && !westOpen) {
+    return 'horizontal';
+  }
+
+  if (eastOpen && westOpen && !northOpen && !southOpen) {
+    return 'vertical';
+  }
+
+  return null;
+}
+
+function findPathToHub(
+  data: number[],
+  start: CellCoord,
+  hubCells: Set<string>,
+): CellCoord[] | null {
+  const startKey = `${start.cx},${start.cy}`;
+  const queue: CellCoord[] = [start];
+  const visited = new Set<string>([startKey]);
+  const parents = new Map<string, string | null>([[startKey, null]]);
+
+  let head = 0;
+  while (head < queue.length) {
+    const current = queue[head++];
+    const currentKey = `${current.cx},${current.cy}`;
+
+    if (hubCells.has(currentKey)) {
+      const path: CellCoord[] = [];
+      let walkKey: string | null = currentKey;
+      while (walkKey) {
+        const [cx, cy] = walkKey.split(',').map(Number);
+        path.push({ cx, cy });
+        walkKey = parents.get(walkKey) ?? null;
+      }
+      path.reverse();
+      return path;
+    }
+
+    for (const dir of DIRS) {
+      const nextCx = current.cx + dir.dx;
+      const nextCy = current.cy + dir.dy;
+      if (nextCx < 0 || nextCx >= GRID_CELLS || nextCy < 0 || nextCy >= GRID_CELLS) continue;
+      if (!areCellsConnected(data, current.cx, current.cy, nextCx, nextCy)) continue;
+
+      const nextKey = `${nextCx},${nextCy}`;
+      if (visited.has(nextKey)) continue;
+
+      visited.add(nextKey);
+      parents.set(nextKey, currentKey);
+      queue.push({ cx: nextCx, cy: nextCy });
+    }
+  }
+
+  return null;
+}
+
+function createGatePlacement(teamIndex: number, cellX: number, cellY: number, orientation: GateOrientation): GatePlacement {
+  const { tx, ty } = cellToTile(cellX, cellY);
+
+  if (orientation === 'horizontal') {
+    return {
+      teamIndex,
+      cellX,
+      cellY,
+      tileX: tx,
+      tileY: ty + GATE_MIDPOINT_OFFSET,
+      orientation,
+    };
+  }
+
+  return {
+    teamIndex,
+    cellX,
+    cellY,
+    tileX: tx + GATE_MIDPOINT_OFFSET,
+    tileY: ty,
+    orientation,
+  };
+}
+
+function stampGate(data: number[], gate: GatePlacement): void {
+  if (gate.orientation === 'horizontal') {
+    for (let dx = 0; dx < CELL_SIZE; dx++) {
+      data[gate.tileY * MAP_SIZE + (gate.tileX + dx)] = TILE_GATE_HORIZONTAL;
+    }
+    return;
+  }
+
+  for (let dy = 0; dy < CELL_SIZE; dy++) {
+    data[(gate.tileY + dy) * MAP_SIZE + gate.tileX] = TILE_GATE_VERTICAL;
+  }
+}
+
+function computeGatePlacements(data: number[], spawnPoints: SpawnPoint[]): GatePlacement[] {
+  const hubBounds = getHubTileBounds(MAP_SIZE, MAP_SIZE);
+  const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+  const usedCells = new Set<string>();
+  const gates: GatePlacement[] = [];
+
+  for (let teamIndex = 0; teamIndex < spawnPoints.length; teamIndex++) {
+    const spawnCell = spawnPointToCell(spawnPoints[teamIndex]);
+    const pathToHub = findPathToHub(data, spawnCell, hubCells);
+    if (!pathToHub) continue;
+
+    for (let i = 1; i < pathToHub.length - 1; i++) {
+      const cell = pathToHub[i];
+      const cellKey = `${cell.cx},${cell.cy}`;
+      if (usedCells.has(cellKey)) continue;
+
+      const orientation = getGateOrientationForCell(data, cell.cx, cell.cy);
+      if (!orientation) continue;
+
+      gates.push(createGatePlacement(teamIndex, cell.cx, cell.cy, orientation));
+      usedCells.add(cellKey);
+      break;
+    }
+  }
+
+  return gates;
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 export const MAZE_SIZE = MAP_SIZE;
 
-export function generateMaze(seed: number): TileMapData {
+export function generateMazeLayout(
+  seed: number,
+  spawnDistance: number,
+  numTeams: number = DEFAULT_LAYOUT_TEAM_COUNT,
+): GeneratedMazeLayout {
+  const baseData = generateMazeData(seed);
+  const spawnPoints = computeSpawnPoints(baseData, spawnDistance, numTeams);
+  const gates = computeGatePlacements(baseData, spawnPoints);
+  const gatedData = baseData.slice();
+
+  for (const gate of gates) {
+    stampGate(gatedData, gate);
+  }
+
   return {
-    width: MAP_SIZE,
-    height: MAP_SIZE,
-    tileSize: TILE_PX,
-    data: generateMazeData(seed),
+    map: {
+      width: MAP_SIZE,
+      height: MAP_SIZE,
+      tileSize: TILE_PX,
+      data: gatedData,
+    },
+    spawnPoints,
+    gates,
   };
+}
+
+export function generateMaze(seed: number): TileMapData {
+  return generateMazeLayout(seed, DEFAULT_LAYOUT_SPAWN_DISTANCE, DEFAULT_LAYOUT_TEAM_COUNT).map;
 }
 
 // ── BFS-Based Equidistant Spawn Point Computation ───────────────────────────
@@ -537,7 +734,7 @@ function areCellsConnected(
     for (let wy = 0; wy < CELL_SIZE; wy++) {
       for (let wx = 0; wx < WALL_SIZE; wx++) {
         const tile = data[(topY + wy) * MAP_SIZE + (wallX + wx)];
-        if (tile === TILE_FLOOR || tile === TILE_FLOOR_SHADOW) return true;
+        if (isWalkableTileId(tile)) return true;
       }
     }
   } else {
@@ -547,7 +744,7 @@ function areCellsConnected(
     for (let wy = 0; wy < WALL_SIZE; wy++) {
       for (let wx = 0; wx < CELL_SIZE; wx++) {
         const tile = data[(wallY + wy) * MAP_SIZE + (leftX + wx)];
-        if (tile === TILE_FLOOR || tile === TILE_FLOOR_SHADOW) return true;
+        if (isWalkableTileId(tile)) return true;
       }
     }
   }

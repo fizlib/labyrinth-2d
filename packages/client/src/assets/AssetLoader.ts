@@ -25,6 +25,8 @@ import {
   generateShadowTopTexture,
   generateShadowLeftTexture,
   generateShadowCornerTexture,
+  generateGateHorizontalTexture,
+  generateGateVerticalTexture,
   generateWisdomOrbTexture,
 } from './FallbackTextures';
 
@@ -43,6 +45,8 @@ export interface GameAssets {
   wallCornerBLTexture: Texture;
   wallCornerBRTexture: Texture;
   wallTopEdgeTexture: Texture;
+  gateHorizontalTexture: Texture;
+  gateVerticalTexture: Texture;
   /** 4 grass variant textures: [0-1] plain grass, [2-3] flower grass (rarer). */
   grassVariantTextures: Texture[];
   treeTexture: Texture;
@@ -78,6 +82,8 @@ export async function loadAssets(): Promise<GameAssets> {
   let wallCornerBLTexture: Texture;
   let wallCornerBRTexture: Texture;
   let wallTopEdgeTexture: Texture;
+  let gateHorizontalTexture: Texture;
+  let gateVerticalTexture: Texture;
   let grassVariantTextures: Texture[] = [];
   let treeTexture: Texture;
   let shadowTopTexture: Texture;
@@ -156,6 +162,18 @@ export async function loadAssets(): Promise<GameAssets> {
   }
 
   // ── Tree asset (separate from tilesheet — different dimensions) ──────────
+  try {
+    const gateSheet = await Assets.load<Texture>('assets/gates.png');
+    gateSheet.source.scaleMode = 'nearest';
+    gateHorizontalTexture = new Texture({ source: gateSheet.source, frame: new Rectangle(0, 0, 16, 16) });
+    gateVerticalTexture = new Texture({ source: gateSheet.source, frame: new Rectangle(16, 0, 16, 16) });
+    console.info('[Assets] Loaded gates.png (horizontal + vertical gate tiles)');
+  } catch {
+    console.info('[Assets] gates.png not found â€” using fallback gate textures');
+    gateHorizontalTexture = generateGateHorizontalTexture();
+    gateVerticalTexture = generateGateVerticalTexture();
+  }
+
   try {
     treeTexture = await Assets.load<Texture>('assets/oak-tree.png');
     treeTexture.source.scaleMode = 'nearest';
@@ -362,6 +380,8 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture,
     wallCornerBRTexture,
     wallTopEdgeTexture,
+    gateHorizontalTexture,
+    gateVerticalTexture,
     grassVariantTextures,
     treeTexture,
     shadowTopTexture,

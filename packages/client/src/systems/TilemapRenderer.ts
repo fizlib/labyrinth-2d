@@ -33,6 +33,8 @@ import {
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
   TILE_RUNESTONE_3,
+  TILE_GATE_HORIZONTAL,
+  TILE_GATE_VERTICAL,
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
 } from '@labyrinth/shared';
@@ -87,9 +89,11 @@ function getWallFaceTexture(x: number, y: number, wallFaceTextures: Texture[]): 
   return wallFaceTextures[3];
 }
 
-/** Returns true if tileId is a solid wall type (IDs 2–12, plus tree/runestones). */
+/** Returns true if tileId is a wall-row obstacle that should render on the entity layer. */
 function isSolidWallTile(tileId: number): boolean {
-  return tileId >= TILE_WALL_FACE && tileId <= TILE_WALL_TOP_EDGE;
+  return (tileId >= TILE_WALL_FACE && tileId <= TILE_WALL_TOP_EDGE) ||
+    tileId === TILE_GATE_HORIZONTAL ||
+    tileId === TILE_GATE_VERTICAL;
 }
 
 /** Returns the appropriate texture for a wall tile ID. */
@@ -106,6 +110,8 @@ function getWallTexture(tileId: number, x: number, y: number, assets: GameAssets
     case TILE_WALL_CORNER_BL: return assets.wallCornerBLTexture;
     case TILE_WALL_CORNER_BR: return assets.wallCornerBRTexture;
     case TILE_WALL_TOP_EDGE:  return assets.wallTopEdgeTexture;
+    case TILE_GATE_HORIZONTAL:return assets.gateHorizontalTexture;
+    case TILE_GATE_VERTICAL:  return assets.gateVerticalTexture;
     default: return null;
   }
 }
@@ -171,7 +177,8 @@ export class TilemapRenderer {
             // ── Background tile ──────────────────────────────────
             if (tileId === TILE_FLOOR || tileId === TILE_FLOOR_SHADOW ||
                 tileId === TILE_TREE ||
-                tileId === TILE_RUNESTONE_1 || tileId === TILE_RUNESTONE_2 || tileId === TILE_RUNESTONE_3) {
+                tileId === TILE_RUNESTONE_1 || tileId === TILE_RUNESTONE_2 || tileId === TILE_RUNESTONE_3 ||
+                tileId === TILE_GATE_HORIZONTAL || tileId === TILE_GATE_VERTICAL) {
               // All of these get a grass tile in the background
               const grassTex = getGrassTexture(x, y, assets.grassVariantTextures);
               const sprite = new Sprite(grassTex);

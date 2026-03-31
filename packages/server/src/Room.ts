@@ -23,13 +23,12 @@ import {
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
   TILE_RUNESTONE_3,
-  generateMaze,
-  computeSpawnPoints,
   computePortalPosition,
   computeHubDistanceField,
   computePortalDistanceField,
   getNavigationDirectionForPosition,
   applyInputWithCollision,
+  generateMazeLayout,
   type NavigationDistanceField,
   type FacingDirection,
   type TileMapData,
@@ -119,8 +118,9 @@ export class Room {
   constructor(id: string) {
     this.id = id;
     this.mapSeed = Math.floor(Math.random() * 2147483647);
-    this.map = generateMaze(this.mapSeed);
-    this.spawnPoints = computeSpawnPoints(this.map.data, SPAWN_DISTANCE, MAX_TEAMS);
+    const layout = generateMazeLayout(this.mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
+    this.map = layout.map;
+    this.spawnPoints = layout.spawnPoints;
     this.hubDistanceField = computeHubDistanceField(this.map);
     this.runestones = findRunestonePositions(this.map);
     this.state = {

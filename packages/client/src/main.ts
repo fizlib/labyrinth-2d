@@ -13,7 +13,9 @@ import {
   INITIAL_WISDOM_ORBS,
   TILE_SIZE,
   MAZE_SIZE,
-  generateMaze,
+  MAX_TEAMS,
+  SPAWN_DISTANCE,
+  generateMazeLayout,
   applyInputWithCollision,
 } from '@labyrinth/shared';
 import type { GameState, TileMapData, FacingDirection } from '@labyrinth/shared';
@@ -434,7 +436,7 @@ async function main(): Promise<void> {
     onRoomJoined: (roomId, playerId, mapSeed, gameState) => {
       console.info(`[Main] Joined room "${roomId}" as ${playerId} (maze seed: ${mapSeed})`);
 
-      currentMap = generateMaze(mapSeed);
+      currentMap = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS).map;
       mapPixelW = currentMap.width * currentMap.tileSize;
       mapPixelH = currentMap.height * currentMap.tileSize;
 
