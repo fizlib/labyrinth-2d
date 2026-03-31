@@ -13,6 +13,7 @@ export {
   applyInput,
   isPositionValid,
   applyInputWithCollision,
+  type PortalCollider,
 } from './physics.js';
 
 // ── Re-export map data ──────────────────────────────────────────────────────

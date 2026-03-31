@@ -485,6 +485,7 @@ async function main(): Promise<void> {
           entityLayer,
           true, // skip emergence for late joiners
         );
+        minimap?.setPortalPosition(gameState.portal.x, gameState.portal.y);
         console.info(`[Main] Late-join: portal already active at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`);
       }
 
@@ -554,7 +555,7 @@ async function main(): Promise<void> {
           );
 
           for (const input of pendingInputs) {
-            const result = applyInputWithCollision(localX, localY, input, input.dt, currentMap!);
+            const result = applyInputWithCollision(localX, localY, input, input.dt, currentMap!, latestServerState?.portal);
             localX = result.x;
             localY = result.y;
           }
@@ -649,7 +650,7 @@ async function main(): Promise<void> {
         dt: dtSeconds,
       };
 
-      const result = applyInputWithCollision(localX, localY, input, dtSeconds, currentMap!);
+      const result = applyInputWithCollision(localX, localY, input, dtSeconds, currentMap!, latestServerState?.portal);
       localX = result.x;
       localY = result.y;
 
@@ -729,6 +730,7 @@ async function main(): Promise<void> {
           entityLayer,
           false, // play emergence animation
         );
+        minimap?.setPortalPosition(pendingPortalPos.x, pendingPortalPos.y);
         // Instant camera jump to portal (no directional clues)
         cinematicPhase = 'watch_portal';
         cinematicElapsed = 0;

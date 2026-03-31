@@ -351,6 +351,7 @@ export class Room {
           input,
           dtPerInput,
           this.map,
+          this.portalPosition,
         );
         player.x = result.x;
         player.y = result.y;

@@ -21,6 +21,18 @@ import {
   type TileMapData,
 } from './maps/level1.js';
 
+/** Optional portal collider for dynamic entity collision. */
+export interface PortalCollider {
+  /** Portal center X in pixels. */
+  x: number;
+  /** Portal center Y in pixels. */
+  y: number;
+}
+
+/** Portal collision hitbox size (widened to 28px to cover the stone frame). */
+const PORTAL_HITBOX_W = 28;
+const PORTAL_HITBOX_H = 16;
+
 export const PLAYER_SPEED = 80;
 export const FEET_HITBOX_W = 8;
 export const FEET_HITBOX_H = 12;
@@ -64,7 +76,12 @@ function isSolidTile(tileX: number, tileY: number, map: TileMapData): boolean {
          tile === TILE_RUNESTONE_3;
 }
 
-export function isPositionValid(x: number, y: number, map: TileMapData): boolean {
+export function isPositionValid(
+  x: number,
+  y: number,
+  map: TileMapData,
+  portal?: PortalCollider | null,
+): boolean {
   const ts = map.tileSize;
 
   const left = x - FEET_HITBOX_W / 2;
@@ -85,6 +102,18 @@ export function isPositionValid(x: number, y: number, map: TileMapData): boolean
     }
   }
 
+  // Check portal collision (dynamic entity, AABB overlap test)
+  if (portal) {
+    const portalLeft = portal.x - PORTAL_HITBOX_W / 2;
+    const portalTop = portal.y - PORTAL_HITBOX_H / 2;
+    const portalRight = portalLeft + PORTAL_HITBOX_W - 1;
+    const portalBottom = portalTop + PORTAL_HITBOX_H - 1;
+
+    if (left <= portalRight && right >= portalLeft && top <= portalBottom && bottom >= portalTop) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -94,6 +123,7 @@ export function applyInputWithCollision(
   input: { up: boolean; down: boolean; left: boolean; right: boolean },
   dt: number,
   map: TileMapData,
+  portal?: PortalCollider | null,
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
@@ -107,14 +137,14 @@ export function applyInputWithCollision(
 
   if (dx !== 0) {
     const candidateX = x + dx;
-    if (isPositionValid(candidateX, y, map)) {
+    if (isPositionValid(candidateX, y, map, portal)) {
       newX = candidateX;
     }
   }
 
   if (dy !== 0) {
     const candidateY = y + dy;
-    if (isPositionValid(newX, candidateY, map)) {
+    if (isPositionValid(newX, candidateY, map, portal)) {
       newY = candidateY;
     }
   }

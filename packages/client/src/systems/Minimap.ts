@@ -42,6 +42,8 @@ const COL_FLOOR: readonly number[] = [107, 166, 61, 255]; // vibrant grass green
 const COL_DIRT: readonly number[] = [154, 109, 70, 255]; // warm dirt/shadow brown
 const COL_WALL: readonly number[] = [89, 73, 58, 255]; // dark wood/stone wall
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
+const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
+const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot center
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -65,6 +67,11 @@ export class Minimap {
   // ── Tracking for incremental updates ───────────────────────────────────
   private lastPlayerTileX = -1;
   private lastPlayerTileY = -1;
+
+  // ── Portal marker ──────────────────────────────────────────────────────
+  private portalTileX = -1;
+  private portalTileY = -1;
+  private portalActive = false;
 
   // ──────────────────────────────────────────────────────────────────────
 
@@ -169,6 +176,16 @@ export class Minimap {
     stage.addChild(this.container);
   }
 
+  /** Set the portal position (called when portal spawns). */
+  setPortalPosition(pixelX: number, pixelY: number): void {
+    this.portalTileX = Math.floor(pixelX / this.mapData.tileSize);
+    this.portalTileY = Math.floor(pixelY / this.mapData.tileSize);
+    this.portalActive = true;
+    // Force a redraw on next update
+    this.lastPlayerTileX = -1;
+    this.lastPlayerTileY = -1;
+  }
+
   /**
    * Call every frame with the local player's precise pixel position.
    * Handles both optimized CPU fog updates and GPU smooth scrolling.
@@ -232,7 +249,21 @@ export class Minimap {
         if (tx >= 0 && tx < width && ty >= 0 && ty < height) {
           const fogIdx = ty * width + tx;
           if (this.fog[fogIdx] === 1) {
-            col = this.tileColor(data[fogIdx]);
+            // Check if this tile is the portal (drawn as a high-visibility diamond)
+            if (this.portalActive) {
+              const dx = Math.abs(tx - this.portalTileX);
+              const dy = Math.abs(ty - this.portalTileY);
+              
+              if (dx === 0 && dy === 0) {
+                col = COL_PORTAL_GLOW; // center
+              } else if (dx + dy === 1) {
+                col = COL_PORTAL; // diamond edges
+              } else {
+                col = this.tileColor(data[fogIdx]);
+              }
+            } else {
+              col = this.tileColor(data[fogIdx]);
+            }
           }
         }
 
