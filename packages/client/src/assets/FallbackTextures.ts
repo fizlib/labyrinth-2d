@@ -542,6 +542,36 @@ export function generatePlayerSpritesheet(): {
 // shadow_corner.png assets look like — semi-transparent black gradients.
 
 /** Shadow cast by a north wall — gradient fading downward. */
+export function generateWisdomOrbTexture(): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+  ctx.clearRect(0, 0, TILE, TILE);
+
+  ctx.fillStyle = '#0f0f16';
+  ctx.fillRect(5, 2, 6, 2);
+
+  ctx.fillStyle = '#64e7ff';
+  ctx.beginPath();
+  ctx.arc(8, 9, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#c9fbff';
+  ctx.beginPath();
+  ctx.arc(6, 7, 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#1c87a8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(8, 9, 5, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = '#9c7a2f';
+  ctx.fillRect(6, 13, 4, 2);
+  ctx.fillRect(7, 11, 2, 2);
+
+  return canvasToTexture(canvas);
+}
+
 export function generateShadowTopTexture(): Texture {
   const [canvas, ctx] = makeCanvas(TILE, TILE);
   ctx.clearRect(0, 0, TILE, TILE);

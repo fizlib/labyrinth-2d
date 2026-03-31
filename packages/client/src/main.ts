@@ -4,12 +4,13 @@
 // Step 9: 2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application, Sprite, AnimatedSprite, Container, Texture, Text, TextStyle, TextureStyle } from 'pixi.js';
+import { Application, AnimatedSprite, Container, Texture, Text, TextStyle, TextureStyle } from 'pixi.js';
 
 TextureStyle.defaultOptions.scaleMode = 'nearest';
 import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
+  INITIAL_WISDOM_ORBS,
   TILE_SIZE,
   MAZE_SIZE,
   generateMaze,
@@ -23,6 +24,8 @@ import { DebugSettings } from './config/DebugSettings';
 import { Minimap } from './systems/Minimap';
 import { TilemapRenderer, type RunestoneSpriteData } from './systems/TilemapRenderer';
 import { Portal } from './systems/Portal';
+import { WisdomOrbHud } from './systems/WisdomOrbHud';
+import { WisdomArrow } from './systems/WisdomArrow';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 
@@ -81,6 +84,12 @@ let interactPrompt: Text | null = null;
 
 /** Portal instance (created when all runestones are activated). */
 let portal: Portal | null = null;
+
+/** Top-left HUD showing remaining wisdom orbs. */
+let wisdomOrbHud: WisdomOrbHud | null = null;
+
+/** Local-only world-space hint arrow shown after using a wisdom orb. */
+let wisdomArrow: WisdomArrow | null = null;
 
 // ── Screen Shake & Cinematic Camera State ───────────────────────────────────
 
@@ -466,6 +475,17 @@ async function main(): Promise<void> {
       minimap = new Minimap(currentMap!, INTERNAL_WIDTH, INTERNAL_HEIGHT);
       minimap.addToStage(app.stage);
 
+      if (wisdomOrbHud) wisdomOrbHud.destroy();
+      wisdomOrbHud = new WisdomOrbHud(assets.wisdomOrbTexture, () => {
+        if (!net.isConnected || !localPlayerInitialized) return;
+        net.sendUseWisdomOrb();
+      });
+      wisdomOrbHud.addToStage(app.stage);
+      wisdomOrbHud.setRemaining(me?.wisdomOrbs ?? INITIAL_WISDOM_ORBS);
+
+      wisdomArrow?.destroy();
+      wisdomArrow = new WisdomArrow(entityLayer);
+
       // ── Sync runestone activation state from initial GameState ─────
       for (const rsInfo of gameState.runestones) {
         const rsData = tilemapRenderer?.runestoneSprites.find((r) => r.index === rsInfo.index);
@@ -564,6 +584,7 @@ async function main(): Promise<void> {
         data.sprite.x = Math.round(localX);
         data.sprite.y = Math.round(localY);
         data.sprite.zIndex = Math.round(localY) + 1;
+        wisdomOrbHud?.setRemaining(localPlayerData.wisdomOrbs);
       }
 
       knownRemotePlayers.clear();
@@ -606,6 +627,11 @@ async function main(): Promise<void> {
       // Start screen shake — portal will spawn after shake completes
       shakeTimeRemaining = SHAKE_DURATION;
       pendingPortalPos = { x: portalX, y: portalY };
+    },
+
+    onWisdomOrbUsed: (direction, remainingWisdomOrbs) => {
+      wisdomOrbHud?.setRemaining(remainingWisdomOrbs);
+      wisdomArrow?.show(direction);
     },
 
     onError: (code, message) => {
@@ -706,6 +732,7 @@ async function main(): Promise<void> {
 
     // ── 4. Minimap ────────────────────────────────────────────────────
     if (minimap) minimap.update(localX, localY);
+    wisdomArrow?.update(dtSeconds, localX, localY);
 
     // ── 4b. Screen shake ────────────────────────────────────────────
     if (shakeTimeRemaining > 0) {
@@ -859,6 +886,10 @@ async function main(): Promise<void> {
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     const dir = KEY_MAP[e.code];
     if (dir) keys[dir] = true;
+
+    if (e.code === 'KeyQ' && !e.repeat && localPlayerInitialized) {
+      net.sendUseWisdomOrb();
+    }
 
     // ── E key: runestone activation ──────────────────────────────────
     if (e.code === 'KeyE' && localPlayerInitialized && tilemapRenderer) {

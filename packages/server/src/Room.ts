@@ -19,13 +19,17 @@ import {
   MAX_TEAMS,
   TILE_SIZE,
   SPAWN_DISTANCE,
+  INITIAL_WISDOM_ORBS,
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
   TILE_RUNESTONE_3,
   generateMaze,
   computeSpawnPoints,
   computePortalPosition,
+  computeHubDistanceField,
+  getHubDirectionForPosition,
   applyInputWithCollision,
+  type HubDistanceField,
   type FacingDirection,
   type TileMapData,
   type SpawnPoint,
@@ -40,6 +44,7 @@ import {
   type PlayerLeftMessage,
   type RunestoneActivatedMessage,
   type AllRunestonesActivatedMessage,
+  type WisdomOrbUsedMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -104,11 +109,15 @@ export class Room {
   /** Dynamically computed equidistant spawn points (one per team). */
   private readonly spawnPoints: SpawnPoint[];
 
+  /** Precomputed tile distances from every walkable tile to the hub. */
+  private readonly hubDistanceField: HubDistanceField;
+
   constructor(id: string) {
     this.id = id;
     this.mapSeed = Math.floor(Math.random() * 2147483647);
     this.map = generateMaze(this.mapSeed);
     this.spawnPoints = computeSpawnPoints(this.map.data, SPAWN_DISTANCE, MAX_TEAMS);
+    this.hubDistanceField = computeHubDistanceField(this.map);
     this.runestones = findRunestonePositions(this.map);
     this.state = {
       tick: 0,
@@ -191,6 +200,7 @@ export class Room {
       facing: 'down',
       isMoving: false,
       lastProcessedInput: 0,
+      wisdomOrbs: INITIAL_WISDOM_ORBS,
     };
     this.state.players.push(playerInfo);
 
@@ -313,6 +323,35 @@ export class Room {
   }
 
   // ── Game Loop ─────────────────────────────────────────────────────────
+
+  handleUseWisdomOrb(playerId: string): void {
+    const player = this.state.players.find((p) => p.id === playerId);
+    if (!player || player.wisdomOrbs <= 0) return;
+
+    const direction = getHubDirectionForPosition(
+      player.x,
+      player.y,
+      this.map,
+      this.hubDistanceField,
+    );
+    if (!direction) return;
+
+    const ws = this.sockets.get(playerId);
+    if (!ws) return;
+
+    player.wisdomOrbs--;
+
+    const orbUsedMsg: WisdomOrbUsedMessage = {
+      type: MessageType.WisdomOrbUsed,
+      direction,
+      remainingWisdomOrbs: player.wisdomOrbs,
+    };
+    this.send(ws, orbUsedMsg);
+
+    console.info(
+      `[Room:${this.id}] Wisdom orb used by ${playerId} -> ${direction} (${player.wisdomOrbs} remaining)`,
+    );
+  }
 
   private startLoop(): void {
     if (this.loopHandle !== null) return;

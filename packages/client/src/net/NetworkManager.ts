@@ -11,9 +11,11 @@ import {
   MessageType,
   DEFAULT_ROOM_ID,
   type GameState,
+  type HubDirection,
   type JoinRoomMessage,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
+  type UseWisdomOrbMessage,
   type DebugTeleportMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
@@ -25,6 +27,7 @@ export interface NetworkCallbacks {
   onPlayerLeft: (playerId: string) => void;
   onRunestoneActivated: (runestoneIndex: number) => void;
   onAllRunestonesActivated: (portalX: number, portalY: number) => void;
+  onWisdomOrbUsed: (direction: HubDirection, remainingWisdomOrbs: number) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
 }
@@ -136,6 +139,16 @@ export class NetworkManager {
         this.callbacks.onAllRunestonesActivated(msg.portalX, msg.portalY);
         break;
 
+      case MessageType.WisdomOrbUsed:
+        if (this._gameState && this._playerId) {
+          const localPlayer = this._gameState.players.find((player) => player.id === this._playerId);
+          if (localPlayer) {
+            localPlayer.wisdomOrbs = msg.remainingWisdomOrbs;
+          }
+        }
+        this.callbacks.onWisdomOrbUsed(msg.direction, msg.remainingWisdomOrbs);
+        break;
+
       case MessageType.Error:
         this.callbacks.onError(msg.code, msg.message);
         break;
@@ -174,6 +187,14 @@ export class NetworkManager {
     const msg: ActivateRunestoneMessage = {
       type: MessageType.ActivateRunestone,
       runestoneIndex,
+    };
+    this.send(msg);
+  }
+
+  /** Send a wisdom orb use request to the server. */
+  sendUseWisdomOrb(): void {
+    const msg: UseWisdomOrbMessage = {
+      type: MessageType.UseWisdomOrb,
     };
     this.send(msg);
   }

@@ -11,13 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
-  TILE_WALL_FACE, TILE_WALL_TOP, TILE_WALL_INTERIOR,
-  TILE_WALL_SIDE_LEFT, TILE_WALL_SIDE_RIGHT, TILE_WALL_BOTTOM,
-  TILE_WALL_CORNER_TL, TILE_WALL_CORNER_TR,
-  TILE_WALL_CORNER_BL, TILE_WALL_CORNER_BR,
-  TILE_WALL_TOP_EDGE,
-  TILE_TREE,
-  TILE_RUNESTONE_1, TILE_RUNESTONE_2, TILE_RUNESTONE_3,
+  isSolidTileId,
   type TileMapData,
 } from './maps/level1.js';
 
@@ -59,21 +53,7 @@ function isSolidTile(tileX: number, tileY: number, map: TileMapData): boolean {
     return true; // Out of bounds = impassable
   }
   const tile = map.data[tileY * map.width + tileX];
-  return tile === TILE_WALL_FACE || 
-         tile === TILE_WALL_TOP || 
-         tile === TILE_WALL_INTERIOR ||
-         tile === TILE_WALL_SIDE_LEFT ||
-         tile === TILE_WALL_SIDE_RIGHT ||
-         tile === TILE_WALL_BOTTOM ||
-         tile === TILE_WALL_CORNER_TL ||
-         tile === TILE_WALL_CORNER_TR ||
-         tile === TILE_WALL_CORNER_BL ||
-         tile === TILE_WALL_CORNER_BR ||
-         tile === TILE_WALL_TOP_EDGE ||
-         tile === TILE_TREE ||
-         tile === TILE_RUNESTONE_1 ||
-         tile === TILE_RUNESTONE_2 ||
-         tile === TILE_RUNESTONE_3;
+  return isSolidTileId(tile);
 }
 
 export function isPositionValid(

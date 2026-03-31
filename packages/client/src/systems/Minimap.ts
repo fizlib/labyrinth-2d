@@ -39,7 +39,6 @@ const REVEAL_RADIUS = 7;
 // ── Tile colour palette (Stardew Valley Inspired RGBA) ─────────────────────
 
 const COL_FLOOR: readonly number[] = [107, 166, 61, 255]; // vibrant grass green
-const COL_DIRT: readonly number[] = [154, 109, 70, 255]; // warm dirt/shadow brown
 const COL_WALL: readonly number[] = [89, 73, 58, 255]; // dark wood/stone wall
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)

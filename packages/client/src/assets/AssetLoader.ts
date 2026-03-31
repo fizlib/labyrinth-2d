@@ -25,6 +25,7 @@ import {
   generateShadowTopTexture,
   generateShadowLeftTexture,
   generateShadowCornerTexture,
+  generateWisdomOrbTexture,
 } from './FallbackTextures';
 
 export interface GameAssets {
@@ -58,6 +59,8 @@ export interface GameAssets {
   portalFrames: Texture[];
   /** Number of emergence frames (the rest are idle). */
   portalEmergenceCount: number;
+  /** Wisdom orb HUD texture. */
+  wisdomOrbTexture: Texture;
 }
 
 export async function loadAssets(): Promise<GameAssets> {
@@ -83,6 +86,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let runestoneTextures: [Texture, Texture][] = [];
   let portalFrames: Texture[] = [];
   let portalEmergenceCount = 6;
+  let wisdomOrbTexture: Texture;
 
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
@@ -303,6 +307,15 @@ export async function loadAssets(): Promise<GameAssets> {
 
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
   try {
+    wisdomOrbTexture = await Assets.load<Texture>('assets/wisdom_orb.png');
+    wisdomOrbTexture.source.scaleMode = 'nearest';
+    console.info(`[Assets] Loaded wisdom_orb.png (${wisdomOrbTexture.width}x${wisdomOrbTexture.height})`);
+  } catch {
+    console.info('[Assets] wisdom_orb.png not found - using fallback orb texture');
+    wisdomOrbTexture = generateWisdomOrbTexture();
+  }
+
+  try {
     // Load the fonts so they are registered with the browser
     await Assets.load([
       'assets/pixel_operator/PixelOperator.ttf',
@@ -337,5 +350,6 @@ export async function loadAssets(): Promise<GameAssets> {
     runestoneTextures,
     portalFrames,
     portalEmergenceCount,
+    wisdomOrbTexture,
   };
 }

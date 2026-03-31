@@ -99,6 +99,42 @@ const TILE_PX = 16;
 /** Size of the central hub room in tiles. Matches CELL_SIZE to prevent cutting wall corners, resulting in a clean cross-shaped hub area. */
 const HUB_SIZE = 30;
 
+export interface HubTileBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+export function getHubTileBounds(width: number = MAP_SIZE, height: number = MAP_SIZE): HubTileBounds {
+  const left = Math.floor((width - HUB_SIZE) / 2);
+  const top = Math.floor((height - HUB_SIZE) / 2);
+  return {
+    left,
+    top,
+    right: left + HUB_SIZE - 1,
+    bottom: top + HUB_SIZE - 1,
+  };
+}
+
+export function isSolidTileId(tile: number): boolean {
+  return tile === TILE_WALL_FACE ||
+    tile === TILE_WALL_TOP ||
+    tile === TILE_WALL_INTERIOR ||
+    tile === TILE_WALL_SIDE_LEFT ||
+    tile === TILE_WALL_SIDE_RIGHT ||
+    tile === TILE_WALL_BOTTOM ||
+    tile === TILE_WALL_CORNER_TL ||
+    tile === TILE_WALL_CORNER_TR ||
+    tile === TILE_WALL_CORNER_BL ||
+    tile === TILE_WALL_CORNER_BR ||
+    tile === TILE_WALL_TOP_EDGE ||
+    tile === TILE_TREE ||
+    tile === TILE_RUNESTONE_1 ||
+    tile === TILE_RUNESTONE_2 ||
+    tile === TILE_RUNESTONE_3;
+}
+
 // ── Seeded PRNG (mulberry32) ────────────────────────────────────────────────
 
 function mulberry32(seed: number): () => number {
@@ -604,9 +640,6 @@ export function computeSpawnPoints(
   for (let i = 0; i < numTeams; i++) {
     // Sector center angle: evenly spaced, starting from -PI (left)
     const sectorCenter = -Math.PI + sectorSize * (i + 0.5);
-    const sectorMin = sectorCenter - sectorSize / 2;
-    const sectorMax = sectorCenter + sectorSize / 2;
-
     // Normalize angle difference helper
     const angleDiff = (a: number, center: number) => {
       let diff = a - center;

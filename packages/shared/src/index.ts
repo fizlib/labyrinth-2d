@@ -6,6 +6,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Re-export physics module ────────────────────────────────────────────────
+import type { HubDirection } from './navigation.js';
+
 export {
   PLAYER_SPEED,
   FEET_HITBOX_W,
@@ -41,7 +43,18 @@ export {
   generateMaze,
   type TileMapData,
   type SpawnPoint,
+  type HubTileBounds,
+  getHubTileBounds,
+  isSolidTileId,
 } from './maps/level1.js';
+
+export {
+  computeHubDistanceField,
+  getHubDirectionForPosition,
+  getHubDirectionForTile,
+  type HubDirection,
+  type HubDistanceField,
+} from './navigation.js';
 
 
 // ── Game Constants ──────────────────────────────────────────────────────────
@@ -83,6 +96,9 @@ export const SERVER_TICK_S = 1 / SERVER_TICK_RATE;
 /** Default room ID used when no lobby system is in place yet. */
 export const DEFAULT_ROOM_ID = 'default';
 
+/** Number of wisdom orbs each player starts with. */
+export const INITIAL_WISDOM_ORBS = 3;
+
 // ── Network Message Types ───────────────────────────────────────────────────
 
 /**
@@ -94,6 +110,7 @@ export enum MessageType {
   JoinRoom = 'JOIN_ROOM',
   PlayerInput = 'PLAYER_INPUT',
   ActivateRunestone = 'ACTIVATE_RUNESTONE',
+  UseWisdomOrb = 'USE_WISDOM_ORB',
   DebugTeleport = 'DEBUG_TELEPORT',
 
   // ── Server → Client ──
@@ -102,6 +119,7 @@ export enum MessageType {
   PlayerLeft = 'PLAYER_LEFT',
   RunestoneActivated = 'RUNESTONE_ACTIVATED',
   AllRunestonesActivated = 'ALL_RUNESTONES_ACTIVATED',
+  WisdomOrbUsed = 'WISDOM_ORB_USED',
   Error = 'ERROR',
 }
 
@@ -128,6 +146,10 @@ export interface ActivateRunestoneMessage {
   runestoneIndex: number;
 }
 
+export interface UseWisdomOrbMessage {
+  type: MessageType.UseWisdomOrb;
+}
+
 export interface DebugTeleportMessage {
   type: MessageType.DebugTeleport;
   x: number;
@@ -150,6 +172,7 @@ export interface PlayerInfo {
   facing: FacingDirection;
   isMoving: boolean;
   lastProcessedInput: number;
+  wisdomOrbs: number;
 }
 
 export interface RoomJoinedMessage {
@@ -184,6 +207,12 @@ export interface AllRunestonesActivatedMessage {
   portalY: number;
 }
 
+export interface WisdomOrbUsedMessage {
+  type: MessageType.WisdomOrbUsed;
+  direction: HubDirection;
+  remainingWisdomOrbs: number;
+}
+
 export interface ErrorMessage {
   type: MessageType.Error;
   code: string;
@@ -215,7 +244,12 @@ export interface GameState {
 
 // ── Union Types ─────────────────────────────────────────────────────────────
 
-export type ClientToServerMessage = JoinRoomMessage | PlayerInputMessage | ActivateRunestoneMessage | DebugTeleportMessage;
+export type ClientToServerMessage =
+  | JoinRoomMessage
+  | PlayerInputMessage
+  | ActivateRunestoneMessage
+  | UseWisdomOrbMessage
+  | DebugTeleportMessage;
 
 export type ServerToClientMessage =
   | RoomJoinedMessage
@@ -223,4 +257,5 @@ export type ServerToClientMessage =
   | PlayerLeftMessage
   | RunestoneActivatedMessage
   | AllRunestonesActivatedMessage
+  | WisdomOrbUsedMessage
   | ErrorMessage;

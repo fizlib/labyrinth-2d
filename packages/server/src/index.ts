@@ -60,7 +60,7 @@ function generatePlayerId(): string {
 
 // ── uWebSockets.js Application ──────────────────────────────────────────────
 
-const app = uWS
+uWS
   .App()
   .ws<SocketData>('/*', {
     /* ── Connection Settings ─────────────────────────────────── */
@@ -135,6 +135,16 @@ const app = uWS
               const room = rooms.get(data.roomId);
               if (room) {
                 room.handleActivateRunestone(data.id, msg);
+              }
+            }
+            break;
+          }
+
+          case MessageType.UseWisdomOrb: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) {
+                room.handleUseWisdomOrb(data.id);
               }
             }
             break;
