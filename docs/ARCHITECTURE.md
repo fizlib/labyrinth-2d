@@ -33,7 +33,8 @@ One room owns one maze instance. The server is authoritative for player state, r
   - one player list
   - one runestone state array
   - one optional portal position
-  - one precomputed hub-distance field for wisdom guidance
+  - one precomputed hub-distance field for phase 1 wisdom guidance
+  - one optional portal-distance field for phase 2 wisdom guidance
 
 ### Room Lifecycle
 
@@ -125,22 +126,22 @@ One room owns one maze instance. The server is authoritative for player state, r
 - The generated map contains exactly three runestone tiles inside the hub area.
 - The server validates runestone activation by proximity before accepting a request.
 - When all three runestones are active, the server computes one portal position farther from the hub than player spawns and broadcasts it.
+- As soon as the authoritative portal position exists, wisdom orbs switch from hub guidance to portal guidance.
 - The portal is a world entity, not a tilemap tile.
 
 ### Wisdom Orbs and Shared Navigation
 
 - Each player starts with `3` wisdom orbs.
 - Wisdom orbs are server-authoritative and stored directly on `PlayerInfo`.
-- Shared hub guidance lives in `packages/shared/src/navigation.ts`.
-- `computeHubDistanceField()` precomputes:
-  - tile-level distances from the hub
-  - cell-graph distances from the hub
-- `getHubDirectionForPosition()` converts the player's feet position to a tile and returns one of:
+- Shared phase-aware guidance lives in `packages/shared/src/navigation.ts`.
+- `computeHubDistanceField()` builds the phase 1 pathfield toward the central hub.
+- `computePortalDistanceField()` builds the phase 2 pathfield toward walkable portal-approach tiles around the blocked portal collider.
+- `getNavigationDirectionForPosition()` converts the player's feet position to a tile and returns one of:
   - `north`
   - `east`
   - `south`
   - `west`
-- The hint logic is branch-aware. It chooses from locally open exits that the player can actually take from the current cell or passage, rather than pointing at the hub's raw absolute bearing through walls.
+- The hint logic is branch-aware. It chooses from locally open exits that the player can actually take from the current cell or passage, rather than pointing at the target's raw absolute bearing through walls.
 
 ## Map System
 

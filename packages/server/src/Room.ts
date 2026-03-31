@@ -27,9 +27,10 @@ import {
   computeSpawnPoints,
   computePortalPosition,
   computeHubDistanceField,
-  getHubDirectionForPosition,
+  computePortalDistanceField,
+  getNavigationDirectionForPosition,
   applyInputWithCollision,
-  type HubDistanceField,
+  type NavigationDistanceField,
   type FacingDirection,
   type TileMapData,
   type SpawnPoint,
@@ -110,7 +111,10 @@ export class Room {
   private readonly spawnPoints: SpawnPoint[];
 
   /** Precomputed tile distances from every walkable tile to the hub. */
-  private readonly hubDistanceField: HubDistanceField;
+  private readonly hubDistanceField: NavigationDistanceField;
+
+  /** Precomputed tile distances from every walkable tile to the portal approach zone. */
+  private portalDistanceField: NavigationDistanceField | null = null;
 
   constructor(id: string) {
     this.id = id;
@@ -306,6 +310,7 @@ export class Room {
         const portalPxX = (portalTile.x + 0.5) * TILE_SIZE;
         const portalPxY = (portalTile.y + 0.5) * TILE_SIZE;
         this.portalPosition = { x: portalPxX, y: portalPxY };
+        this.portalDistanceField = computePortalDistanceField(this.map, this.portalPosition);
         this.state.portal = this.portalPosition;
 
         console.info(`[Room:${this.id}] All runestones activated! Portal spawned at (${Math.round(portalPxX)}, ${Math.round(portalPxY)})`);
@@ -328,11 +333,15 @@ export class Room {
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player || player.wisdomOrbs <= 0) return;
 
-    const direction = getHubDirectionForPosition(
+    const activeTarget = this.portalPosition ? 'portal' : 'hub';
+    const activeDistanceField = this.portalPosition ? this.portalDistanceField : this.hubDistanceField;
+    if (!activeDistanceField) return;
+
+    const direction = getNavigationDirectionForPosition(
       player.x,
       player.y,
       this.map,
-      this.hubDistanceField,
+      activeDistanceField,
     );
     if (!direction) return;
 
@@ -349,7 +358,7 @@ export class Room {
     this.send(ws, orbUsedMsg);
 
     console.info(
-      `[Room:${this.id}] Wisdom orb used by ${playerId} -> ${direction} (${player.wisdomOrbs} remaining)`,
+      `[Room:${this.id}] Wisdom orb used by ${playerId} -> ${direction} toward ${activeTarget} (${player.wisdomOrbs} remaining)`,
     );
   }
 

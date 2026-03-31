@@ -50,9 +50,13 @@ export {
 
 export {
   computeHubDistanceField,
+  computePortalDistanceField,
+  getNavigationDirectionForPosition,
+  getNavigationDirectionForTile,
   getHubDirectionForPosition,
   getHubDirectionForTile,
   type HubDirection,
+  type NavigationDistanceField,
   type HubDistanceField,
 } from './navigation.js';
 

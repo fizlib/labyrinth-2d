@@ -24,12 +24,30 @@ export interface PortalCollider {
 }
 
 /** Portal collision hitbox size (widened to 28px to cover the stone frame). */
-const PORTAL_HITBOX_W = 28;
-const PORTAL_HITBOX_H = 16;
+export const PORTAL_HITBOX_W = 28;
+export const PORTAL_HITBOX_H = 16;
+
+export interface PortalBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
 
 export const PLAYER_SPEED = 80;
 export const FEET_HITBOX_W = 8;
 export const FEET_HITBOX_H = 12;
+
+export function getPortalBounds(portal: PortalCollider): PortalBounds {
+  const left = portal.x - PORTAL_HITBOX_W / 2;
+  const top = portal.y - PORTAL_HITBOX_H / 2;
+  return {
+    left,
+    top,
+    right: left + PORTAL_HITBOX_W - 1,
+    bottom: top + PORTAL_HITBOX_H - 1,
+  };
+}
 
 export function applyInput(
   x: number,
@@ -84,12 +102,14 @@ export function isPositionValid(
 
   // Check portal collision (dynamic entity, AABB overlap test)
   if (portal) {
-    const portalLeft = portal.x - PORTAL_HITBOX_W / 2;
-    const portalTop = portal.y - PORTAL_HITBOX_H / 2;
-    const portalRight = portalLeft + PORTAL_HITBOX_W - 1;
-    const portalBottom = portalTop + PORTAL_HITBOX_H - 1;
+    const bounds = getPortalBounds(portal);
 
-    if (left <= portalRight && right >= portalLeft && top <= portalBottom && bottom >= portalTop) {
+    if (
+      left <= bounds.right &&
+      right >= bounds.left &&
+      top <= bounds.bottom &&
+      bottom >= bounds.top
+    ) {
       return false;
     }
   }

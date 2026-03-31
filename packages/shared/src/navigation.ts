@@ -6,19 +6,24 @@ import {
   isSolidTileId,
   type TileMapData,
 } from './maps/level1.js';
+import { getPortalBounds, type PortalCollider } from './physics.js';
 
 export type HubDirection = 'north' | 'east' | 'south' | 'west';
 
-export interface HubDistanceField {
+export interface NavigationDistanceField {
   tileDistances: Int16Array;
   cellDistances: Int16Array;
+  blockedTiles: Uint8Array | null;
 }
 
+export type HubDistanceField = NavigationDistanceField;
+
 type Region =
-  | { type: 'hub' }
   | { type: 'cell'; cx: number; cy: number }
   | { type: 'horizontal'; leftCx: number; cy: number }
   | { type: 'vertical'; cx: number; topCy: number };
+
+type CellCoord = { cx: number; cy: number };
 
 const TILE_DIRS: Array<{ direction: HubDirection; dx: number; dy: number }> = [
   { direction: 'north', dx: 0, dy: -1 },
@@ -35,52 +40,130 @@ const CELL_DIRS: Array<{ direction: HubDirection; dx: number; dy: number }> = [
 ];
 
 export function computeHubDistanceField(map: TileMapData): HubDistanceField {
-  return {
-    tileDistances: computeTileDistances(map),
-    cellDistances: computeCellDistances(map),
-  };
+  const hubBounds = getHubTileBounds(map.width, map.height);
+  const seedIndices: number[] = [];
+
+  for (let ty = hubBounds.top; ty <= hubBounds.bottom; ty++) {
+    for (let tx = hubBounds.left; tx <= hubBounds.right; tx++) {
+      const index = ty * map.width + tx;
+      if (isSolidTileId(map.data[index])) continue;
+      seedIndices.push(index);
+    }
+  }
+
+  return computeDistanceField(map, seedIndices, collectHubSeedCells(map));
 }
 
-export function getHubDirectionForPosition(
+export function computePortalDistanceField(
+  map: TileMapData,
+  portal: PortalCollider,
+): NavigationDistanceField | null {
+  const blockedTiles = new Uint8Array(map.width * map.height);
+  const seedIndexSet = new Set<number>();
+  const seedCellSet = new Set<string>();
+  const bounds = getPortalBounds(portal);
+
+  const tileLeft = Math.floor(bounds.left / map.tileSize);
+  const tileTop = Math.floor(bounds.top / map.tileSize);
+  const tileRight = Math.floor(bounds.right / map.tileSize);
+  const tileBottom = Math.floor(bounds.bottom / map.tileSize);
+
+  for (let ty = tileTop; ty <= tileBottom; ty++) {
+    for (let tx = tileLeft; tx <= tileRight; tx++) {
+      if (tx < 0 || tx >= map.width || ty < 0 || ty >= map.height) continue;
+      blockedTiles[ty * map.width + tx] = 1;
+    }
+  }
+
+  for (let ty = tileTop; ty <= tileBottom; ty++) {
+    for (let tx = tileLeft; tx <= tileRight; tx++) {
+      if (tx < 0 || tx >= map.width || ty < 0 || ty >= map.height) continue;
+
+      for (const dir of TILE_DIRS) {
+        const nextX = tx + dir.dx;
+        const nextY = ty + dir.dy;
+        if (nextX < 0 || nextX >= map.width || nextY < 0 || nextY >= map.height) continue;
+
+        const nextIndex = nextY * map.width + nextX;
+        if (blockedTiles[nextIndex] === 1) continue;
+        if (isSolidTileId(map.data[nextIndex])) continue;
+
+        seedIndexSet.add(nextIndex);
+
+        const cell = getContainingCell(nextX, nextY, map);
+        if (cell) {
+          seedCellSet.add(`${cell.cx},${cell.cy}`);
+        }
+      }
+    }
+  }
+
+  if (seedIndexSet.size === 0) return null;
+
+  return computeDistanceField(
+    map,
+    Array.from(seedIndexSet),
+    cellsFromKeySet(seedCellSet),
+    blockedTiles,
+  );
+}
+
+export function getNavigationDirectionForPosition(
   x: number,
   y: number,
   map: TileMapData,
-  distances: HubDistanceField,
+  distances: NavigationDistanceField,
 ): HubDirection | null {
   const feetTileX = Math.floor(x / map.tileSize);
   const feetTileY = Math.floor((y - 1) / map.tileSize);
-  return getHubDirectionForTile(feetTileX, feetTileY, map, distances);
+  return getNavigationDirectionForTile(feetTileX, feetTileY, map, distances);
 }
 
-export function getHubDirectionForTile(
+export function getNavigationDirectionForTile(
   tileX: number,
   tileY: number,
   map: TileMapData,
-  distances: HubDistanceField,
+  distances: NavigationDistanceField,
 ): HubDirection | null {
+  if (tileX < 0 || tileX >= map.width || tileY < 0 || tileY >= map.height) return null;
+
+  const currentIndex = tileY * map.width + tileX;
+  if (isSolidTileId(map.data[currentIndex])) return null;
+
+  const currentTileDistance = distances.tileDistances[currentIndex];
+  if (currentTileDistance <= 0) return null;
+
   const region = classifyRegion(tileX, tileY, map);
-  if (!region || region.type === 'hub') return null;
+  if (!region) {
+    return getTileRayDirection(tileX, tileY, map, distances);
+  }
 
   switch (region.type) {
     case 'cell': {
-      const currentDist = distances.cellDistances[region.cy * GRID_CELLS + region.cx];
-      let bestDirection: HubDirection | null = null;
-      let bestDistance = currentDist;
+      const currentDistance = distances.cellDistances[region.cy * GRID_CELLS + region.cx];
+      if (currentDistance > 0) {
+        let bestDirection: HubDirection | null = null;
+        let bestDistance = currentDistance;
 
-      for (const dir of CELL_DIRS) {
-        const nextCx = region.cx + dir.dx;
-        const nextCy = region.cy + dir.dy;
-        if (nextCx < 0 || nextCx >= GRID_CELLS || nextCy < 0 || nextCy >= GRID_CELLS) continue;
-        if (!areCellsConnected(map, region.cx, region.cy, nextCx, nextCy)) continue;
+        for (const dir of CELL_DIRS) {
+          const nextCx = region.cx + dir.dx;
+          const nextCy = region.cy + dir.dy;
+          if (nextCx < 0 || nextCx >= GRID_CELLS || nextCy < 0 || nextCy >= GRID_CELLS) continue;
+          if (!areCellsConnected(map, region.cx, region.cy, nextCx, nextCy)) continue;
 
-        const nextDist = distances.cellDistances[nextCy * GRID_CELLS + nextCx];
-        if (nextDist === -1 || nextDist >= bestDistance) continue;
+          const nextDistance = distances.cellDistances[nextCy * GRID_CELLS + nextCx];
+          if (nextDistance === -1 || nextDistance >= bestDistance) continue;
 
-        bestDistance = nextDist;
-        bestDirection = dir.direction;
+          bestDistance = nextDistance;
+          bestDirection = dir.direction;
+        }
+
+        if (bestDirection) {
+          return bestDirection;
+        }
       }
 
-      return bestDirection ?? getTileRayDirection(tileX, tileY, map, distances.tileDistances);
+      return getTileRayDirection(tileX, tileY, map, distances);
     }
 
     case 'horizontal':
@@ -93,7 +176,7 @@ export function getHubDirectionForTile(
           direction: 'west',
           distance: getCellDistance(region.leftCx, region.cy, distances.cellDistances),
         },
-      ]);
+      ]) ?? getTileRayDirection(tileX, tileY, map, distances);
 
     case 'vertical':
       return pickBestDirection([
@@ -105,24 +188,44 @@ export function getHubDirectionForTile(
           direction: 'south',
           distance: getCellDistance(region.cx, region.topCy + 1, distances.cellDistances),
         },
-      ]);
+      ]) ?? getTileRayDirection(tileX, tileY, map, distances);
   }
 }
 
-function computeTileDistances(map: TileMapData): Int16Array {
+export const getHubDirectionForPosition = getNavigationDirectionForPosition;
+export const getHubDirectionForTile = getNavigationDirectionForTile;
+
+function computeDistanceField(
+  map: TileMapData,
+  seedIndices: number[],
+  seedCells: CellCoord[],
+  blockedTiles?: Uint8Array,
+): NavigationDistanceField {
+  return {
+    tileDistances: computeTileDistances(map, seedIndices, blockedTiles),
+    cellDistances: computeCellDistances(map, seedCells),
+    blockedTiles: blockedTiles ?? null,
+  };
+}
+
+function computeTileDistances(
+  map: TileMapData,
+  seedIndices: number[],
+  blockedTiles?: Uint8Array,
+): Int16Array {
   const distances = new Int16Array(map.width * map.height);
   distances.fill(-1);
 
-  const hubBounds = getHubTileBounds(map.width, map.height);
   const queue: number[] = [];
 
-  for (let ty = hubBounds.top; ty <= hubBounds.bottom; ty++) {
-    for (let tx = hubBounds.left; tx <= hubBounds.right; tx++) {
-      const index = ty * map.width + tx;
-      if (isSolidTileId(map.data[index])) continue;
-      distances[index] = 0;
-      queue.push(index);
-    }
+  for (const index of seedIndices) {
+    if (index < 0 || index >= map.width * map.height) continue;
+    if (distances[index] !== -1) continue;
+    if (blockedTiles && blockedTiles[index] === 1) continue;
+    if (isSolidTileId(map.data[index])) continue;
+
+    distances[index] = 0;
+    queue.push(index);
   }
 
   let head = 0;
@@ -139,6 +242,7 @@ function computeTileDistances(map: TileMapData): Int16Array {
 
       const nextIndex = nextY * map.width + nextX;
       if (distances[nextIndex] !== -1) continue;
+      if (blockedTiles && blockedTiles[nextIndex] === 1) continue;
       if (isSolidTileId(map.data[nextIndex])) continue;
 
       distances[nextIndex] = currentDistance + 1;
@@ -149,29 +253,16 @@ function computeTileDistances(map: TileMapData): Int16Array {
   return distances;
 }
 
-function computeCellDistances(map: TileMapData): Int16Array {
+function computeCellDistances(map: TileMapData, seedCells: CellCoord[]): Int16Array {
   const distances = new Int16Array(GRID_CELLS * GRID_CELLS);
   distances.fill(-1);
 
-  const hubBounds = getHubTileBounds(map.width, map.height);
-  const wallSize = getOuterWallSize(map);
   const queue: Array<{ cx: number; cy: number }> = [];
-
-  for (let cy = 0; cy < GRID_CELLS; cy++) {
-    for (let cx = 0; cx < GRID_CELLS; cx++) {
-      const tx = wallSize + cx * CELL_STEP;
-      const ty = wallSize + cy * CELL_STEP;
-      const cellRight = tx + CELL_SIZE - 1;
-      const cellBottom = ty + CELL_SIZE - 1;
-      const overlapsHub = tx <= hubBounds.right &&
-        cellRight >= hubBounds.left &&
-        ty <= hubBounds.bottom &&
-        cellBottom >= hubBounds.top;
-      if (!overlapsHub) continue;
-
-      distances[cy * GRID_CELLS + cx] = 0;
-      queue.push({ cx, cy });
-    }
+  for (const cell of seedCells) {
+    const index = cell.cy * GRID_CELLS + cell.cx;
+    if (distances[index] !== -1) continue;
+    distances[index] = 0;
+    queue.push({ cx: cell.cx, cy: cell.cy });
   }
 
   let head = 0;
@@ -196,20 +287,42 @@ function computeCellDistances(map: TileMapData): Int16Array {
   return distances;
 }
 
-function classifyRegion(tileX: number, tileY: number, map: TileMapData): Region | null {
-  if (tileX < 0 || tileX >= map.width || tileY < 0 || tileY >= map.height) return null;
-  if (isSolidTileId(map.data[tileY * map.width + tileX])) return null;
-
+function collectHubSeedCells(map: TileMapData): CellCoord[] {
   const hubBounds = getHubTileBounds(map.width, map.height);
-  if (
-    tileX >= hubBounds.left &&
-    tileX <= hubBounds.right &&
-    tileY >= hubBounds.top &&
-    tileY <= hubBounds.bottom
-  ) {
-    return { type: 'hub' };
+  const wallSize = getOuterWallSize(map);
+  const seedCells: CellCoord[] = [];
+
+  for (let cy = 0; cy < GRID_CELLS; cy++) {
+    for (let cx = 0; cx < GRID_CELLS; cx++) {
+      const tx = wallSize + cx * CELL_STEP;
+      const ty = wallSize + cy * CELL_STEP;
+      const cellRight = tx + CELL_SIZE - 1;
+      const cellBottom = ty + CELL_SIZE - 1;
+      const overlapsHub = tx <= hubBounds.right &&
+        cellRight >= hubBounds.left &&
+        ty <= hubBounds.bottom &&
+        cellBottom >= hubBounds.top;
+      if (!overlapsHub) continue;
+
+      seedCells.push({ cx, cy });
+    }
   }
 
+  return seedCells;
+}
+
+function cellsFromKeySet(keys: Set<string>): CellCoord[] {
+  const cells: CellCoord[] = [];
+
+  for (const key of keys) {
+    const [cx, cy] = key.split(',').map(Number);
+    cells.push({ cx, cy });
+  }
+
+  return cells;
+}
+
+function classifyRegion(tileX: number, tileY: number, map: TileMapData): Region | null {
   const wallSize = getOuterWallSize(map);
   const localX = tileX - wallSize;
   const localY = tileY - wallSize;
@@ -235,6 +348,19 @@ function classifyRegion(tileX: number, tileY: number, map: TileMapData): Region 
   }
 
   return null;
+}
+
+function getContainingCell(tileX: number, tileY: number, map: TileMapData): CellCoord | null {
+  const wallSize = getOuterWallSize(map);
+  const localX = tileX - wallSize;
+  const localY = tileY - wallSize;
+  if (localX < 0 || localY < 0) return null;
+
+  const cx = Math.floor(localX / CELL_STEP);
+  const cy = Math.floor(localY / CELL_STEP);
+  if (cx < 0 || cx >= GRID_CELLS || cy < 0 || cy >= GRID_CELLS) return null;
+
+  return { cx, cy };
 }
 
 function areCellsConnected(
@@ -275,9 +401,9 @@ function getTileRayDirection(
   tileX: number,
   tileY: number,
   map: TileMapData,
-  tileDistances: Int16Array,
+  distances: NavigationDistanceField,
 ): HubDirection | null {
-  const currentDistance = tileDistances[tileY * map.width + tileX];
+  const currentDistance = distances.tileDistances[tileY * map.width + tileX];
   if (currentDistance <= 0) return null;
 
   let bestDirection: HubDirection | null = null;
@@ -293,9 +419,10 @@ function getTileRayDirection(
       if (nextX < 0 || nextX >= map.width || nextY < 0 || nextY >= map.height) break;
 
       const nextIndex = nextY * map.width + nextX;
+      if (distances.blockedTiles && distances.blockedTiles[nextIndex] === 1) break;
       if (isSolidTileId(map.data[nextIndex])) break;
 
-      const nextDistance = tileDistances[nextIndex];
+      const nextDistance = distances.tileDistances[nextIndex];
       if (nextDistance !== -1) {
         rayBest = Math.min(rayBest, nextDistance);
       }
