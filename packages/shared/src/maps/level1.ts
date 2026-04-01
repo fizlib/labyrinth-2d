@@ -50,6 +50,8 @@ export interface GeneratedMazeLayout {
   map: TileMapData;
   spawnPoints: SpawnPoint[];
   gates: GatePlacement[];
+  /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
+  dirtMask: Uint8Array;
 }
 
 // ── Tile ID Constants ───────────────────────────────────────────────────────
@@ -651,6 +653,34 @@ function stampGate(data: number[], gate: GatePlacement): void {
   }
 }
 
+function stampDirtRect(
+  dirtMask: Uint8Array,
+  startX: number,
+  startY: number,
+  width: number,
+  height: number,
+): void {
+  const clampedStartX = Math.max(0, startX);
+  const clampedStartY = Math.max(0, startY);
+  const clampedEndX = Math.min(MAP_SIZE, startX + width);
+  const clampedEndY = Math.min(MAP_SIZE, startY + height);
+
+  for (let y = clampedStartY; y < clampedEndY; y++) {
+    for (let x = clampedStartX; x < clampedEndX; x++) {
+      dirtMask[y * MAP_SIZE + x] = 1;
+    }
+  }
+}
+
+function stampGateDirtBand(dirtMask: Uint8Array, gate: GatePlacement): void {
+  if (gate.orientation === 'horizontal') {
+    stampDirtRect(dirtMask, gate.tileX, gate.tileY - 1, CELL_SIZE, 3);
+    return;
+  }
+
+  stampDirtRect(dirtMask, gate.tileX - 1, gate.tileY, 3, CELL_SIZE);
+}
+
 function computeGatePlacements(data: number[], spawnPoints: SpawnPoint[]): GatePlacement[] {
   const hubBounds = getHubTileBounds(MAP_SIZE, MAP_SIZE);
   const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
@@ -692,9 +722,11 @@ export function generateMazeLayout(
   const spawnPoints = computeSpawnPoints(baseData, spawnDistance, numTeams);
   const gates = computeGatePlacements(baseData, spawnPoints);
   const gatedData = baseData.slice();
+  const dirtMask = new Uint8Array(MAP_SIZE * MAP_SIZE);
 
   for (const gate of gates) {
     stampGate(gatedData, gate);
+    stampGateDirtBand(dirtMask, gate);
   }
 
   return {
@@ -706,6 +738,7 @@ export function generateMazeLayout(
     },
     spawnPoints,
     gates,
+    dirtMask,
   };
 }
 

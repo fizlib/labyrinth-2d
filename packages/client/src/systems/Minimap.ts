@@ -12,7 +12,12 @@
 
 import { Container, Sprite, Texture, Graphics } from 'pixi.js';
 import type { TileMapData } from '@labyrinth/shared';
-import { TILE_FLOOR, TILE_FLOOR_SHADOW } from '@labyrinth/shared';
+import {
+  TILE_FLOOR,
+  TILE_FLOOR_SHADOW,
+  TILE_GATE_HORIZONTAL,
+  TILE_GATE_VERTICAL,
+} from '@labyrinth/shared';
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
@@ -39,6 +44,7 @@ const REVEAL_RADIUS = 7;
 // ── Tile colour palette (Stardew Valley Inspired RGBA) ─────────────────────
 
 const COL_FLOOR: readonly number[] = [107, 166, 61, 255]; // vibrant grass green
+const COL_DIRT: readonly number[] = [142, 110, 78, 255]; // muted dirt brown
 const COL_WALL: readonly number[] = [89, 73, 58, 255]; // dark wood/stone wall
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
@@ -61,6 +67,7 @@ export class Minimap {
 
   // ── Map / fog state ────────────────────────────────────────────────────
   private mapData: TileMapData;
+  private dirtMask: Uint8Array;
   private fog: Uint8Array;
 
   // ── Tracking for incremental updates ───────────────────────────────────
@@ -76,10 +83,12 @@ export class Minimap {
 
   constructor(
     mapData: TileMapData,
+    dirtMask: Uint8Array,
     internalWidth: number,
     internalHeight: number,
   ) {
     this.mapData = mapData;
+    this.dirtMask = dirtMask;
     this.fog = new Uint8Array(mapData.width * mapData.height); // all 0 (hidden)
 
     // ── Offscreen canvas (kept small & strictly for the viewable area) ─
@@ -258,11 +267,11 @@ export class Minimap {
               } else if (dx + dy === 1) {
                 col = COL_PORTAL; // diamond edges
               } else {
-                col = this.tileColor(data[fogIdx]);
-              }
-            } else {
-              col = this.tileColor(data[fogIdx]);
-            }
+                 col = this.tileColor(fogIdx, data[fogIdx]);
+               }
+             } else {
+               col = this.tileColor(fogIdx, data[fogIdx]);
+             }
           }
         }
 
@@ -278,7 +287,13 @@ export class Minimap {
   // ── Pixel manipulation ────────────────────────────────────────────────
 
   /** Get the minimap colour for a given tile ID. */
-  private tileColor(id: number): readonly number[] {
+  private tileColor(tileIndex: number, id: number): readonly number[] {
+    const isGroundTile = id === TILE_FLOOR ||
+      id === TILE_FLOOR_SHADOW ||
+      id === TILE_GATE_HORIZONTAL ||
+      id === TILE_GATE_VERTICAL;
+
+    if (isGroundTile && this.dirtMask[tileIndex] === 1) return COL_DIRT;
     if (id === TILE_FLOOR) return COL_FLOOR;
     if (id === TILE_FLOOR_SHADOW) return COL_FLOOR; // shadows are now overlays, base is grass
     return COL_WALL; // solid walls, trees, unknown

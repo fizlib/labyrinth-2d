@@ -52,6 +52,7 @@ export interface RunestoneSpriteData {
 
 const FRONT_GATE_WIDTH_TILES = 6;
 const FRONT_GATE_HEIGHT_TILES = 4;
+const GATE_SOUTH_SHADOW_OFFSET_PX = 4;
 const FRONT_GATE_TILE_ROWS: (keyof FrontGateTextures)[][] = [
   ['topLeft', 'topMid', 'topMid', 'topMid', 'topMid', 'topRight'],
   ['midLeft', 'midCenter', 'midCenter', 'midCenter', 'midCenter', 'midRight'],
@@ -87,6 +88,51 @@ function getGrassTexture(x: number, y: number, grassTextures: Texture[]): Textur
   if (h < 94) return grassTextures[1];
   if (h < 97) return grassTextures[2];
   return grassTextures[3];
+}
+
+function getCenterDirtTexture(x: number, y: number, assets: GameAssets): Texture {
+  const h = (Math.imul(x, 374761393) + Math.imul(y, 668265263)) >>> 0;
+  return (h & 1) === 0 ? assets.dirtTextures.center : assets.dirtTextures.plainAlt;
+}
+
+function isDirtAt(
+  x: number,
+  y: number,
+  dirtMask: Uint8Array,
+  mapWidth: number,
+  mapHeight: number,
+): boolean {
+  if (x < 0 || x >= mapWidth || y < 0 || y >= mapHeight) return false;
+  return dirtMask[y * mapWidth + x] === 1;
+}
+
+function getDirtTexture(
+  x: number,
+  y: number,
+  dirtMask: Uint8Array,
+  mapWidth: number,
+  mapHeight: number,
+  assets: GameAssets,
+): Texture {
+  const north = isDirtAt(x, y - 1, dirtMask, mapWidth, mapHeight);
+  const east = isDirtAt(x + 1, y, dirtMask, mapWidth, mapHeight);
+  const south = isDirtAt(x, y + 1, dirtMask, mapWidth, mapHeight);
+  const west = isDirtAt(x - 1, y, dirtMask, mapWidth, mapHeight);
+
+  const missingNorth = !north;
+  const missingEast = !east;
+  const missingSouth = !south;
+  const missingWest = !west;
+
+  if (missingNorth && missingEast) return assets.dirtTextures.northEast;
+  if (missingEast && missingSouth) return assets.dirtTextures.southEast;
+  if (missingSouth && missingWest) return assets.dirtTextures.southWest;
+  if (missingNorth && missingWest) return assets.dirtTextures.northWest;
+  if (missingNorth) return assets.dirtTextures.north;
+  if (missingEast) return assets.dirtTextures.east;
+  if (missingSouth) return assets.dirtTextures.south;
+  if (missingWest) return assets.dirtTextures.west;
+  return getCenterDirtTexture(x, y, assets);
 }
 
 /** Deterministic wall face variant texture based on tile position. */
@@ -125,11 +171,36 @@ function getWallTexture(tileId: number, x: number, y: number, assets: GameAssets
   }
 }
 
-function usesGrassBackground(tileId: number): boolean {
+function usesGroundBackgroundTile(tileId: number): boolean {
+  return tileId === TILE_FLOOR ||
+    tileId === TILE_FLOOR_SHADOW ||
+    tileId === TILE_TREE ||
+    tileId === TILE_RUNESTONE_1 ||
+    tileId === TILE_RUNESTONE_2 ||
+    tileId === TILE_RUNESTONE_3 ||
+    tileId === TILE_GATE_HORIZONTAL ||
+    tileId === TILE_GATE_VERTICAL;
+}
+
+function isGateTileId(tileId: number): boolean {
+  return tileId === TILE_GATE_HORIZONTAL || tileId === TILE_GATE_VERTICAL;
+}
+
+function usesGroundShadowOverlay(tileId: number): boolean {
   return tileId === TILE_FLOOR ||
     tileId === TILE_FLOOR_SHADOW ||
     tileId === TILE_GATE_HORIZONTAL ||
     tileId === TILE_GATE_VERTICAL;
+}
+
+function isSouthGroundShadowCasterTileId(tileId: number): boolean {
+  return (tileId >= TILE_WALL_FACE && tileId <= TILE_TREE) ||
+    tileId === TILE_GATE_HORIZONTAL ||
+    tileId === TILE_GATE_VERTICAL;
+}
+
+function isEastGroundShadowCasterTileId(tileId: number): boolean {
+  return tileId >= TILE_WALL_FACE && tileId <= TILE_TREE;
 }
 
 function createFrontGateSprite(
@@ -177,11 +248,32 @@ function createFrontGateSprite(
   return sprite;
 }
 
-/** Check if tile at (tx, ty) is any solid wall type (IDs 2–13) for shadow logic. */
-function isTileSolid(tx: number, ty: number, map: TileMapData): boolean {
+/** Check if tile at (tx, ty) should cast a south-dropping ground shadow. */
+function isSouthGroundShadowCaster(tx: number, ty: number, map: TileMapData): boolean {
   if (tx < 0 || tx >= map.width || ty < 0 || ty >= map.height) return true;
   const id = map.data[ty * map.width + tx];
-  return id >= 2 && id <= 13; // TILE_WALL_FACE(2) through TILE_TREE(13)
+  return isSouthGroundShadowCasterTileId(id);
+}
+
+/** Check if tile at (tx, ty) should cast an east-dropping ground shadow. */
+function isEastGroundShadowCaster(tx: number, ty: number, map: TileMapData): boolean {
+  if (tx < 0 || tx >= map.width || ty < 0 || ty >= map.height) return true;
+  const id = map.data[ty * map.width + tx];
+  return isEastGroundShadowCasterTileId(id);
+}
+
+function getGroundTexture(
+  x: number,
+  y: number,
+  dirtMask: Uint8Array,
+  map: TileMapData,
+  assets: GameAssets,
+): Texture {
+  if (dirtMask[y * map.width + x] === 1) {
+    return getDirtTexture(x, y, dirtMask, map.width, map.height, assets);
+  }
+
+  return getGrassTexture(x, y, assets.grassVariantTextures);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,7 +298,13 @@ export class TilemapRenderer {
 
   // ──────────────────────────────────────────────────────────────────────
 
-  constructor(map: TileMapData, gates: GatePlacement[], assets: GameAssets, renderer: Renderer) {
+  constructor(
+    map: TileMapData,
+    gates: GatePlacement[],
+    dirtMask: Uint8Array,
+    assets: GameAssets,
+    renderer: Renderer,
+  ) {
     const ts = map.tileSize;
     const renderSimpleHorizontalGates = !assets.frontGateTextures;
 
@@ -230,6 +328,7 @@ export class TilemapRenderer {
 
         const shadowChunk = new Container();
         let shadowHasContent = false;
+        let shadowChunkTopOverflow = 0;
 
         for (let y = startY; y < endY; y++) {
           for (let x = startX; x < endX; x++) {
@@ -238,13 +337,8 @@ export class TilemapRenderer {
             const localY = (y - startY) * ts;
 
             // ── Background tile ──────────────────────────────────
-            if (tileId === TILE_FLOOR || tileId === TILE_FLOOR_SHADOW ||
-                tileId === TILE_TREE ||
-                tileId === TILE_RUNESTONE_1 || tileId === TILE_RUNESTONE_2 || tileId === TILE_RUNESTONE_3 ||
-                tileId === TILE_GATE_HORIZONTAL || tileId === TILE_GATE_VERTICAL) {
-              // All of these get a grass tile in the background
-              const grassTex = getGrassTexture(x, y, assets.grassVariantTextures);
-              const sprite = new Sprite(grassTex);
+            if (usesGroundBackgroundTile(tileId)) {
+              const sprite = new Sprite(getGroundTexture(x, y, dirtMask, map, assets));
               sprite.x = localX;
               sprite.y = localY;
               sprite.width = ts;
@@ -254,27 +348,39 @@ export class TilemapRenderer {
             }
 
             // ── Shadow overlay ───────────────────────────────────
-            if (usesGrassBackground(tileId)) {
-              const wallAbove = isTileSolid(x, y - 1, map);
-              const wallLeft = isTileSolid(x - 1, y, map);
+            if (usesGroundShadowOverlay(tileId)) {
+              const wallAbove = isSouthGroundShadowCaster(x, y - 1, map);
+              const wallLeft = isEastGroundShadowCaster(x - 1, y, map);
+              const aboveTileId = y > 0 ? map.data[(y - 1) * map.width + x] : null;
+              const gateSouthShadowOffset =
+                wallAbove && aboveTileId !== null && isGateTileId(aboveTileId)
+                  ? GATE_SOUTH_SHADOW_OFFSET_PX
+                  : 0;
 
-              let shadowTex: Texture | null = null;
-              if (wallAbove && wallLeft) {
-                shadowTex = assets.shadowCornerTexture;
-              } else if (wallAbove) {
-                shadowTex = assets.shadowTopTexture;
-              } else if (wallLeft) {
-                shadowTex = assets.shadowLeftTexture;
+              const shadowOverlays: { texture: Texture; offsetY: number }[] = [];
+              if (wallAbove && wallLeft && gateSouthShadowOffset === 0) {
+                shadowOverlays.push({ texture: assets.shadowCornerTexture, offsetY: 0 });
+              } else {
+                if (wallAbove) {
+                  shadowOverlays.push({
+                    texture: assets.shadowTopTexture,
+                    offsetY: -gateSouthShadowOffset,
+                  });
+                }
+                if (wallLeft) {
+                  shadowOverlays.push({ texture: assets.shadowLeftTexture, offsetY: 0 });
+                }
               }
 
-              if (shadowTex) {
-                const overlay = new Sprite(shadowTex);
+              for (const shadow of shadowOverlays) {
+                const overlay = new Sprite(shadow.texture);
                 overlay.x = localX;
-                overlay.y = localY;
+                overlay.y = localY + shadow.offsetY;
                 overlay.width = ts;
                 overlay.height = ts;
                 shadowChunk.addChild(overlay);
                 shadowHasContent = true;
+                shadowChunkTopOverflow = Math.min(shadowChunkTopOverflow, overlay.y);
               }
             }
           }
@@ -314,9 +420,15 @@ export class TilemapRenderer {
 
         // Bake and register shadow chunk
         if (shadowHasContent) {
+          const shadowFrame = new Rectangle(
+            0,
+            shadowChunkTopOverflow,
+            chunkPixelW,
+            chunkPixelH - shadowChunkTopOverflow,
+          );
           const tex = renderer.generateTexture({
             target: shadowChunk,
-            frame: chunkFrame, // <-- Force exact dimensions
+            frame: shadowFrame,
             resolution: 1,
             antialias: false
           });
@@ -325,13 +437,13 @@ export class TilemapRenderer {
 
           const shadowSprite = new Sprite(tex);
           shadowSprite.x = startX * ts;
-          shadowSprite.y = startY * ts;
+          shadowSprite.y = startY * ts + shadowChunkTopOverflow;
 
           this.shadowLayer.addChild(shadowSprite);
           this.allChunks.push({
             container: shadowSprite,
             worldLeft: startX * ts,
-            worldTop: startY * ts,
+            worldTop: startY * ts + shadowChunkTopOverflow,
             worldRight: endX * ts,
             worldBottom: endY * ts,
           });

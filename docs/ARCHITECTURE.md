@@ -149,6 +149,8 @@ One room owns one maze instance. The server is authoritative for player state, r
 
 Map generation lives in `packages/shared/src/maps/level1.ts`.
 
+`generateMazeLayout()` returns the tile map, spawn points, gate placements, and a visual-only `dirtMask` used by the client ground renderer and minimap.
+
 ### Core Layout
 
 - Tile grid: `218 x 218`
@@ -170,6 +172,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 6. Post-process solid regions into the final 2.5D wall tile set.
 7. Place the hub tree and the three runestones.
 8. Compute spawn points from the ungated maze, then stamp one closed gate cell per team along the chosen spawn-to-hub routes when a qualifying straight corridor cell exists.
+9. Stamp a visual-only dirt mask around each closed gate so the client can render short dirt approaches that transition back into grass.
 
 ### Spawns and Objective Placement
 
@@ -177,6 +180,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 - `SPAWN_DISTANCE` is currently `10` cell-steps from the hub.
 - Spawn selection prefers angular separation around the map so teams begin in different sectors.
 - Closed gates are chosen from straight-through cells on spawn-to-hub paths and are rendered as one-tile-thick barriers through the middle of those cells.
+- Each gate also produces a short rectangular dirt band in shared layout data. The dirt mask is visual-only and does not affect collision or navigation.
 - Portal placement is also BFS-driven and prefers cells deeper in the maze than player spawns.
 
 ### Tile IDs
@@ -225,7 +229,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 
 Asset loading lives in `packages/client/src/assets/AssetLoader.ts`.
 
-The loader attempts to load authored PNG assets first and falls back to generated textures if a file is missing. Current supported assets include:
+The loader attempts to load authored PNG assets first and falls back to generated textures if a file is missing. `assets/tiles.png` is a `272 x 32` atlas: row 0 contains the existing floor, wall, and grass slices, and row 1 columns `0..9` contain the dirt transition set used for gate approaches. Current supported assets include:
 
 - `assets/tiles.png`
 - `assets/oak-tree.png`

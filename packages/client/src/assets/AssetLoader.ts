@@ -42,6 +42,35 @@ export interface FrontGateTextures {
   bottomRight: Texture;
 }
 
+export interface DirtTextures {
+  center: Texture;
+  plainAlt: Texture;
+  north: Texture;
+  northEast: Texture;
+  east: Texture;
+  southEast: Texture;
+  south: Texture;
+  southWest: Texture;
+  west: Texture;
+  northWest: Texture;
+}
+
+function createFallbackDirtTextures(): DirtTextures {
+  const dirt = generateDirtTexture();
+  return {
+    center: dirt,
+    plainAlt: dirt,
+    north: dirt,
+    northEast: dirt,
+    east: dirt,
+    southEast: dirt,
+    south: dirt,
+    southWest: dirt,
+    west: dirt,
+    northWest: dirt,
+  };
+}
+
 export interface GameAssets {
   floorTexture: Texture;
   floorShadowTexture: Texture;
@@ -62,6 +91,7 @@ export interface GameAssets {
   gateVerticalTexture: Texture;
   /** 4 grass variant textures: [0-1] plain grass, [2-3] flower grass (rarer). */
   grassVariantTextures: Texture[];
+  dirtTextures: DirtTextures;
   treeTexture: Texture;
   /** Shadow overlay for tiles directly below a north wall. */
   shadowTopTexture: Texture;
@@ -99,6 +129,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let gateHorizontalTexture = generateGateHorizontalTexture();
   let gateVerticalTexture = generateGateVerticalTexture();
   let grassVariantTextures: Texture[] = [];
+  let dirtTextures = createFallbackDirtTextures();
   let treeTexture: Texture;
   let shadowTopTexture: Texture;
   let shadowLeftTexture: Texture;
@@ -112,6 +143,9 @@ export async function loadAssets(): Promise<GameAssets> {
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
     tilesheet.source.scaleMode = 'nearest';
+    if (tilesheet.width < 272 || tilesheet.height < 16) {
+      throw new Error(`Expected tiles.png to be at least 272x16 but received ${tilesheet.width}x${tilesheet.height}`);
+    }
 
     floorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(0, 0, 16, 16) });
     floorShadowTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(16, 0, 16, 16) });
@@ -133,7 +167,24 @@ export async function loadAssets(): Promise<GameAssets> {
       );
     }
 
-    console.info('[Assets] Loaded tiles.png (preserved wall tiles + grass variants)');
+    if (tilesheet.height >= 32) {
+      dirtTextures = {
+        center: new Texture({ source: tilesheet.source, frame: new Rectangle(0, 16, 16, 16) }),
+        plainAlt: new Texture({ source: tilesheet.source, frame: new Rectangle(16, 16, 16, 16) }),
+        north: new Texture({ source: tilesheet.source, frame: new Rectangle(32, 16, 16, 16) }),
+        northEast: new Texture({ source: tilesheet.source, frame: new Rectangle(48, 16, 16, 16) }),
+        east: new Texture({ source: tilesheet.source, frame: new Rectangle(64, 16, 16, 16) }),
+        southEast: new Texture({ source: tilesheet.source, frame: new Rectangle(80, 16, 16, 16) }),
+        south: new Texture({ source: tilesheet.source, frame: new Rectangle(96, 16, 16, 16) }),
+        southWest: new Texture({ source: tilesheet.source, frame: new Rectangle(112, 16, 16, 16) }),
+        west: new Texture({ source: tilesheet.source, frame: new Rectangle(128, 16, 16, 16) }),
+        northWest: new Texture({ source: tilesheet.source, frame: new Rectangle(144, 16, 16, 16) }),
+      };
+    } else {
+      console.warn('[Assets] tiles.png is missing the dirt row - using fallback dirt textures');
+    }
+
+    console.info('[Assets] Loaded tiles.png (wall tiles, grass variants, dirt transitions)');
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
     // Map existing fallback generators to the new semantic naming
@@ -151,6 +202,7 @@ export async function loadAssets(): Promise<GameAssets> {
     wallTopEdgeTexture = generateTopEdgeTexture();
     // Fallback: reuse the same grass texture for all variants
     grassVariantTextures = [floorTexture, floorTexture, floorTexture, floorTexture];
+    dirtTextures = createFallbackDirtTextures();
   }
 
   try {
@@ -411,6 +463,7 @@ export async function loadAssets(): Promise<GameAssets> {
     gateHorizontalTexture,
     gateVerticalTexture,
     grassVariantTextures,
+    dirtTextures,
     treeTexture,
     shadowTopTexture,
     shadowLeftTexture,

@@ -443,7 +443,7 @@ async function main(): Promise<void> {
 
       // ── Build chunk-based tilemap ──────────────────────────────────────
       tilemapRenderer?.destroy();
-      tilemapRenderer = new TilemapRenderer(currentMap, layout.gates, assets, app.renderer);
+      tilemapRenderer = new TilemapRenderer(currentMap, layout.gates, layout.dirtMask, assets, app.renderer);
 
       // Attach layers: background and shadow go before entityLayer,
       // entityLayer is already a child of worldContainer.
@@ -487,7 +487,7 @@ async function main(): Promise<void> {
 
       // ── Minimap ──────────────────────────────────────────────────────
       if (minimap) minimap.destroy();
-      minimap = new Minimap(currentMap!, INTERNAL_WIDTH, INTERNAL_HEIGHT);
+      minimap = new Minimap(currentMap!, layout.dirtMask, INTERNAL_WIDTH, INTERNAL_HEIGHT);
       minimap.addToStage(app.stage);
 
       if (wisdomOrbHud) wisdomOrbHud.destroy();
