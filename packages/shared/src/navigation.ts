@@ -7,6 +7,11 @@ import {
   isSolidTileId,
   type TileMapData,
 } from './maps/level1.js';
+
+/** Solid for navigation purposes — like isSolidTileId but treats gate tiles as passable. */
+function isSolidForNavigation(tile: number): boolean {
+  return isSolidTileId(tile) && !isGateTileId(tile);
+}
 import { getPortalBounds, type PortalCollider } from './physics.js';
 
 export type HubDirection = 'north' | 'east' | 'south' | 'west';
@@ -52,7 +57,7 @@ export function computeHubDistanceField(map: TileMapData): HubDistanceField {
     }
   }
 
-  return computeDistanceField(map, seedIndices, collectHubSeedCells(map));
+  return computeDistanceField(map, seedIndices, collectHubSeedCells(map), undefined, true);
 }
 
 export function computePortalDistanceField(
@@ -106,6 +111,7 @@ export function computePortalDistanceField(
     Array.from(seedIndexSet),
     cellsFromKeySet(seedCellSet),
     blockedTiles,
+    true,
   );
 }
 
@@ -209,9 +215,10 @@ function computeDistanceField(
   seedIndices: number[],
   seedCells: CellCoord[],
   blockedTiles?: Uint8Array,
+  ignoreGates?: boolean,
 ): NavigationDistanceField {
   return {
-    tileDistances: computeTileDistances(map, seedIndices, blockedTiles),
+    tileDistances: computeTileDistances(map, seedIndices, blockedTiles, ignoreGates),
     cellDistances: computeCellDistances(map, seedCells),
     blockedTiles: blockedTiles ?? null,
   };
@@ -221,7 +228,9 @@ function computeTileDistances(
   map: TileMapData,
   seedIndices: number[],
   blockedTiles?: Uint8Array,
+  ignoreGates?: boolean,
 ): Int16Array {
+  const isTileSolid = ignoreGates ? isSolidForNavigation : isSolidTileId;
   const distances = new Int16Array(map.width * map.height);
   distances.fill(-1);
 
@@ -231,7 +240,7 @@ function computeTileDistances(
     if (index < 0 || index >= map.width * map.height) continue;
     if (distances[index] !== -1) continue;
     if (blockedTiles && blockedTiles[index] === 1) continue;
-    if (isSolidTileId(map.data[index])) continue;
+    if (isTileSolid(map.data[index])) continue;
 
     distances[index] = 0;
     queue.push(index);
@@ -252,7 +261,7 @@ function computeTileDistances(
       const nextIndex = nextY * map.width + nextX;
       if (distances[nextIndex] !== -1) continue;
       if (blockedTiles && blockedTiles[nextIndex] === 1) continue;
-      if (isSolidTileId(map.data[nextIndex])) continue;
+      if (isTileSolid(map.data[nextIndex])) continue;
 
       distances[nextIndex] = currentDistance + 1;
       queue.push(nextIndex);
@@ -429,7 +438,7 @@ function getTileRayDirection(
 
       const nextIndex = nextY * map.width + nextX;
       if (distances.blockedTiles && distances.blockedTiles[nextIndex] === 1) break;
-      if (isSolidTileId(map.data[nextIndex])) break;
+      if (isSolidForNavigation(map.data[nextIndex])) break;
 
       const nextDistance = distances.tileDistances[nextIndex];
       if (nextDistance !== -1) {

@@ -492,7 +492,16 @@ async function main(): Promise<void> {
 
       if (wisdomOrbHud) wisdomOrbHud.destroy();
       wisdomOrbHud = new WisdomOrbHud(assets.wisdomOrbTexture, () => {
-        if (!net.isConnected || !localPlayerInitialized) return;
+        console.info('[WisdomOrb][Click] Orb clicked in HUD');
+        if (!net.isConnected) {
+          console.warn('[WisdomOrb][Click] BLOCKED: not connected');
+          return;
+        }
+        if (!localPlayerInitialized) {
+          console.warn('[WisdomOrb][Click] BLOCKED: local player not initialized');
+          return;
+        }
+        console.info(`[WisdomOrb][Click] Sending USE_WISDOM_ORB, player at (${localX.toFixed(1)}, ${localY.toFixed(1)})`);
         net.sendUseWisdomOrb();
       });
       wisdomOrbHud.addToStage(app.stage);
@@ -652,6 +661,7 @@ async function main(): Promise<void> {
     },
 
     onWisdomOrbUsed: (direction, remainingWisdomOrbs) => {
+      console.info(`[WisdomOrb][Response] Server accepted! direction=${direction}, remaining=${remainingWisdomOrbs}`);
       wisdomOrbHud?.setRemaining(remainingWisdomOrbs);
       wisdomArrow?.show(direction);
     },
@@ -910,8 +920,16 @@ async function main(): Promise<void> {
     const dir = KEY_MAP[e.code];
     if (dir) keys[dir] = true;
 
-    if (e.code === 'KeyQ' && !e.repeat && localPlayerInitialized) {
-      net.sendUseWisdomOrb();
+    if (e.code === 'KeyQ' && !e.repeat) {
+      console.info(`[WisdomOrb][KeyQ] Q pressed. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`);
+      if (!localPlayerInitialized) {
+        console.warn('[WisdomOrb][KeyQ] BLOCKED: local player not initialized');
+      } else if (!net.isConnected) {
+        console.warn('[WisdomOrb][KeyQ] BLOCKED: not connected');
+      } else {
+        console.info(`[WisdomOrb][KeyQ] Sending USE_WISDOM_ORB, player at (${localX.toFixed(1)}, ${localY.toFixed(1)})`);
+        net.sendUseWisdomOrb();
+      }
     }
 
     if (e.code === 'KeyE' && introDialogueHud?.isVisible()) {

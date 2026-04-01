@@ -59,6 +59,7 @@ export class WisdomOrbHud {
       orb.x = orbStartX + i * (ORB_SIZE + ORB_GAP);
       orb.y = orbY;
       orb.on('pointertap', () => {
+        console.info(`[WisdomOrb][HUD] pointertap on orb index=${i}, remainingOrbs=${this.remainingOrbs}, eligible=${i < this.remainingOrbs}`);
         if (i < this.remainingOrbs) onUseOrb();
       });
       this.orbSprites.push(orb);

@@ -193,6 +193,7 @@ export class NetworkManager {
 
   /** Send a wisdom orb use request to the server. */
   sendUseWisdomOrb(): void {
+    console.info('[WisdomOrb][Net] Sending USE_WISDOM_ORB to server');
     const msg: UseWisdomOrbMessage = {
       type: MessageType.UseWisdomOrb,
     };

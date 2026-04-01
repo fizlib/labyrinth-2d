@@ -330,12 +330,32 @@ export class Room {
   // ── Game Loop ─────────────────────────────────────────────────────────
 
   handleUseWisdomOrb(playerId: string): void {
+    console.info(`[Room:${this.id}][WisdomOrb] USE request from ${playerId}`);
+
     const player = this.state.players.find((p) => p.id === playerId);
-    if (!player || player.wisdomOrbs <= 0) return;
+    if (!player) {
+      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: player ${playerId} not found in state (${this.state.players.length} players)`);
+      return;
+    }
+    if (player.wisdomOrbs <= 0) {
+      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: player ${playerId} has 0 orbs remaining`);
+      return;
+    }
 
     const activeTarget = this.portalPosition ? 'portal' : 'hub';
     const activeDistanceField = this.portalPosition ? this.portalDistanceField : this.hubDistanceField;
-    if (!activeDistanceField) return;
+    if (!activeDistanceField) {
+      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: no distance field available (target=${activeTarget}, portalPos=${JSON.stringify(this.portalPosition)}, portalField=${!!this.portalDistanceField}, hubField=${!!this.hubDistanceField})`);
+      return;
+    }
+
+    console.info(`[Room:${this.id}][WisdomOrb] Computing direction for player at (${player.x.toFixed(1)}, ${player.y.toFixed(1)}), target=${activeTarget}`);
+    const feetTileX = Math.floor(player.x / this.map.tileSize);
+    const feetTileY = Math.floor((player.y - 1) / this.map.tileSize);
+    const tileIndex = feetTileY * this.map.width + feetTileX;
+    const tileId = this.map.data[tileIndex];
+    const tileDist = activeDistanceField.tileDistances[tileIndex];
+    console.info(`[Room:${this.id}][WisdomOrb] Feet tile: (${feetTileX}, ${feetTileY}), tileId=${tileId}, tileDistance=${tileDist}`);
 
     const direction = getNavigationDirectionForPosition(
       player.x,
@@ -343,10 +363,16 @@ export class Room {
       this.map,
       activeDistanceField,
     );
-    if (!direction) return;
+    if (!direction) {
+      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: getNavigationDirectionForPosition returned null for player at (${player.x.toFixed(1)}, ${player.y.toFixed(1)}), tile (${feetTileX}, ${feetTileY}), tileId=${tileId}, tileDistance=${tileDist}`);
+      return;
+    }
 
     const ws = this.sockets.get(playerId);
-    if (!ws) return;
+    if (!ws) {
+      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: socket not found for player ${playerId}`);
+      return;
+    }
 
     player.wisdomOrbs--;
 
@@ -358,7 +384,7 @@ export class Room {
     this.send(ws, orbUsedMsg);
 
     console.info(
-      `[Room:${this.id}] Wisdom orb used by ${playerId} -> ${direction} toward ${activeTarget} (${player.wisdomOrbs} remaining)`,
+      `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} -> ${direction} toward ${activeTarget} (${player.wisdomOrbs} remaining)`,
     );
   }
 
