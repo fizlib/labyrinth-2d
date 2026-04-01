@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-03-31 - Spawn-route gate cells
+Last updated: 2026-04-01 - Gates restricted to vertical passages only
 
 ## Project Overview
 
@@ -171,7 +171,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 5. Open the four hub entrances into the surrounding maze.
 6. Post-process solid regions into the final 2.5D wall tile set.
 7. Place the hub tree and the three runestones.
-8. Compute spawn points from the ungated maze, then stamp one closed gate cell per team along the chosen spawn-to-hub routes when a qualifying straight corridor cell exists.
+8. Compute spawn points from the ungated maze, then stamp one closed gate cell per team along the chosen spawn-to-hub routes when a qualifying vertical (north-south) corridor cell exists. Horizontal passages never receive gates.
 9. Stamp a visual-only dirt mask around each closed gate so the client can render short dirt approaches that transition back into grass.
 
 ### Spawns and Objective Placement
@@ -179,7 +179,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 - Team spawn points are computed with BFS over the cell graph, not hardcoded coordinates.
 - `SPAWN_DISTANCE` is currently `10` cell-steps from the hub.
 - Spawn selection prefers angular separation around the map so teams begin in different sectors.
-- Closed gates are chosen from straight-through cells on spawn-to-hub paths and are rendered as one-tile-thick barriers through the middle of those cells.
+- Closed gates are chosen from vertical (north-south) corridor cells on spawn-to-hub paths and are rendered as one-tile-thick horizontal barriers through the middle of those cells.
 - Each gate also produces a short rectangular dirt band in shared layout data. The dirt mask is visual-only and does not affect collision or navigation.
 - Portal placement is also BFS-driven and prefers cells deeper in the maze than player spawns.
 

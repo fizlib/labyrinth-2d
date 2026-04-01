@@ -560,12 +560,9 @@ function getGateOrientationForCell(data: number[], cx: number, cy: number): Gate
   const southOpen = cy < GRID_CELLS - 1 && areCellsConnected(data, cx, cy, cx, cy + 1);
   const westOpen = cx > 0 && areCellsConnected(data, cx, cy, cx - 1, cy);
 
+  // Only place gates in vertical passages (north-south corridors)
   if (northOpen && southOpen && !eastOpen && !westOpen) {
     return 'horizontal';
-  }
-
-  if (eastOpen && westOpen && !northOpen && !southOpen) {
-    return 'vertical';
   }
 
   return null;
