@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Container, Sprite, Texture, Renderer, Rectangle } from 'pixi.js';
-import type { TileMapData } from '@labyrinth/shared';
+import type { TileMapData, GatePlacement } from '@labyrinth/shared';
 import {
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
@@ -38,7 +38,7 @@ import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
 } from '@labyrinth/shared';
-import type { GameAssets } from '../assets/AssetLoader';
+import type { GameAssets, FrontGateTextures } from '../assets/AssetLoader';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -49,6 +49,15 @@ export interface RunestoneSpriteData {
   tileY: number;
   activated: boolean;
 }
+
+const FRONT_GATE_WIDTH_TILES = 6;
+const FRONT_GATE_HEIGHT_TILES = 4;
+const FRONT_GATE_TILE_ROWS: (keyof FrontGateTextures)[][] = [
+  ['topLeft', 'topMid', 'topMid', 'topMid', 'topMid', 'topRight'],
+  ['midLeft', 'midCenter', 'midCenter', 'midCenter', 'midCenter', 'midRight'],
+  ['midLeft', 'midCenter', 'midCenter', 'midCenter', 'midCenter', 'midRight'],
+  ['bottomLeft', 'bottomMid', 'bottomMid', 'bottomMid', 'bottomMid', 'bottomRight'],
+];
 
 // ── Chunk configuration ─────────────────────────────────────────────────────
 
@@ -90,10 +99,10 @@ function getWallFaceTexture(x: number, y: number, wallFaceTextures: Texture[]): 
 }
 
 /** Returns true if tileId is a wall-row obstacle that should render on the entity layer. */
-function isSolidWallTile(tileId: number): boolean {
+function isSolidWallTile(tileId: number, renderSimpleHorizontalGates: boolean): boolean {
   return (tileId >= TILE_WALL_FACE && tileId <= TILE_WALL_TOP_EDGE) ||
-    tileId === TILE_GATE_HORIZONTAL ||
-    tileId === TILE_GATE_VERTICAL;
+    tileId === TILE_GATE_VERTICAL ||
+    (renderSimpleHorizontalGates && tileId === TILE_GATE_HORIZONTAL);
 }
 
 /** Returns the appropriate texture for a wall tile ID. */
@@ -114,6 +123,58 @@ function getWallTexture(tileId: number, x: number, y: number, assets: GameAssets
     case TILE_GATE_VERTICAL:  return assets.gateVerticalTexture;
     default: return null;
   }
+}
+
+function usesGrassBackground(tileId: number): boolean {
+  return tileId === TILE_FLOOR ||
+    tileId === TILE_FLOOR_SHADOW ||
+    tileId === TILE_GATE_HORIZONTAL ||
+    tileId === TILE_GATE_VERTICAL;
+}
+
+function createFrontGateSprite(
+  gate: GatePlacement,
+  textures: FrontGateTextures,
+  renderer: Renderer,
+  tileSize: number,
+): Sprite {
+  const gateContainer = new Container();
+
+  for (let row = 0; row < FRONT_GATE_TILE_ROWS.length; row++) {
+    const tileRow = FRONT_GATE_TILE_ROWS[row];
+    for (let col = 0; col < tileRow.length; col++) {
+      const tile = new Sprite(textures[tileRow[col]]);
+      tile.x = col * tileSize;
+      tile.y = row * tileSize;
+      tile.width = tileSize;
+      tile.height = tileSize;
+      gateContainer.addChild(tile);
+    }
+  }
+
+  const frame = new Rectangle(
+    0,
+    0,
+    FRONT_GATE_WIDTH_TILES * tileSize,
+    FRONT_GATE_HEIGHT_TILES * tileSize,
+  );
+  const bakedTexture = renderer.generateTexture({
+    target: gateContainer,
+    frame,
+    resolution: 1,
+    antialias: false,
+  });
+  bakedTexture.source.style.scaleMode = 'nearest';
+  bakedTexture.source.style.update();
+
+  const sprite = new Sprite(bakedTexture);
+  sprite.anchor.set(0, 1);
+  sprite.x = gate.tileX * tileSize;
+  sprite.y = (gate.tileY + 1) * tileSize;
+  sprite.zIndex = (gate.tileY + 1) * tileSize;
+
+  gateContainer.destroy({ children: true });
+  return sprite;
 }
 
 /** Check if tile at (tx, ty) is any solid wall type (IDs 2–13) for shadow logic. */
@@ -138,14 +199,16 @@ export class TilemapRenderer {
   // ── Extracted entities — add individually to entityLayer ────────────────
   readonly treeSprites: Sprite[] = [];
   readonly runestoneSprites: RunestoneSpriteData[] = [];
+  readonly gateSprites: Sprite[] = [];
 
   // ── Internal tracking for culling + cleanup ────────────────────────────
   private allChunks: ChunkMeta[] = [];
 
   // ──────────────────────────────────────────────────────────────────────
 
-  constructor(map: TileMapData, assets: GameAssets, renderer: Renderer) {
+  constructor(map: TileMapData, gates: GatePlacement[], assets: GameAssets, renderer: Renderer) {
     const ts = map.tileSize;
+    const renderSimpleHorizontalGates = !assets.frontGateTextures;
 
     this.backgroundLayer = new Container();
     this.shadowLayer = new Container();
@@ -191,7 +254,7 @@ export class TilemapRenderer {
             }
 
             // ── Shadow overlay ───────────────────────────────────
-            if (tileId === TILE_FLOOR || tileId === TILE_FLOOR_SHADOW) {
+            if (usesGrassBackground(tileId)) {
               const wallAbove = isTileSolid(x, y - 1, map);
               const wallLeft = isTileSolid(x - 1, y, map);
 
@@ -293,7 +356,7 @@ export class TilemapRenderer {
         for (let x = startX; x < endX; x++) {
           const tileId = map.data[y * map.width + x];
 
-          if (isSolidWallTile(tileId)) {
+          if (isSolidWallTile(tileId, renderSimpleHorizontalGates)) {
             const tex = getWallTexture(tileId, x, y, assets);
             if (tex) {
               const sprite = new Sprite(tex);
@@ -379,6 +442,13 @@ export class TilemapRenderer {
         }
       }
     }
+
+    if (assets.frontGateTextures) {
+      for (const gate of gates) {
+        if (gate.orientation !== 'horizontal') continue;
+        this.gateSprites.push(createFrontGateSprite(gate, assets.frontGateTextures, renderer, ts));
+      }
+    }
   }
 
   // ── Per-frame viewport culling ────────────────────────────────────────
@@ -428,9 +498,15 @@ export class TilemapRenderer {
       rs.sprite.destroy();
     }
 
+    for (const gate of this.gateSprites) {
+      gate.parent?.removeChild(gate);
+      gate.destroy();
+    }
+
     this.wallRowChunks.length = 0;
     this.treeSprites.length = 0;
     this.runestoneSprites.length = 0;
+    this.gateSprites.length = 0;
     this.allChunks.length = 0;
   }
 }

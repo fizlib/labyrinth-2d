@@ -436,13 +436,14 @@ async function main(): Promise<void> {
     onRoomJoined: (roomId, playerId, mapSeed, gameState) => {
       console.info(`[Main] Joined room "${roomId}" as ${playerId} (maze seed: ${mapSeed})`);
 
-      currentMap = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS).map;
+      const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
+      currentMap = layout.map;
       mapPixelW = currentMap.width * currentMap.tileSize;
       mapPixelH = currentMap.height * currentMap.tileSize;
 
       // ── Build chunk-based tilemap ──────────────────────────────────────
       tilemapRenderer?.destroy();
-      tilemapRenderer = new TilemapRenderer(currentMap, assets, app.renderer);
+      tilemapRenderer = new TilemapRenderer(currentMap, layout.gates, assets, app.renderer);
 
       // Attach layers: background and shadow go before entityLayer,
       // entityLayer is already a child of worldContainer.
@@ -455,6 +456,10 @@ async function main(): Promise<void> {
       // Add wall row chunks to entityLayer for Y-sorting with players
       for (const wallChunk of tilemapRenderer.wallRowChunks) {
         entityLayer.addChild(wallChunk);
+      }
+
+      for (const gate of tilemapRenderer.gateSprites) {
+        entityLayer.addChild(gate);
       }
 
       // Add trees to entityLayer for Y-sorting

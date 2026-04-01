@@ -30,6 +30,18 @@ import {
   generateWisdomOrbTexture,
 } from './FallbackTextures';
 
+export interface FrontGateTextures {
+  topLeft: Texture;
+  topMid: Texture;
+  topRight: Texture;
+  midLeft: Texture;
+  midCenter: Texture;
+  midRight: Texture;
+  bottomLeft: Texture;
+  bottomMid: Texture;
+  bottomRight: Texture;
+}
+
 export interface GameAssets {
   floorTexture: Texture;
   floorShadowTexture: Texture;
@@ -45,6 +57,7 @@ export interface GameAssets {
   wallCornerBLTexture: Texture;
   wallCornerBRTexture: Texture;
   wallTopEdgeTexture: Texture;
+  frontGateTextures: FrontGateTextures | null;
   gateHorizontalTexture: Texture;
   gateVerticalTexture: Texture;
   /** 4 grass variant textures: [0-1] plain grass, [2-3] flower grass (rarer). */
@@ -82,8 +95,9 @@ export async function loadAssets(): Promise<GameAssets> {
   let wallCornerBLTexture: Texture;
   let wallCornerBRTexture: Texture;
   let wallTopEdgeTexture: Texture;
-  let gateHorizontalTexture: Texture;
-  let gateVerticalTexture: Texture;
+  let frontGateTextures: FrontGateTextures | null = null;
+  let gateHorizontalTexture = generateGateHorizontalTexture();
+  let gateVerticalTexture = generateGateVerticalTexture();
   let grassVariantTextures: Texture[] = [];
   let treeTexture: Texture;
   let shadowTopTexture: Texture;
@@ -160,18 +174,31 @@ export async function loadAssets(): Promise<GameAssets> {
       fallbackWallFace,
     ];
   }
-
-  // ── Tree asset (separate from tilesheet — different dimensions) ──────────
+  // Gate atlas asset: 3x3 grid of 16x16 gate pieces packed into one 48x48 PNG.
   try {
     const gateSheet = await Assets.load<Texture>('assets/gates.png');
     gateSheet.source.scaleMode = 'nearest';
-    gateHorizontalTexture = new Texture({ source: gateSheet.source, frame: new Rectangle(0, 0, 16, 16) });
-    gateVerticalTexture = new Texture({ source: gateSheet.source, frame: new Rectangle(16, 0, 16, 16) });
-    console.info('[Assets] Loaded gates.png (horizontal + vertical gate tiles)');
-  } catch {
-    console.info('[Assets] gates.png not found â€” using fallback gate textures');
-    gateHorizontalTexture = generateGateHorizontalTexture();
-    gateVerticalTexture = generateGateVerticalTexture();
+    if (gateSheet.width < 48 || gateSheet.height < 48) {
+      throw new Error(`Expected a 48x48 front-gate atlas but received ${gateSheet.width}x${gateSheet.height}`);
+    }
+
+    frontGateTextures = {
+      topLeft: new Texture({ source: gateSheet.source, frame: new Rectangle(0, 0, 16, 16) }),
+      topMid: new Texture({ source: gateSheet.source, frame: new Rectangle(16, 0, 16, 16) }),
+      topRight: new Texture({ source: gateSheet.source, frame: new Rectangle(32, 0, 16, 16) }),
+      midLeft: new Texture({ source: gateSheet.source, frame: new Rectangle(0, 16, 16, 16) }),
+      midCenter: new Texture({ source: gateSheet.source, frame: new Rectangle(16, 16, 16, 16) }),
+      midRight: new Texture({ source: gateSheet.source, frame: new Rectangle(32, 16, 16, 16) }),
+      bottomLeft: new Texture({ source: gateSheet.source, frame: new Rectangle(0, 32, 16, 16) }),
+      bottomMid: new Texture({ source: gateSheet.source, frame: new Rectangle(16, 32, 16, 16) }),
+      bottomRight: new Texture({ source: gateSheet.source, frame: new Rectangle(32, 32, 16, 16) }),
+    };
+    console.info('[Assets] Loaded gates.png (front-facing 3x3 gate atlas)');
+  } catch (err) {
+    console.info('[Assets] gates.png not found or invalid - using fallback gate textures');
+    if (err instanceof Error) {
+      console.warn('[Assets] Gate atlas load error:', err.message);
+    }
   }
 
   try {
@@ -380,6 +407,7 @@ export async function loadAssets(): Promise<GameAssets> {
     wallCornerBLTexture,
     wallCornerBRTexture,
     wallTopEdgeTexture,
+    frontGateTextures,
     gateHorizontalTexture,
     gateVerticalTexture,
     grassVariantTextures,
@@ -394,3 +422,4 @@ export async function loadAssets(): Promise<GameAssets> {
     wisdomOrbTexture,
   };
 }
+
