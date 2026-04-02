@@ -1388,7 +1388,8 @@ async function main(): Promise<void> {
   });
 
   // ── Connect to Server ─────────────────────────────────────────────────
-  const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+  const envUrl = import.meta.env.VITE_SERVER_URL;
+  const wsUrl = envUrl || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
   const displayName = `Explorer-${Math.floor(Math.random() * 9999).toString().padStart(4, '0')}`;
 
   net.connect(wsUrl, 'default', displayName);

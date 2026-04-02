@@ -114,41 +114,42 @@ export const DEFAULT_ROOM_ID = 'default';
 /** Number of wisdom orbs each player starts with. */
 export const INITIAL_WISDOM_ORBS = 3;
 
-// ── Network Message Types ───────────────────────────────────────────────────
-
 /**
- * Discriminator enum for all messages exchanged between client and server.
- * Every message has a `type` field set to one of these values.
+ * Discriminator for all messages exchanged between client and server.
+ * Used as a const object + type union for compatibility with Node.js 22's
+ * TypeScript strip-only mode (which does not support traditional enums).
  */
-export enum MessageType {
+export const MessageType = {
   // ── Client → Server ──
-  JoinRoom = 'JOIN_ROOM',
-  PlayerInput = 'PLAYER_INPUT',
-  ActivateRunestone = 'ACTIVATE_RUNESTONE',
-  UseWisdomOrb = 'USE_WISDOM_ORB',
-  DebugTeleport = 'DEBUG_TELEPORT',
+  JoinRoom: 'JOIN_ROOM',
+  PlayerInput: 'PLAYER_INPUT',
+  ActivateRunestone: 'ACTIVATE_RUNESTONE',
+  UseWisdomOrb: 'USE_WISDOM_ORB',
+  DebugTeleport: 'DEBUG_TELEPORT',
 
   // ── Server → Client ──
-  RoomJoined = 'ROOM_JOINED',
-  TickUpdate = 'TICK_UPDATE',
-  PlayerLeft = 'PLAYER_LEFT',
-  RunestoneActivated = 'RUNESTONE_ACTIVATED',
-  AllRunestonesActivated = 'ALL_RUNESTONES_ACTIVATED',
-  WisdomOrbUsed = 'WISDOM_ORB_USED',
-  GateStateChanged = 'GATE_STATE_CHANGED',
-  Error = 'ERROR',
-}
+  RoomJoined: 'ROOM_JOINED',
+  TickUpdate: 'TICK_UPDATE',
+  PlayerLeft: 'PLAYER_LEFT',
+  RunestoneActivated: 'RUNESTONE_ACTIVATED',
+  AllRunestonesActivated: 'ALL_RUNESTONES_ACTIVATED',
+  WisdomOrbUsed: 'WISDOM_ORB_USED',
+  GateStateChanged: 'GATE_STATE_CHANGED',
+  Error: 'ERROR',
+} as const;
+
+export type MessageType = (typeof MessageType)[keyof typeof MessageType];
 
 // ── Client → Server Messages ────────────────────────────────────────────────
 
 export interface JoinRoomMessage {
-  type: MessageType.JoinRoom;
+  type: typeof MessageType.JoinRoom;
   roomId: string;
   displayName: string;
 }
 
 export interface PlayerInputMessage {
-  type: MessageType.PlayerInput;
+  type: typeof MessageType.PlayerInput;
   sequenceNumber: number;
   up: boolean;
   down: boolean;
@@ -157,17 +158,17 @@ export interface PlayerInputMessage {
 }
 
 export interface ActivateRunestoneMessage {
-  type: MessageType.ActivateRunestone;
+  type: typeof MessageType.ActivateRunestone;
   /** Runestone index: 0, 1, or 2. */
   runestoneIndex: number;
 }
 
 export interface UseWisdomOrbMessage {
-  type: MessageType.UseWisdomOrb;
+  type: typeof MessageType.UseWisdomOrb;
 }
 
 export interface DebugTeleportMessage {
-  type: MessageType.DebugTeleport;
+  type: typeof MessageType.DebugTeleport;
   x: number;
   y: number;
 }
@@ -192,7 +193,7 @@ export interface PlayerInfo {
 }
 
 export interface RoomJoinedMessage {
-  type: MessageType.RoomJoined;
+  type: typeof MessageType.RoomJoined;
   roomId: string;
   playerId: string;
   mapSeed: number;
@@ -200,23 +201,23 @@ export interface RoomJoinedMessage {
 }
 
 export interface TickUpdateMessage {
-  type: MessageType.TickUpdate;
+  type: typeof MessageType.TickUpdate;
   gameState: GameState;
 }
 
 export interface PlayerLeftMessage {
-  type: MessageType.PlayerLeft;
+  type: typeof MessageType.PlayerLeft;
   playerId: string;
 }
 
 export interface RunestoneActivatedMessage {
-  type: MessageType.RunestoneActivated;
+  type: typeof MessageType.RunestoneActivated;
   /** Index of the activated runestone (0, 1, or 2). */
   runestoneIndex: number;
 }
 
 export interface AllRunestonesActivatedMessage {
-  type: MessageType.AllRunestonesActivated;
+  type: typeof MessageType.AllRunestonesActivated;
   /** Portal spawn X in pixel coordinates. */
   portalX: number;
   /** Portal spawn Y in pixel coordinates. */
@@ -224,19 +225,19 @@ export interface AllRunestonesActivatedMessage {
 }
 
 export interface WisdomOrbUsedMessage {
-  type: MessageType.WisdomOrbUsed;
+  type: typeof MessageType.WisdomOrbUsed;
   direction: HubDirection;
   remainingWisdomOrbs: number;
 }
 
 export interface ErrorMessage {
-  type: MessageType.Error;
+  type: typeof MessageType.Error;
   code: string;
   message: string;
 }
 
 export interface GateStateChangedMessage {
-  type: MessageType.GateStateChanged;
+  type: typeof MessageType.GateStateChanged;
   /** Index into the gates array. */
   gateIndex: number;
   /** Whether the gate is now open (passable). */

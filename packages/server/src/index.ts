@@ -33,7 +33,7 @@ import {
 
 import { Room, type SocketData } from './Room.js';
 
-const PORT = 9001;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 9001;
 
 // ── Room Registry ───────────────────────────────────────────────────────────
 
