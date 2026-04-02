@@ -795,17 +795,7 @@ async function main(): Promise<void> {
 
       if (wisdomOrbHud) wisdomOrbHud.destroy();
       wisdomOrbHud = new WisdomOrbHud(assets.wisdomOrbTexture, () => {
-        console.info('[WisdomOrb][Click] Orb clicked in HUD');
-        if (!net.isConnected) {
-          console.warn('[WisdomOrb][Click] BLOCKED: not connected');
-          return;
-        }
-        if (!localPlayerInitialized) {
-          console.warn('[WisdomOrb][Click] BLOCKED: local player not initialized');
-          return;
-        }
-        console.info(`[WisdomOrb][Click] Sending USE_WISDOM_ORB, player at (${localX.toFixed(1)}, ${localY.toFixed(1)})`);
-        net.sendUseWisdomOrb();
+        triggerUseWisdomOrb('Click');
       });
       wisdomOrbHud.addToStage(app.stage);
       wisdomOrbHud.setRemaining(me?.wisdomOrbs ?? INITIAL_WISDOM_ORBS);
@@ -1005,6 +995,20 @@ async function main(): Promise<void> {
 
   // ── Interaction Helpers + Mobile Controls ────────────────────────────
 
+  const triggerUseWisdomOrb = (source: 'Click' | 'KeyQ' | 'MobileQ'): void => {
+    console.info(`[WisdomOrb][${source}] Triggered. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`);
+    if (!localPlayerInitialized) {
+      console.warn(`[WisdomOrb][${source}] BLOCKED: local player not initialized`);
+      return;
+    }
+    if (!net.isConnected) {
+      console.warn(`[WisdomOrb][${source}] BLOCKED: not connected`);
+      return;
+    }
+    console.info(`[WisdomOrb][${source}] Sending USE_WISDOM_ORB, player at (${localX.toFixed(1)}, ${localY.toFixed(1)})`);
+    net.sendUseWisdomOrb();
+  };
+
   const triggerInteract = (): void => {
     if (introDialogueHud?.isVisible()) {
       introDialogueHud.advance();
@@ -1035,6 +1039,9 @@ async function main(): Promise<void> {
     },
     onInteract: () => {
       triggerInteract();
+    },
+    onUseWisdom: () => {
+      triggerUseWisdomOrb('MobileQ');
     },
   });
   window.addEventListener('beforeunload', () => mobileControls.destroy(), { once: true });
@@ -1283,15 +1290,7 @@ async function main(): Promise<void> {
     if (dir) setKeyboardDirection(dir, true);
 
     if (e.code === 'KeyQ' && !e.repeat) {
-      console.info(`[WisdomOrb][KeyQ] Q pressed. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`);
-      if (!localPlayerInitialized) {
-        console.warn('[WisdomOrb][KeyQ] BLOCKED: local player not initialized');
-      } else if (!net.isConnected) {
-        console.warn('[WisdomOrb][KeyQ] BLOCKED: not connected');
-      } else {
-        console.info(`[WisdomOrb][KeyQ] Sending USE_WISDOM_ORB, player at (${localX.toFixed(1)}, ${localY.toFixed(1)})`);
-        net.sendUseWisdomOrb();
-      }
+      triggerUseWisdomOrb('KeyQ');
     }
 
     if (e.code === 'KeyE') {
