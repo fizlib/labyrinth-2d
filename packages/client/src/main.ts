@@ -1050,12 +1050,12 @@ async function main(): Promise<void> {
   app.ticker.add((ticker) => {
     if (!net.isConnected || !localPlayerInitialized || !net.playerId) return;
 
-    const dtSeconds = ticker.deltaMS / 1000;
+    // Cap dt to prevent massive physics jumps when mobile browsers drop frames
+    const dtSeconds = Math.min(ticker.deltaMS / 1000, 0.1);
     const now = performance.now();
 
     // ── 1. Local player prediction ────────────────────────────────
     const isMoving = activeKeys.up || activeKeys.down || activeKeys.left || activeKeys.right;
-
     if (isMoving) {
       localFacing = deriveFacingFromKeys();
       inputSequenceNumber++;

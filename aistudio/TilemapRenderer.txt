@@ -471,12 +471,8 @@ export class TilemapRenderer {
       }
     }
 
-    // ── Step 2: Build Row Chunks (Walls) ─────────────────────────────
-    
-    // Optimization: Making wall chunks up to 128 tiles wide (2048px) instead of 32 tiles.
-    // This reduces the number of elements in entityLayer from ~1500 to ~430, making
-    // Y-sorting much faster and heavily reducing CPU stuttering on mobile devices.
-    const WALL_CHUNK_WIDTH = 128;
+    // ── Step 2: Build 32×1 Row Chunks (Walls) ────────────────────────
+
     const wallChunkCols = Math.ceil(map.width / WALL_CHUNK_WIDTH);
 
     for (let y = 0; y < map.height; y++) {
