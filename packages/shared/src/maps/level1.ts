@@ -696,7 +696,8 @@ function stampDirtRect(
 
 function stampGateDirtBand(dirtMask: Uint8Array, gate: GatePlacement): void {
   if (gate.orientation === 'horizontal') {
-    stampDirtRect(dirtMask, gate.tileX, gate.tileY - 1, CELL_SIZE, 3);
+    // Expand dirt band further: cover (gateRow - 5 to gateRow + 4)
+    stampDirtRect(dirtMask, gate.tileX, gate.tileY - 5, CELL_SIZE, 10);
     return;
   }
 
@@ -748,34 +749,34 @@ function computePressurePlates(gates: GatePlacement[]): PressurePlateInfo[] {
     const { tx, ty } = cellToTile(gate.cellX, gate.cellY);
     const gateRow = gate.tileY; // The row where the gate barrier sits
 
-    // Spawn side: 2 plates on left and right edges, 1 row away from gate toward spawn
-    // Hub side: 1 plate centered, 1 row away from gate toward hub
-    const spawnRow = gate.spawnDirection === 'north' ? gateRow - 2 : gateRow + 1;
-    const hubRow = gate.spawnDirection === 'north' ? gateRow + 1 : gateRow - 2;
+    // Spawn side: 2 plates, 3 rows away from gate toward spawn
+    // Hub side: 1 plate centered, 3 rows away from gate toward hub
+    const spawnRow = gate.spawnDirection === 'north' ? gateRow - 4 : gateRow + 3;
+    const hubRow = gate.spawnDirection === 'north' ? gateRow + 3 : gateRow - 4;
 
-    // Spawn side — left plate (leftmost tile of cell)
+    // Spawn side — left plate (1 tile offset from corridor edge)
     plates.push({
       id: nextId++,
       gateIndex,
-      tileX: tx,
+      tileX: tx + 1,
       tileY: spawnRow,
       side: 'spawn',
     });
 
-    // Spawn side — right plate (rightmost tile of cell)
+    // Spawn side — right plate (1 tile offset from corridor edge)
     plates.push({
       id: nextId++,
       gateIndex,
-      tileX: tx + CELL_SIZE - 1,
+      tileX: tx + CELL_SIZE - 2,
       tileY: spawnRow,
       side: 'spawn',
     });
 
-    // Hub side — center plate
+    // Hub side — offset plate (one tile right from center)
     plates.push({
       id: nextId++,
       gateIndex,
-      tileX: tx + Math.floor(CELL_SIZE / 2),
+      tileX: tx + Math.floor(CELL_SIZE / 2) + 1,
       tileY: hubRow,
       side: 'hub',
     });

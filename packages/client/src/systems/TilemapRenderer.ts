@@ -60,6 +60,8 @@ export interface PressurePlateSpriteData {
   side: 'spawn' | 'hub';
   /** Current animation frame index (0=up, 1=mid, 2=pressed). */
   currentFrame: number;
+  /** The specific frame set to use for this plate. */
+  frameSet: Texture[];
 }
 
 const FRONT_GATE_WIDTH_TILES = 6;
@@ -573,13 +575,26 @@ export class TilemapRenderer {
 
     // ── Step 3b: Extract Pressure Plate Sprites ────────────────────────
     for (const plate of pressurePlates) {
-      const plateTex = assets.pressurePlateFrames[0]; // Start at frame 0 (up)
+      const isHub = plate.side === 'hub';
+      const frameSet = isHub ? assets.hubPressurePlateFrames : assets.pressurePlateFrames;
+      const plateTex = frameSet[0]; // Start at frame 0 (up)
       const plateSprite = new Sprite(plateTex);
       plateSprite.anchor.set(0, 0);
-      plateSprite.x = plate.tileX * ts;
-      plateSprite.y = plate.tileY * ts;
-      plateSprite.width = ts;
-      plateSprite.height = ts;
+
+      if (isHub) {
+        // Hub-side plate: 24x16, centered horizontally on 16x16 tile
+        plateSprite.x = plate.tileX * ts - 4;
+        plateSprite.y = plate.tileY * ts;
+        plateSprite.width = 24;
+        plateSprite.height = 16;
+      } else {
+        // Spawn-side plate: standard 16x16
+        plateSprite.x = plate.tileX * ts;
+        plateSprite.y = plate.tileY * ts;
+        plateSprite.width = ts;
+        plateSprite.height = ts;
+      }
+
       plateSprite.zIndex = plate.tileY * ts; // Below player feet
 
       this.pressurePlateSprites.push({
@@ -590,6 +605,7 @@ export class TilemapRenderer {
         tileY: plate.tileY,
         side: plate.side,
         currentFrame: 0,
+        frameSet: frameSet,
       });
     }
 

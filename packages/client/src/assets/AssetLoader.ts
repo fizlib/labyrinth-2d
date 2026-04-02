@@ -112,6 +112,8 @@ export interface GameAssets {
   wisdomOrbTexture: Texture;
   /** Pressure plate animation frames: [frame0 (up), frame1 (mid), frame2 (pressed)]. */
   pressurePlateFrames: Texture[];
+  /** Hub-side pressure plate animation frames (24x16). */
+  hubPressurePlateFrames: Texture[];
 }
 
 export async function loadAssets(): Promise<GameAssets> {
@@ -143,6 +145,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let portalEmergenceCount = 6;
   let wisdomOrbTexture: Texture;
   let pressurePlateFrames: Texture[] = [];
+  let hubPressurePlateFrames: Texture[] = [];
 
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
@@ -453,6 +456,8 @@ export async function loadAssets(): Promise<GameAssets> {
   try {
     const plateSheet = await Assets.load<Texture>('assets/plate_spritesheet.png');
     plateSheet.source.scaleMode = 'nearest';
+
+    // Row 1: 16x16 frames
     pressurePlateFrames = [];
     for (let i = 0; i < 3; i++) {
       pressurePlateFrames.push(new Texture({
@@ -460,7 +465,21 @@ export async function loadAssets(): Promise<GameAssets> {
         frame: new Rectangle(i * 16, 0, 16, 16),
       }));
     }
-    console.info('[Assets] Loaded plate_spritesheet.png (3 frames)');
+
+    // Row 2: 24x16 frames
+    hubPressurePlateFrames = [];
+    if (plateSheet.height >= 32) {
+      for (let i = 0; i < 3; i++) {
+        hubPressurePlateFrames.push(new Texture({
+          source: plateSheet.source,
+          frame: new Rectangle(i * 24, 16, 24, 16),
+        }));
+      }
+      console.info('[Assets] Loaded plate_spritesheet.png Row 2 (24x16 hub plates)');
+    } else {
+      console.warn('[Assets] plate_spritesheet.png missing Row 2 — falling back');
+      hubPressurePlateFrames = pressurePlateFrames;
+    }
   } catch {
     console.info('[Assets] plate_spritesheet.png not found — using fallback pressure plate textures');
     pressurePlateFrames = [
@@ -468,6 +487,7 @@ export async function loadAssets(): Promise<GameAssets> {
       generatePressurePlateTexture(1),
       generatePressurePlateTexture(2),
     ];
+    hubPressurePlateFrames = pressurePlateFrames;
   }
 
   return {
@@ -499,6 +519,7 @@ export async function loadAssets(): Promise<GameAssets> {
     portalEmergenceCount,
     wisdomOrbTexture,
     pressurePlateFrames,
+    hubPressurePlateFrames,
   };
 }
 

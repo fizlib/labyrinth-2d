@@ -339,10 +339,13 @@ interface GateSlideState {
   sprite: import('pixi.js').Sprite | null;
   /** The mask graphics used for clipping the bottom. */
   mask: import('pixi.js').Graphics | null;
+  /** Original Y position (bottom of the gate). */
+  originalY: number;
 }
 
 const gateSlideStates: Map<number, GateSlideState> = new Map();
 const GATE_SLIDE_SPEED = 3; // units per second (0→1 takes ~0.33s)
+const GATE_STICK_OUT_PX = 4; // Pixels of the gate top that remain sticking out
 
 /**
  * Apply a gate open/close state change:
@@ -371,6 +374,9 @@ function applyGateState(
   // Find the corresponding front gate sprite
   const gateSprite = renderer.gateSprites[gateIndex] ?? null;
 
+  // Calculate original bottom Y position from tile coordinates
+  const originalY = (gate.tileY + 1) * TILE_SIZE;
+
   // Initialize or update slide state
   let slide = gateSlideStates.get(gateIndex);
   if (!slide) {
@@ -379,11 +385,13 @@ function applyGateState(
       target: open ? 1 : 0,
       sprite: gateSprite,
       mask: null,
+      originalY: originalY,
     };
     gateSlideStates.set(gateIndex, slide);
   } else {
     slide.target = open ? 1 : 0;
     slide.sprite = gateSprite;
+    slide.originalY = originalY;
   }
 }
 
@@ -395,58 +403,51 @@ function updateGateSlideAnimations(dt: number): void {
   for (const [, slide] of gateSlideStates) {
     if (!slide.sprite) continue;
 
-    // Animate progress toward target
+    // 1. Advance progress toward target
     if (slide.progress !== slide.target) {
       if (slide.target > slide.progress) {
         slide.progress = Math.min(slide.target, slide.progress + GATE_SLIDE_SPEED * dt);
       } else {
         slide.progress = Math.max(slide.target, slide.progress - GATE_SLIDE_SPEED * dt);
       }
+    }
 
-      // Apply clipping: move sprite down and clip from bottom
-      // The sprite is anchored at (0, 1) — bottom-left.
-      // To make it "sink into the ground" we shift it down and mask.
-      const spriteHeight = slide.sprite.height;
-      const slideOffset = spriteHeight * slide.progress;
+    // 2. Apply visual state based on current progress
+    const spriteHeight = slide.sprite.height;
+    const maxSlideOffset = spriteHeight - GATE_STICK_OUT_PX;
+    const slideOffset = maxSlideOffset * slide.progress;
 
-      if (slide.progress > 0 && slide.progress < 1) {
-        // Create/update mask for partial visibility
-        if (!slide.mask) {
-          slide.mask = new Graphics();
-          if (slide.sprite.parent) {
-            slide.sprite.parent.addChild(slide.mask);
-          }
+    // Physically move the sprite down
+    slide.sprite.y = slide.originalY + slideOffset;
+
+    if (slide.progress > 0) {
+      // Opening, closing, or fully open (progress=1)
+      if (!slide.mask) {
+        slide.mask = new Graphics();
+        if (slide.sprite.parent) {
+          slide.sprite.parent.addChild(slide.mask);
         }
-        // Mask rectangle: covers visible portion of the gate
-        const visibleHeight = spriteHeight - slideOffset;
-        slide.mask.clear();
-        slide.mask.rect(
-          slide.sprite.x,
-          slide.sprite.y - spriteHeight,
-          slide.sprite.width,
-          visibleHeight,
-        );
-        slide.mask.fill({ color: 0xffffff });
-        slide.sprite.mask = slide.mask;
-        slide.sprite.visible = true;
-      } else if (slide.progress >= 1) {
-        // Fully open — hide sprite entirely
-        slide.sprite.visible = false;
-        if (slide.mask) {
-          slide.sprite.mask = null;
-          slide.mask.parent?.removeChild(slide.mask);
-          slide.mask.destroy();
-          slide.mask = null;
-        }
-      } else {
-        // Fully closed — show sprite, remove mask
-        slide.sprite.visible = true;
-        if (slide.mask) {
-          slide.sprite.mask = null;
-          slide.mask.parent?.removeChild(slide.mask);
-          slide.mask.destroy();
-          slide.mask = null;
-        }
+      }
+      // Static mask at original gate position (originalY is bottom)
+      slide.mask.clear();
+      slide.mask.rect(
+        slide.sprite.x,
+        slide.originalY - spriteHeight,
+        slide.sprite.width,
+        spriteHeight,
+      );
+      slide.mask.fill({ color: 0xffffff });
+      slide.sprite.mask = slide.mask;
+      slide.sprite.visible = true;
+    } else {
+      // Fully closed (progress=0) — hide mask, show at original Y
+      slide.sprite.visible = true;
+      slide.sprite.y = slide.originalY;
+      if (slide.mask) {
+        slide.sprite.mask = null;
+        slide.mask.parent?.removeChild(slide.mask);
+        slide.mask.destroy();
+        slide.mask = null;
       }
     }
   }
@@ -528,7 +529,7 @@ function updatePressurePlateAnimations(
       }
 
       // Update sprite texture
-      const frameTex = assets.pressurePlateFrames[plate.currentFrame];
+      const frameTex = plate.frameSet[plate.currentFrame];
       if (frameTex) {
         plate.sprite.texture = frameTex;
       }
@@ -657,6 +658,9 @@ async function main(): Promise<void> {
   const net = new NetworkManager({
     onRoomJoined: (roomId, playerId, mapSeed, gameState) => {
       console.info(`[Main] Joined room "${roomId}" as ${playerId} (maze seed: ${mapSeed})`);
+
+      // Clear previous slide states on new room join
+      gateSlideStates.clear();
 
       const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
       currentMap = layout.map;
