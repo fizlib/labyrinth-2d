@@ -63,8 +63,7 @@ canvas {
     0 0 30px rgba(106, 90, 205, 0.15),
     0 0 60px rgba(106, 90, 205, 0.05);
   z-index: 1000;
-  pointer-events: none;
-  /* Don't block game interaction */
+  pointer-events: none; /* Don't block game interaction */
   font-size: 0.8rem;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -317,9 +316,8 @@ canvas {
 /* Mobile touch controls */
 
 .mobile-controls {
-  --mobile-button-size: clamp(3rem, 12vw, 4.5rem);
-  /* Slightly smaller footprint */
-  --mobile-gap: clamp(0.35rem, 1.5vw, 0.65rem);
+  --mobile-button-size: clamp(3.75rem, 14vw, 5rem);
+  --mobile-gap: clamp(0.35rem, 1.8vw, 0.65rem);
   display: none;
   position: absolute;
   inset: 0;
@@ -343,89 +341,56 @@ canvas {
     'left . right'
     '. down .';
   gap: var(--mobile-gap);
-  opacity: 0.5;
-  /* Transparent when idle so UI beneath is visible */
-  transition: opacity 0.2s ease;
-}
-
-/* Brighten the entire D-pad when any button inside is being touched */
-.mobile-controls__dpad:active,
-.mobile-controls__dpad:focus-within {
-  opacity: 1;
 }
 
 .mobile-controls__actions {
   position: absolute;
   right: max(1rem, env(safe-area-inset-right));
-  bottom: max(1rem, env(safe-area-inset-bottom));
-  /* Ergonomic fix: aligns the Interact button vertically with the Left/Right arrows of the D-Pad */
-  margin-bottom: calc(var(--mobile-button-size) + var(--mobile-gap));
+  bottom: calc(max(1rem, env(safe-area-inset-bottom)) + clamp(8.75rem, 24vh, 10.5rem));
   display: flex;
-  gap: var(--mobile-gap);
-  opacity: 0.5;
-  /* Transparent when idle */
-  transition: opacity 0.2s ease;
-}
-
-.mobile-controls__actions:active,
-.mobile-controls__actions:focus-within {
-  opacity: 1;
 }
 
 .mobile-controls__button {
   min-width: var(--mobile-button-size);
   min-height: var(--mobile-button-size);
-
-  /* Clean, minimalist pixel-art style */
-  background: rgba(14, 14, 26, 0.4);
-  /* Matches game background #0e0e1a */
-  border: 2px solid rgba(200, 214, 229, 0.25);
-  /* Subtle text color border */
-  border-radius: 6px;
-  /* Slight rounding for comfort, but still blocky */
-  color: rgba(200, 214, 229, 0.8);
+  border: 2px solid rgba(232, 207, 151, 0.78);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(36, 49, 64, 0.98), rgba(16, 22, 30, 0.96));
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #f7edd2;
   font-family: 'PixelOperator8', 'Courier New', Courier, monospace;
   font-size: clamp(1.4rem, 5vw, 2rem);
+  letter-spacing: 0.06em;
   line-height: 1;
-
-  /* Flexbox automatically perfectly centers the arrows/text */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-
+  text-transform: uppercase;
   pointer-events: auto;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
-  transition: transform 0.08s ease, background 0.08s ease, border-color 0.08s ease, box-shadow 0.08s ease;
-}
-
-.mobile-controls__button--interact,
-.mobile-controls__button--wisdom {
-  min-width: clamp(6rem, 22vw, 8rem);
-  padding: 0 1rem;
-  font-size: clamp(0.9rem, 3.5vw, 1.25rem);
-  letter-spacing: 0.1em;
+  transition:
+    transform 0.08s ease,
+    border-color 0.08s ease,
+    background 0.08s ease,
+    box-shadow 0.08s ease;
 }
 
 .mobile-controls__button--interact {
-  /* Distinct highlight color matching your #f0e68c accent */
-  border-color: rgba(240, 230, 140, 0.3);
-  color: rgba(240, 230, 140, 0.9);
-}
-
-.mobile-controls__button--wisdom {
-  border-color: rgba(90, 205, 224, 0.32);
-  color: rgba(90, 205, 224, 0.92);
+  min-width: clamp(6rem, 25vw, 8rem);
+  padding: 0 1rem;
+  font-size: clamp(1rem, 3.7vw, 1.25rem);
 }
 
 .mobile-controls__button.is-pressed {
-  transform: scale(0.92);
-  background: rgba(106, 90, 205, 0.6);
-  /* Purple accent */
-  border-color: rgba(255, 255, 255, 0.9);
-  color: #ffffff;
-  box-shadow: 0 0 12px rgba(106, 90, 205, 0.5);
+  transform: translateY(2px) scale(0.98);
+  border-color: rgba(90, 205, 224, 0.95);
+  background:
+    linear-gradient(180deg, rgba(24, 33, 45, 0.98), rgba(12, 18, 24, 0.98));
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(90, 205, 224, 0.16);
 }

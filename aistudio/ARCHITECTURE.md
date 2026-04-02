@@ -267,7 +267,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `MobileControls`
   - mobile-only DOM overlay shown on coarse-pointer, non-hover devices
   - bottom-left D-pad for `west`, `north`, `east`, and `south`
-  - right-side `E` and `Q` buttons that mirror the keyboard action keys
+  - right-side `Interact` button that mirrors the keyboard `E` flow
 - `WisdomArrow`
   - local-only world-space hint arrow above the local player
   - appears after a successful orb use
@@ -278,10 +278,10 @@ The client currently has multiple UI subsystems, not just the minimap:
 ### Input Handling
 
 - Movement: arrow keys or `WASD`, plus the mobile D-pad on supported touch devices
-- Intro dialogue advance: `E`, the clickable arrow button, or the mobile `E` button while the intro dialogue is visible
-- Intro dialogue skip: `E`, the clickable arrow button, or the mobile `E` button while the current page is still typing
-- Runestone interaction: `E` or the mobile `E` button after the intro dialogue is dismissed
-- Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
+- Intro dialogue advance: `E`, the clickable arrow button, or the mobile `Interact` button while the intro dialogue is visible
+- Intro dialogue skip: `E`, the clickable arrow button, or the mobile `Interact` button while the current page is still typing
+- Runestone interaction: `E` or the mobile `Interact` button after the intro dialogue is dismissed
+- Wisdom orb use: `Q` or click a filled orb in the HUD
 - Debug-only tools can enable scroll zoom, zoom toggling, and click teleport
 
 ## Monorepo Structure
