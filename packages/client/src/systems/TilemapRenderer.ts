@@ -91,6 +91,7 @@ interface ChunkMeta {
   worldTop: number;
   worldRight: number;
   worldBottom: number;
+  isVisible: boolean;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -431,6 +432,7 @@ export class TilemapRenderer {
             worldTop: startY * ts,
             worldRight: endX * ts,
             worldBottom: endY * ts,
+            isVisible: true,
           });
 
           bgChunk.destroy({ children: true }); // Free memory!
@@ -464,6 +466,7 @@ export class TilemapRenderer {
             worldTop: startY * ts + shadowChunkTopOverflow,
             worldRight: endX * ts,
             worldBottom: endY * ts,
+            isVisible: true,
           });
 
           shadowChunk.destroy({ children: true }); // Free memory!
@@ -530,6 +533,7 @@ export class TilemapRenderer {
             worldTop: y * ts,
             worldRight: endX * ts,
             worldBottom: (y + 1) * ts,
+            isVisible: true,
           });
 
           rowContainer.destroy({ children: true }); // Free memory!
@@ -640,9 +644,13 @@ export class TilemapRenderer {
 
     for (let i = 0; i < this.allChunks.length; i++) {
       const chunk = this.allChunks[i];
-      chunk.container.visible =
+      const isVisible =
         chunk.worldRight >= viewL && chunk.worldLeft <= viewR &&
         chunk.worldBottom >= viewT && chunk.worldTop <= viewB;
+      if (chunk.isVisible !== isVisible) {
+        chunk.isVisible = isVisible;
+        chunk.container.visible = isVisible;
+      }
     }
   }
 

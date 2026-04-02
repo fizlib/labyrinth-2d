@@ -25,7 +25,7 @@ import {
 } from '@labyrinth/shared';
 import type { GameState, TileMapData, FacingDirection, GatePlacement, PressurePlateInfo, GeneratedMazeLayout } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
-import { SnapshotBuffer, INTERPOLATION_DELAY } from './net/SnapshotBuffer';
+import { SnapshotBuffer, INTERPOLATION_DELAY, type TimestampedSnapshot } from './net/SnapshotBuffer';
 import { loadAssets, type GameAssets } from './assets/AssetLoader';
 import { DebugSettings } from './config/DebugSettings';
 import { Minimap } from './systems/Minimap';
@@ -251,8 +251,17 @@ interface InterpolatedPlayer {
   isMoving: boolean;
 }
 
-function getInterpolatedPlayer(playerId: string, renderTime: number): InterpolatedPlayer | null {
-  const pair = snapshotBuffer.getInterpolationPair(renderTime);
+interface SnapshotPair {
+  past: TimestampedSnapshot;
+  future: TimestampedSnapshot;
+  t: number;
+}
+
+function getInterpolatedPlayer(
+  playerId: string,
+  pair: SnapshotPair | null,
+  latest: TimestampedSnapshot | null,
+): InterpolatedPlayer | null {
 
   if (pair) {
     const pastPlayer = pair.past.state.players.find((p) => p.id === playerId);
@@ -271,7 +280,6 @@ function getInterpolatedPlayer(playerId: string, renderTime: number): Interpolat
     if (pastPlayer) return { x: pastPlayer.x, y: pastPlayer.y, facing: pastPlayer.facing, isMoving: pastPlayer.isMoving };
   }
 
-  const latest = snapshotBuffer.getLatest();
   if (latest) {
     const player = latest.state.players.find((p) => p.id === playerId);
     if (player) return { x: player.x, y: player.y, facing: player.facing, isMoving: player.isMoving };
@@ -294,9 +302,43 @@ function deriveFacingFromKeys(): FacingDirection {
   return localFacing;
 }
 
+interface ZIndexedDisplayObject {
+  x: number;
+  y: number;
+  zIndex: number;
+}
+
+function setRoundedPosition(
+  displayObject: ZIndexedDisplayObject,
+  x: number,
+  y: number,
+  zOffset = 0,
+): void {
+  const roundedX = Math.round(x);
+  const roundedY = Math.round(y);
+  const nextZIndex = roundedY + zOffset;
+
+  if (displayObject.x !== roundedX) displayObject.x = roundedX;
+  if (displayObject.y !== roundedY) displayObject.y = roundedY;
+  if (displayObject.zIndex !== nextZIndex) displayObject.zIndex = nextZIndex;
+}
+
 // ── Debug UI ────────────────────────────────────────────────────────────────
 
-function createDebugUI(): void {
+interface DebugUiDom {
+  root: HTMLDivElement;
+  status: HTMLDivElement;
+  tick: HTMLSpanElement;
+  pending: HTMLSpanElement;
+  snapshot: HTMLSpanElement;
+  playerList: HTMLUListElement;
+}
+
+const DEBUG_UI_UPDATE_INTERVAL_MS = 150;
+let lastDebugUiUpdateAt = -Infinity;
+let lastDebugPlayerListMarkup = '';
+
+function createDebugUI(): DebugUiDom {
   const debugDiv = document.createElement('div');
   debugDiv.id = 'debug-ui';
 
@@ -350,12 +392,32 @@ function createDebugUI(): void {
     </div>
   `;
   document.body.appendChild(debugDiv);
+
+  const status = debugDiv.querySelector<HTMLDivElement>('#connection-status');
+  const tick = debugDiv.querySelector<HTMLSpanElement>('#tick-counter');
+  const pending = debugDiv.querySelector<HTMLSpanElement>('#pending-count');
+  const snapshot = debugDiv.querySelector<HTMLSpanElement>('#snapshot-count');
+  const playerList = debugDiv.querySelector<HTMLUListElement>('#player-list');
+
+  if (!status || !tick || !pending || !snapshot || !playerList) {
+    throw new Error('Failed to initialize debug UI');
+  }
+
+  lastDebugUiUpdateAt = -Infinity;
+  lastDebugPlayerListMarkup = '';
+
+  return {
+    root: debugDiv,
+    status,
+    tick,
+    pending,
+    snapshot,
+    playerList,
+  };
 }
 
-function setupDebugToggles(): void {
-  const debugUI = document.getElementById('debug-ui');
-  if (!debugUI) return;
-
+function setupDebugToggles(debugUi: DebugUiDom): void {
+  const debugUI = debugUi.root;
   // Allow pointer events on the toggles area
   debugUI.style.pointerEvents = 'auto';
 
@@ -368,7 +430,7 @@ function setupDebugToggles(): void {
   });
 
   // Minimize button
-  const minimizeBtn = document.getElementById('debug-minimize-btn');
+  const minimizeBtn = debugUI.querySelector<HTMLButtonElement>('#debug-minimize-btn');
   if (minimizeBtn) {
     minimizeBtn.addEventListener('click', () => {
       const isMinimized = debugUI.classList.toggle('minimized');
@@ -378,23 +440,29 @@ function setupDebugToggles(): void {
   }
 }
 
-function updateDebugUI(state: GameState, playerId: string | null): void {
-  const tickEl = document.getElementById('tick-counter');
-  const pendingEl = document.getElementById('pending-count');
-  const snapshotEl = document.getElementById('snapshot-count');
-  const playerListEl = document.getElementById('player-list');
+function updateDebugUI(debugUi: DebugUiDom, state: GameState, playerId: string | null, force = false): void {
+  const now = performance.now();
+  if (!force && now - lastDebugUiUpdateAt < DEBUG_UI_UPDATE_INTERVAL_MS) return;
+  lastDebugUiUpdateAt = now;
 
-  if (tickEl) tickEl.textContent = state.tick.toString();
-  if (pendingEl) pendingEl.textContent = pendingInputs.length.toString();
-  if (snapshotEl) snapshotEl.textContent = snapshotBuffer.length.toString();
+  const tickText = state.tick.toString();
+  const pendingText = pendingInputs.length.toString();
+  const snapshotText = snapshotBuffer.length.toString();
 
-  if (playerListEl) {
-    playerListEl.innerHTML = state.players
+  if (debugUi.tick.textContent !== tickText) debugUi.tick.textContent = tickText;
+  if (debugUi.pending.textContent !== pendingText) debugUi.pending.textContent = pendingText;
+  if (debugUi.snapshot.textContent !== snapshotText) debugUi.snapshot.textContent = snapshotText;
+
+  const playerListMarkup = state.players
       .map((p) => {
         const isYou = p.id === playerId ? ' <span class="you-badge">← you</span>' : '';
         return `<li><span class="player-name">${p.displayName}</span> <span class="player-pos">(${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${isYou}</li>`;
       })
       .join('');
+
+  if (playerListMarkup !== lastDebugPlayerListMarkup) {
+    debugUi.playerList.innerHTML = playerListMarkup;
+    lastDebugPlayerListMarkup = playerListMarkup;
   }
 }
 
@@ -657,9 +725,12 @@ async function main(): Promise<void> {
   let zoomToggleState: ZoomToggleState = 'default';
   const savedZoomBeforeToggle = zoomLevel;
 
-  createDebugUI();
-  setupDebugToggles();
-  const statusEl = document.getElementById('connection-status');
+  const debugUiEnabled = DebugSettings.sessionEnabled;
+  const debugUi = debugUiEnabled ? createDebugUI() : null;
+  if (debugUi) {
+    setupDebugToggles(debugUi);
+  }
+  const statusEl = debugUi?.status ?? null;
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
@@ -877,16 +948,17 @@ async function main(): Promise<void> {
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const data = ensurePlayerSprite(player.id, player.spriteIndex);
-        data.sprite.x = Math.round(player.x);
-        data.sprite.y = Math.round(player.y);
-        data.sprite.zIndex = Math.round(player.y) + 1;
+        setRoundedPosition(data.sprite, player.x, player.y, 1);
         if (!isLocal) knownRemotePlayers.add(player.id);
       }
 
       snapshotBuffer.push(gameState);
+      if (worldContainer.scale.x !== zoomLevel || worldContainer.scale.y !== zoomLevel) {
+        worldContainer.scale.set(zoomLevel);
+      }
       updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
       latestServerState = gameState;
-      updateDebugUI(gameState, playerId);
+      if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
     },
 
     onTickUpdate: (gameState) => {
@@ -914,9 +986,7 @@ async function main(): Promise<void> {
           }
         }
 
-        data.sprite.x = Math.round(localX);
-        data.sprite.y = Math.round(localY);
-        data.sprite.zIndex = Math.round(localY) + 1;
+        setRoundedPosition(data.sprite, localX, localY, 1);
         wisdomOrbHud?.setRemaining(localPlayerData.wisdomOrbs);
       }
 
@@ -937,7 +1007,7 @@ async function main(): Promise<void> {
       }
 
       latestServerState = gameState;
-      updateDebugUI(gameState, localPlayerId);
+      if (debugUi) updateDebugUI(debugUi, gameState, localPlayerId);
     },
 
     onPlayerLeft: (playerId) => {
@@ -1018,14 +1088,15 @@ async function main(): Promise<void> {
     if (!localPlayerInitialized || !tilemapRenderer) return;
 
     const INTERACT_RANGE = 28;
+    const INTERACT_RANGE_SQ = INTERACT_RANGE * INTERACT_RANGE;
     for (const rs of tilemapRenderer.runestoneSprites) {
       if (rs.activated) continue;
       const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
       const rsCenterY = (rs.tileY + 1) * TILE_SIZE;
       const dx = localX - rsCenterX;
       const dy = localY - rsCenterY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < INTERACT_RANGE) {
+      const distSq = dx * dx + dy * dy;
+      if (distSq < INTERACT_RANGE_SQ) {
         net.sendActivateRunestone(rs.index);
         break;
       }
@@ -1080,9 +1151,7 @@ async function main(): Promise<void> {
 
     const localData = playerSprites.get(net.playerId);
     if (localData) {
-      localData.sprite.x = Math.round(localX);
-      localData.sprite.y = Math.round(localY);
-      localData.sprite.zIndex = Math.round(localY) + 1; // +1 to ensure visibility over tile floor
+      setRoundedPosition(localData.sprite, localX, localY, 1);
 
       const localAnimKey = getAnimationKey(localFacing, isMoving);
       setPlayerAnimation(localData, localAnimKey);
@@ -1090,16 +1159,16 @@ async function main(): Promise<void> {
 
     // ── 2. Remote player interpolation ────────────────────────────
     const renderTime = now - INTERPOLATION_DELAY;
+    const interpolationPair = snapshotBuffer.getInterpolationPair(renderTime);
+    const latestSnapshot = snapshotBuffer.getLatest();
 
     for (const remoteId of knownRemotePlayers) {
       const data = playerSprites.get(remoteId);
       if (!data) continue;
 
-      const interp = getInterpolatedPlayer(remoteId, renderTime);
+      const interp = getInterpolatedPlayer(remoteId, interpolationPair, latestSnapshot);
       if (interp) {
-        data.sprite.x = Math.round(interp.x);
-        data.sprite.y = Math.round(interp.y);
-        data.sprite.zIndex = Math.round(interp.y) + 1;
+        setRoundedPosition(data.sprite, interp.x, interp.y, 1);
 
         const remoteAnimKey = getAnimationKey(interp.facing, interp.isMoving);
         setPlayerAnimation(data, remoteAnimKey);
@@ -1107,7 +1176,9 @@ async function main(): Promise<void> {
     }
 
     // ── 3. Camera follow + zoom ─────────────────────────────────────
-    worldContainer.scale.set(zoomLevel);
+    if (worldContainer.scale.x !== zoomLevel || worldContainer.scale.y !== zoomLevel) {
+      worldContainer.scale.set(zoomLevel);
+    }
 
     // Determine camera target: player normally, or cinematic override
     let camTargetX = localX;
@@ -1182,8 +1253,9 @@ async function main(): Promise<void> {
     // ── 5. Runestone interaction prompt ──────────────────────────────
     if (interactPrompt && tilemapRenderer) {
       let nearestRS: RunestoneSpriteData | null = null;
-      let nearestDist = Infinity;
+      let nearestDistSq = Infinity;
       const INTERACT_RANGE = 28; // ~1.75 tiles in pixels
+      const INTERACT_RANGE_SQ = INTERACT_RANGE * INTERACT_RANGE;
 
       for (const rs of tilemapRenderer.runestoneSprites) {
         if (rs.activated) continue;
@@ -1191,20 +1263,21 @@ async function main(): Promise<void> {
         const rsCenterY = (rs.tileY + 1) * TILE_SIZE;
         const dx = localX - rsCenterX;
         const dy = localY - rsCenterY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < INTERACT_RANGE && dist < nearestDist) {
-          nearestDist = dist;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < INTERACT_RANGE_SQ && distSq < nearestDistSq) {
+          nearestDistSq = distSq;
           nearestRS = rs;
         }
       }
 
       if (nearestRS) {
-        interactPrompt.visible = true;
-        interactPrompt.x = nearestRS.sprite.x;
-        interactPrompt.y = nearestRS.sprite.y - 34; // above the runestone
-        interactPrompt.zIndex = 99999;
+        if (!interactPrompt.visible) interactPrompt.visible = true;
+        if (interactPrompt.x !== nearestRS.sprite.x) interactPrompt.x = nearestRS.sprite.x;
+        const promptY = nearestRS.sprite.y - 34;
+        if (interactPrompt.y !== promptY) interactPrompt.y = promptY; // above the runestone
+        if (interactPrompt.zIndex !== 99999) interactPrompt.zIndex = 99999;
       } else {
-        interactPrompt.visible = false;
+        if (interactPrompt.visible) interactPrompt.visible = false;
       }
     }
 
@@ -1276,9 +1349,7 @@ async function main(): Promise<void> {
     // Immediately update sprite
     const localData = playerSprites.get(net.playerId!);
     if (localData) {
-      localData.sprite.x = Math.round(localX);
-      localData.sprite.y = Math.round(localY);
-      localData.sprite.zIndex = Math.round(localY) + 1;
+      setRoundedPosition(localData.sprite, localX, localY, 1);
     }
 
     console.info(`[Debug] Teleported to (${Math.round(clampedX)}, ${Math.round(clampedY)})`);

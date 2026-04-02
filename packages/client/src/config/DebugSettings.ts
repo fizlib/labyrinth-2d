@@ -5,6 +5,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'labyrinth-debug-settings';
+const MOBILE_POINTER_QUERY = '(hover: none) and (pointer: coarse)';
+
+function hasDebugOverride(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('debug') === '1';
+}
+
+function isCoarsePointerDevice(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+  return window.matchMedia(MOBILE_POINTER_QUERY).matches;
+}
+
+const SESSION_DEBUG_ENABLED = hasDebugOverride() || (import.meta.env.DEV && !isCoarsePointerDevice());
 
 export interface DebugFlags {
   /** Master switch — when false, ALL debug features are disabled. */
@@ -20,12 +35,23 @@ export interface DebugFlags {
 }
 
 const DEFAULTS: DebugFlags = {
-  masterEnabled: true,
-  scrollZoom: true,
-  zoomToggle: true,
-  clickTeleport: true,
+  masterEnabled: SESSION_DEBUG_ENABLED,
+  scrollZoom: SESSION_DEBUG_ENABLED,
+  zoomToggle: SESSION_DEBUG_ENABLED,
+  clickTeleport: SESSION_DEBUG_ENABLED,
   minimized: false,
 };
+
+function constrainToSession(flags: DebugFlags): DebugFlags {
+  if (SESSION_DEBUG_ENABLED) return flags;
+  return {
+    ...flags,
+    masterEnabled: false,
+    scrollZoom: false,
+    zoomToggle: false,
+    clickTeleport: false,
+  };
+}
 
 /** Load persisted settings from localStorage, falling back to defaults. */
 function load(): DebugFlags {
@@ -33,12 +59,12 @@ function load(): DebugFlags {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<DebugFlags>;
-      return { ...DEFAULTS, ...parsed };
+      return constrainToSession({ ...DEFAULTS, ...parsed });
     }
   } catch {
     /* ignore corrupt data */
   }
-  return { ...DEFAULTS };
+  return constrainToSession({ ...DEFAULTS });
 }
 
 /** Save current settings to localStorage. */
@@ -55,9 +81,14 @@ function save(flags: DebugFlags): void {
 const flags: DebugFlags = load();
 
 export const DebugSettings = {
+  /** Whether this session should expose debug UI and tools by default. */
+  get sessionEnabled(): boolean {
+    return SESSION_DEBUG_ENABLED;
+  },
+
   /** Check if a specific debug feature is currently active. */
   isEnabled(feature: keyof Omit<DebugFlags, 'masterEnabled'>): boolean {
-    return flags.masterEnabled && flags[feature];
+    return SESSION_DEBUG_ENABLED && flags.masterEnabled && flags[feature];
   },
 
   /** Check if the master debug switch is on. */
