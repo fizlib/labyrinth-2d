@@ -676,3 +676,31 @@ export function generateGateVerticalTexture(): Texture {
 
   return canvasToTexture(canvas);
 }
+
+/**
+ * Generate a fallback pressure plate texture for a given depression level.
+ * @param level 0 = fully up, 1 = mid-press, 2 = fully pressed
+ */
+export function generatePressurePlateTexture(level: number): Texture {
+  const [canvas, ctx] = makeCanvas(TILE, TILE);
+  ctx.clearRect(0, 0, TILE, TILE);
+
+  // Inset based on depression level
+  const inset = level; // 0, 1, or 2 pixels of visible depression
+
+  // Stone plate body
+  ctx.fillStyle = '#6a6a72';
+  ctx.fillRect(2 + inset, 2 + inset, 12 - inset * 2, 12 - inset * 2);
+
+  // Top & left highlight (lighter)
+  ctx.fillStyle = level < 2 ? '#8a8a92' : '#5a5a62';
+  ctx.fillRect(2 + inset, 2 + inset, 12 - inset * 2, 1);
+  ctx.fillRect(2 + inset, 2 + inset, 1, 12 - inset * 2);
+
+  // Bottom & right shadow (darker)
+  ctx.fillStyle = level < 2 ? '#4a4a52' : '#3a3a42';
+  ctx.fillRect(2 + inset, 13 - inset, 12 - inset * 2, 1);
+  ctx.fillRect(13 - inset, 2 + inset, 1, 12 - inset * 2);
+
+  return canvasToTexture(canvas);
+}

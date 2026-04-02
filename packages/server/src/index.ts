@@ -186,11 +186,11 @@ uWS
       }
     },
   })
-  .listen(PORT, (listenSocket) => {
+  .listen('0.0.0.0', PORT, (listenSocket) => {
     if (listenSocket) {
       console.info(`─────────────────────────────────────────────────`);
       console.info(`  🏰 Labyrinth 2D Server`);
-      console.info(`  Listening on ws://localhost:${PORT}`);
+      console.info(`  Listening on all interfaces (port ${PORT})`);
       console.info(`  Tick rate: ${SERVER_TICK_RATE} tps`);
       console.info(`  Max players/room: ${MAX_PLAYERS_PER_ROOM}`);
       console.info(`─────────────────────────────────────────────────`);

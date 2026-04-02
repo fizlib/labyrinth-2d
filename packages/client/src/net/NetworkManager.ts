@@ -28,6 +28,7 @@ export interface NetworkCallbacks {
   onRunestoneActivated: (runestoneIndex: number) => void;
   onAllRunestonesActivated: (portalX: number, portalY: number) => void;
   onWisdomOrbUsed: (direction: HubDirection, remainingWisdomOrbs: number) => void;
+  onGateStateChanged: (gateIndex: number, open: boolean) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
 }
@@ -151,6 +152,10 @@ export class NetworkManager {
 
       case MessageType.Error:
         this.callbacks.onError(msg.code, msg.message);
+        break;
+
+      case MessageType.GateStateChanged:
+        this.callbacks.onGateStateChanged(msg.gateIndex, msg.open);
         break;
 
       default:

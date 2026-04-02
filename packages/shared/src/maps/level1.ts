@@ -36,6 +36,9 @@ export interface SpawnPoint {
 
 export type GateOrientation = 'horizontal' | 'vertical';
 
+/** Direction from the gate toward the team's spawn point. */
+export type GateSpawnDirection = 'north' | 'south';
+
 export interface GatePlacement {
   teamIndex: number;
   cellX: number;
@@ -44,12 +47,29 @@ export interface GatePlacement {
   tileX: number;
   tileY: number;
   orientation: GateOrientation;
+  /** Which side of the gate faces the team's spawn. */
+  spawnDirection: GateSpawnDirection;
+}
+
+export interface PressurePlateInfo {
+  /** Unique pressure plate index within the layout. */
+  id: number;
+  /** Index into the gates array this plate belongs to. */
+  gateIndex: number;
+  /** Tile X coordinate of this plate. */
+  tileX: number;
+  /** Tile Y coordinate of this plate. */
+  tileY: number;
+  /** Which side of the gate this plate is on. */
+  side: 'spawn' | 'hub';
 }
 
 export interface GeneratedMazeLayout {
   map: TileMapData;
   spawnPoints: SpawnPoint[];
   gates: GatePlacement[];
+  /** Pressure plate positions for gate activation. */
+  pressurePlates: PressurePlateInfo[];
   /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
   dirtMask: Uint8Array;
 }
@@ -112,6 +132,9 @@ export const TILE_GATE_HORIZONTAL = 17;
 
 /** Closed gate segment spanning top-to-bottom across a cell. */
 export const TILE_GATE_VERTICAL = 18;
+
+/** Pressure plate — walkable, decorative tile checked for player overlap by the server. */
+export const TILE_PRESSURE_PLATE = 19;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -613,7 +636,7 @@ function findPathToHub(
   return null;
 }
 
-function createGatePlacement(teamIndex: number, cellX: number, cellY: number, orientation: GateOrientation): GatePlacement {
+function createGatePlacement(teamIndex: number, cellX: number, cellY: number, orientation: GateOrientation, spawnDirection: GateSpawnDirection): GatePlacement {
   const { tx, ty } = cellToTile(cellX, cellY);
 
   if (orientation === 'horizontal') {
@@ -624,6 +647,7 @@ function createGatePlacement(teamIndex: number, cellX: number, cellY: number, or
       tileX: tx,
       tileY: ty + GATE_MIDPOINT_OFFSET,
       orientation,
+      spawnDirection,
     };
   }
 
@@ -634,6 +658,7 @@ function createGatePlacement(teamIndex: number, cellX: number, cellY: number, or
     tileX: tx + GATE_MIDPOINT_OFFSET,
     tileY: ty,
     orientation,
+    spawnDirection,
   };
 }
 
@@ -697,13 +722,66 @@ function computeGatePlacements(data: number[], spawnPoints: SpawnPoint[]): GateP
       const orientation = getGateOrientationForCell(data, cell.cx, cell.cy);
       if (!orientation) continue;
 
-      gates.push(createGatePlacement(teamIndex, cell.cx, cell.cy, orientation));
+      // Determine spawn direction: the previous cell in the path (closer to spawn)
+      // tells us which side of the gate the spawn is on.
+      const prevCell = pathToHub[i - 1];
+      const spawnDirection: GateSpawnDirection = prevCell.cy < cell.cy ? 'north' : 'south';
+
+      gates.push(createGatePlacement(teamIndex, cell.cx, cell.cy, orientation, spawnDirection));
       usedCells.add(cellKey);
       break;
     }
   }
 
   return gates;
+}
+
+function computePressurePlates(gates: GatePlacement[]): PressurePlateInfo[] {
+  const plates: PressurePlateInfo[] = [];
+  let nextId = 0;
+
+  for (let gateIndex = 0; gateIndex < gates.length; gateIndex++) {
+    const gate = gates[gateIndex];
+    // Only horizontal gates (in vertical N-S corridors) get pressure plates
+    if (gate.orientation !== 'horizontal') continue;
+
+    const { tx, ty } = cellToTile(gate.cellX, gate.cellY);
+    const gateRow = gate.tileY; // The row where the gate barrier sits
+
+    // Spawn side: 2 plates on left and right edges, 1 row away from gate toward spawn
+    // Hub side: 1 plate centered, 1 row away from gate toward hub
+    const spawnRow = gate.spawnDirection === 'north' ? gateRow - 2 : gateRow + 1;
+    const hubRow = gate.spawnDirection === 'north' ? gateRow + 1 : gateRow - 2;
+
+    // Spawn side — left plate (leftmost tile of cell)
+    plates.push({
+      id: nextId++,
+      gateIndex,
+      tileX: tx,
+      tileY: spawnRow,
+      side: 'spawn',
+    });
+
+    // Spawn side — right plate (rightmost tile of cell)
+    plates.push({
+      id: nextId++,
+      gateIndex,
+      tileX: tx + CELL_SIZE - 1,
+      tileY: spawnRow,
+      side: 'spawn',
+    });
+
+    // Hub side — center plate
+    plates.push({
+      id: nextId++,
+      gateIndex,
+      tileX: tx + Math.floor(CELL_SIZE / 2),
+      tileY: hubRow,
+      side: 'hub',
+    });
+  }
+
+  return plates;
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────────
@@ -726,6 +804,15 @@ export function generateMazeLayout(
     stampGateDirtBand(dirtMask, gate);
   }
 
+  const pressurePlates = computePressurePlates(gates);
+
+  // Stamp pressure plate tiles into map data
+  for (const plate of pressurePlates) {
+    if (plate.tileX >= 0 && plate.tileX < MAP_SIZE && plate.tileY >= 0 && plate.tileY < MAP_SIZE) {
+      gatedData[plate.tileY * MAP_SIZE + plate.tileX] = TILE_PRESSURE_PLATE;
+    }
+  }
+
   return {
     map: {
       width: MAP_SIZE,
@@ -735,6 +822,7 @@ export function generateMazeLayout(
     },
     spawnPoints,
     gates,
+    pressurePlates,
     dirtMask,
   };
 }

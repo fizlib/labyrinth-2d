@@ -28,6 +28,7 @@ import {
   generateGateHorizontalTexture,
   generateGateVerticalTexture,
   generateWisdomOrbTexture,
+  generatePressurePlateTexture,
 } from './FallbackTextures';
 
 export interface FrontGateTextures {
@@ -109,6 +110,8 @@ export interface GameAssets {
   portalEmergenceCount: number;
   /** Wisdom orb HUD texture. */
   wisdomOrbTexture: Texture;
+  /** Pressure plate animation frames: [frame0 (up), frame1 (mid), frame2 (pressed)]. */
+  pressurePlateFrames: Texture[];
 }
 
 export async function loadAssets(): Promise<GameAssets> {
@@ -139,6 +142,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let portalFrames: Texture[] = [];
   let portalEmergenceCount = 6;
   let wisdomOrbTexture: Texture;
+  let pressurePlateFrames: Texture[] = [];
 
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
@@ -430,7 +434,7 @@ export async function loadAssets(): Promise<GameAssets> {
     console.info(`[Assets] Loaded wisdom_orb.png (${wisdomOrbTexture.width}x${wisdomOrbTexture.height})`);
   } catch {
     console.info('[Assets] wisdom_orb.png not found - using fallback orb texture');
-    wisdomOrbTexture = generateWisdomOrbTexture();
+     wisdomOrbTexture = generateWisdomOrbTexture();
   }
 
   try {
@@ -443,6 +447,27 @@ export async function loadAssets(): Promise<GameAssets> {
   } catch (err) {
     console.warn('[Assets] Failed to load Pixel Operator fonts:', err);
     // Fallback: standard system fonts will be used if these fail.
+  }
+
+  // ── Pressure plate spritesheet (48×16 — 3 frames of 16×16) ────────────────
+  try {
+    const plateSheet = await Assets.load<Texture>('assets/plate_spritesheet.png');
+    plateSheet.source.scaleMode = 'nearest';
+    pressurePlateFrames = [];
+    for (let i = 0; i < 3; i++) {
+      pressurePlateFrames.push(new Texture({
+        source: plateSheet.source,
+        frame: new Rectangle(i * 16, 0, 16, 16),
+      }));
+    }
+    console.info('[Assets] Loaded plate_spritesheet.png (3 frames)');
+  } catch {
+    console.info('[Assets] plate_spritesheet.png not found — using fallback pressure plate textures');
+    pressurePlateFrames = [
+      generatePressurePlateTexture(0),
+      generatePressurePlateTexture(1),
+      generatePressurePlateTexture(2),
+    ];
   }
 
   return {
@@ -473,6 +498,7 @@ export async function loadAssets(): Promise<GameAssets> {
     portalFrames,
     portalEmergenceCount,
     wisdomOrbTexture,
+    pressurePlateFrames,
   };
 }
 

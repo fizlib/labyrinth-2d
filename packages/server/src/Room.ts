@@ -18,11 +18,16 @@ import {
   PLAYERS_PER_TEAM,
   MAX_TEAMS,
   TILE_SIZE,
+  TILE_FLOOR,
+  TILE_GATE_HORIZONTAL,
+  CELL_SIZE,
   SPAWN_DISTANCE,
   INITIAL_WISDOM_ORBS,
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
   TILE_RUNESTONE_3,
+  FEET_HITBOX_W,
+  FEET_HITBOX_H,
   computePortalPosition,
   computeHubDistanceField,
   computePortalDistanceField,
@@ -33,6 +38,9 @@ import {
   type FacingDirection,
   type TileMapData,
   type SpawnPoint,
+  type GatePlacement,
+  type PressurePlateInfo,
+  type GateState,
   type GameState,
   type PlayerInfo,
   type RunestoneInfo,
@@ -45,6 +53,7 @@ import {
   type RunestoneActivatedMessage,
   type AllRunestonesActivatedMessage,
   type WisdomOrbUsedMessage,
+  type GateStateChangedMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -86,6 +95,32 @@ function findRunestonePositions(map: TileMapData): RunestoneInfo[] {
   return runestones;
 }
 
+/**
+ * Check if a player's feet AABB overlaps a 16×16 pressure plate tile.
+ * Player (x, y) is feet bottom-center. Feet hitbox = 8 wide × 12 tall.
+ */
+function isPlayerOnPlate(
+  playerX: number,
+  playerY: number,
+  plateTileX: number,
+  plateTileY: number,
+  tileSize: number,
+): boolean {
+  // Player feet AABB
+  const pLeft = playerX - FEET_HITBOX_W / 2;
+  const pTop = playerY - FEET_HITBOX_H;
+  const pRight = pLeft + FEET_HITBOX_W - 1;
+  const pBottom = playerY - 1;
+
+  // Plate tile AABB
+  const tLeft = plateTileX * tileSize;
+  const tTop = plateTileY * tileSize;
+  const tRight = tLeft + tileSize - 1;
+  const tBottom = tTop + tileSize - 1;
+
+  return pLeft <= tRight && pRight >= tLeft && pTop <= tBottom && pBottom >= tTop;
+}
+
 export class Room {
   readonly id: string;
   private state: GameState;
@@ -109,6 +144,15 @@ export class Room {
   /** Dynamically computed equidistant spawn points (one per team). */
   private readonly spawnPoints: SpawnPoint[];
 
+  /** Gate placements from map generation. */
+  private readonly gates: GatePlacement[];
+
+  /** Pressure plates from map generation. */
+  private readonly pressurePlates: PressurePlateInfo[];
+
+  /** Per-gate open/closed state (true = open/passable). */
+  private gateOpenStates: boolean[];
+
   /** Precomputed tile distances from every walkable tile to the hub. */
   private readonly hubDistanceField: NavigationDistanceField;
 
@@ -121,6 +165,9 @@ export class Room {
     const layout = generateMazeLayout(this.mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
     this.map = layout.map;
     this.spawnPoints = layout.spawnPoints;
+    this.gates = layout.gates;
+    this.pressurePlates = layout.pressurePlates;
+    this.gateOpenStates = new Array(this.gates.length).fill(false);
     this.hubDistanceField = computeHubDistanceField(this.map);
     this.runestones = findRunestonePositions(this.map);
     this.state = {
@@ -128,6 +175,7 @@ export class Room {
       players: [],
       runestones: this.runestones,
       portal: null,
+      gateStates: this.gates.map((_, i) => ({ gateIndex: i, open: false })),
     };
     console.info(
       `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
@@ -136,6 +184,7 @@ export class Room {
       const sp = this.spawnPoints[i];
       console.info(`  Team ${i} spawn: tile (${sp.x}, ${sp.y}) → px (${(sp.x + 0.5) * TILE_SIZE}, ${(sp.y + 0.5) * TILE_SIZE})`);
     }
+    console.info(`  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}`);
   }
 
   // ── Player Management ─────────────────────────────────────────────────
@@ -453,11 +502,79 @@ export class Room {
       queue.length = 0;
     }
 
+    // ── Pressure plate / gate logic ──────────────────────────────────────
+    this.updateGateStates();
+
     const update: TickUpdateMessage = {
       type: MessageType.TickUpdate,
       gameState: this.cloneState(),
     };
     this.broadcast(update);
+  }
+
+  /**
+   * Check pressure plate activation for each gate and open/close gates accordingly.
+   * - Spawn side: at least 2 distinct players standing on spawn-side plates.
+   * - Hub side: at least 1 player standing on the hub-side plate.
+   */
+  private updateGateStates(): void {
+    for (let gateIndex = 0; gateIndex < this.gates.length; gateIndex++) {
+      const gate = this.gates[gateIndex];
+      const gatePlates = this.pressurePlates.filter((p) => p.gateIndex === gateIndex);
+
+      const spawnPlates = gatePlates.filter((p) => p.side === 'spawn');
+      const hubPlates = gatePlates.filter((p) => p.side === 'hub');
+
+      // Check spawn side: count distinct players on ANY spawn-side plate
+      const playersOnSpawnPlates = new Set<string>();
+      for (const plate of spawnPlates) {
+        for (const player of this.state.players) {
+          if (isPlayerOnPlate(player.x, player.y, plate.tileX, plate.tileY, this.map.tileSize)) {
+            playersOnSpawnPlates.add(player.id);
+          }
+        }
+      }
+      const spawnSideActivated = playersOnSpawnPlates.size >= 2;
+
+      // Check hub side: at least 1 player on any hub-side plate
+      let hubSideActivated = false;
+      for (const plate of hubPlates) {
+        for (const player of this.state.players) {
+          if (isPlayerOnPlate(player.x, player.y, plate.tileX, plate.tileY, this.map.tileSize)) {
+            hubSideActivated = true;
+            break;
+          }
+        }
+        if (hubSideActivated) break;
+      }
+
+      const shouldBeOpen = spawnSideActivated || hubSideActivated;
+      const wasOpen = this.gateOpenStates[gateIndex];
+
+      if (shouldBeOpen !== wasOpen) {
+        this.gateOpenStates[gateIndex] = shouldBeOpen;
+        this.state.gateStates[gateIndex] = { gateIndex, open: shouldBeOpen };
+
+        // Update the tile data: swap gate tiles ↔ floor tiles
+        if (gate.orientation === 'horizontal') {
+          for (let dx = 0; dx < CELL_SIZE; dx++) {
+            const idx = gate.tileY * this.map.width + (gate.tileX + dx);
+            this.map.data[idx] = shouldBeOpen ? TILE_FLOOR : TILE_GATE_HORIZONTAL;
+          }
+        }
+
+        const gateStateMsg: GateStateChangedMessage = {
+          type: MessageType.GateStateChanged,
+          gateIndex,
+          open: shouldBeOpen,
+        };
+        this.broadcast(gateStateMsg);
+
+        console.info(
+          `[Room:${this.id}] Gate ${gateIndex} ${shouldBeOpen ? 'OPENED' : 'CLOSED'} (spawn: ${playersOnSpawnPlates.size} players, hub: ${hubSideActivated})`,
+        );
+      }
+    }
   }
 
   // ── Networking Helpers ────────────────────────────────────────────────
@@ -479,6 +596,7 @@ export class Room {
       players: this.state.players.map((p) => ({ ...p })),
       runestones: this.runestones.map((r) => ({ ...r })),
       portal: this.portalPosition ? { ...this.portalPosition } : null,
+      gateStates: this.state.gateStates.map((g) => ({ ...g })),
     };
   }
 

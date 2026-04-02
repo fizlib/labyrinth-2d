@@ -4,7 +4,7 @@
 // Step 9: 2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application, AnimatedSprite, Container, Texture, Text, TextStyle, TextureStyle } from 'pixi.js';
+import { Application, AnimatedSprite, Container, Texture, Text, TextStyle, TextureStyle, Graphics } from 'pixi.js';
 
 TextureStyle.defaultOptions.scaleMode = 'nearest';
 import {
@@ -12,19 +12,24 @@ import {
   INTERNAL_HEIGHT,
   INITIAL_WISDOM_ORBS,
   TILE_SIZE,
+  TILE_FLOOR,
+  TILE_GATE_HORIZONTAL,
   MAZE_SIZE,
   MAX_TEAMS,
+  CELL_SIZE,
   SPAWN_DISTANCE,
+  FEET_HITBOX_W,
+  FEET_HITBOX_H,
   generateMazeLayout,
   applyInputWithCollision,
 } from '@labyrinth/shared';
-import type { GameState, TileMapData, FacingDirection } from '@labyrinth/shared';
+import type { GameState, TileMapData, FacingDirection, GatePlacement, PressurePlateInfo, GeneratedMazeLayout } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 import { SnapshotBuffer, INTERPOLATION_DELAY } from './net/SnapshotBuffer';
 import { loadAssets, type GameAssets } from './assets/AssetLoader';
 import { DebugSettings } from './config/DebugSettings';
 import { Minimap } from './systems/Minimap';
-import { TilemapRenderer, type RunestoneSpriteData } from './systems/TilemapRenderer';
+import { TilemapRenderer, type RunestoneSpriteData, type PressurePlateSpriteData } from './systems/TilemapRenderer';
 import { Portal } from './systems/Portal';
 import { WisdomOrbHud } from './systems/WisdomOrbHud';
 import { WisdomArrow } from './systems/WisdomArrow';
@@ -85,6 +90,12 @@ const snapshotBuffer = new SnapshotBuffer();
 
 let minimap: Minimap | null = null;
 let tilemapRenderer: TilemapRenderer | null = null;
+
+/** Current layout data for gate/pressure plate reference. */
+let currentLayout: GeneratedMazeLayout | null = null;
+
+/** Pressure plate animation speed (frames per second). */
+const PLATE_ANIM_SPEED = 12;
 
 /** Floating "Press E" interaction prompt */
 let interactPrompt: Text | null = null;
@@ -316,6 +327,217 @@ function updateDebugUI(state: GameState, playerId: string | null): void {
   }
 }
 
+// ── Gate State Helpers ──────────────────────────────────────────────────────
+
+/** Per-gate sliding animation state. */
+interface GateSlideState {
+  /** Current slide progress: 0 = fully closed (visible), 1 = fully open (hidden). */
+  progress: number;
+  /** Target: 0 = closing, 1 = opening. */
+  target: number;
+  /** The gate front sprite being animated. */
+  sprite: import('pixi.js').Sprite | null;
+  /** The mask graphics used for clipping the bottom. */
+  mask: import('pixi.js').Graphics | null;
+}
+
+const gateSlideStates: Map<number, GateSlideState> = new Map();
+const GATE_SLIDE_SPEED = 3; // units per second (0→1 takes ~0.33s)
+
+/**
+ * Apply a gate open/close state change:
+ * - Mutate the tile data for collision sync
+ * - Start sliding animation on the front gate sprite
+ */
+function applyGateState(
+  gateIndex: number,
+  open: boolean,
+  gates: GatePlacement[],
+  map: TileMapData,
+  renderer: TilemapRenderer,
+  _assets: GameAssets,
+): void {
+  const gate = gates[gateIndex];
+  if (!gate) return;
+
+  // Update tile data for collision (client prediction sync)
+  if (gate.orientation === 'horizontal') {
+    for (let dx = 0; dx < CELL_SIZE; dx++) {
+      const idx = gate.tileY * map.width + (gate.tileX + dx);
+      map.data[idx] = open ? TILE_FLOOR : TILE_GATE_HORIZONTAL;
+    }
+  }
+
+  // Find the corresponding front gate sprite
+  const gateSprite = renderer.gateSprites[gateIndex] ?? null;
+
+  // Initialize or update slide state
+  let slide = gateSlideStates.get(gateIndex);
+  if (!slide) {
+    slide = {
+      progress: open ? 0 : 1,
+      target: open ? 1 : 0,
+      sprite: gateSprite,
+      mask: null,
+    };
+    gateSlideStates.set(gateIndex, slide);
+  } else {
+    slide.target = open ? 1 : 0;
+    slide.sprite = gateSprite;
+  }
+}
+
+/**
+ * Update gate sliding animations each frame.
+ * As the gate slides down, a mask clips the bottom progressively.
+ */
+function updateGateSlideAnimations(dt: number): void {
+  for (const [, slide] of gateSlideStates) {
+    if (!slide.sprite) continue;
+
+    // Animate progress toward target
+    if (slide.progress !== slide.target) {
+      if (slide.target > slide.progress) {
+        slide.progress = Math.min(slide.target, slide.progress + GATE_SLIDE_SPEED * dt);
+      } else {
+        slide.progress = Math.max(slide.target, slide.progress - GATE_SLIDE_SPEED * dt);
+      }
+
+      // Apply clipping: move sprite down and clip from bottom
+      // The sprite is anchored at (0, 1) — bottom-left.
+      // To make it "sink into the ground" we shift it down and mask.
+      const spriteHeight = slide.sprite.height;
+      const slideOffset = spriteHeight * slide.progress;
+
+      if (slide.progress > 0 && slide.progress < 1) {
+        // Create/update mask for partial visibility
+        if (!slide.mask) {
+          slide.mask = new Graphics();
+          if (slide.sprite.parent) {
+            slide.sprite.parent.addChild(slide.mask);
+          }
+        }
+        // Mask rectangle: covers visible portion of the gate
+        const visibleHeight = spriteHeight - slideOffset;
+        slide.mask.clear();
+        slide.mask.rect(
+          slide.sprite.x,
+          slide.sprite.y - spriteHeight,
+          slide.sprite.width,
+          visibleHeight,
+        );
+        slide.mask.fill({ color: 0xffffff });
+        slide.sprite.mask = slide.mask;
+        slide.sprite.visible = true;
+      } else if (slide.progress >= 1) {
+        // Fully open — hide sprite entirely
+        slide.sprite.visible = false;
+        if (slide.mask) {
+          slide.sprite.mask = null;
+          slide.mask.parent?.removeChild(slide.mask);
+          slide.mask.destroy();
+          slide.mask = null;
+        }
+      } else {
+        // Fully closed — show sprite, remove mask
+        slide.sprite.visible = true;
+        if (slide.mask) {
+          slide.sprite.mask = null;
+          slide.mask.parent?.removeChild(slide.mask);
+          slide.mask.destroy();
+          slide.mask = null;
+        }
+      }
+    }
+  }
+}
+
+// ── Pressure Plate Animation ────────────────────────────────────────────────
+
+/**
+ * Check if a player's feet AABB overlaps a pressure plate tile (client-side mirror of server logic).
+ */
+function isPlayerOnPlateTile(
+  playerX: number,
+  playerY: number,
+  plateTileX: number,
+  plateTileY: number,
+): boolean {
+  const pLeft = playerX - FEET_HITBOX_W / 2;
+  const pTop = playerY - FEET_HITBOX_H;
+  const pRight = pLeft + FEET_HITBOX_W - 1;
+  const pBottom = playerY - 1;
+
+  const tLeft = plateTileX * TILE_SIZE;
+  const tTop = plateTileY * TILE_SIZE;
+  const tRight = tLeft + TILE_SIZE - 1;
+  const tBottom = tTop + TILE_SIZE - 1;
+
+  return pLeft <= tRight && pRight >= tLeft && pTop <= tBottom && pBottom >= tTop;
+}
+
+/** Per-plate animation timer tracking. */
+const plateAnimTimers: Map<number, number> = new Map();
+
+/**
+ * Update pressure plate animations based on whether any player is standing on each plate.
+ * Step on: frame 0 → 1 → 2, stop at 2.
+ * Step off: frame 2 → 1 → 0, stop at 0.
+ */
+function updatePressurePlateAnimations(
+  renderer: TilemapRenderer,
+  serverState: GameState,
+  dt: number,
+  assets: GameAssets,
+): void {
+  const frameInterval = 1 / PLATE_ANIM_SPEED;
+
+  for (const plate of renderer.pressurePlateSprites) {
+    // Check if any player is standing on this plate
+    let occupied = false;
+    for (const player of serverState.players) {
+      if (isPlayerOnPlateTile(player.x, player.y, plate.tileX, plate.tileY)) {
+        occupied = true;
+        break;
+      }
+    }
+
+    // Also check local predicted position for immediate feedback
+    if (!occupied && localPlayerInitialized) {
+      if (isPlayerOnPlateTile(localX, localY, plate.tileX, plate.tileY)) {
+        occupied = true;
+      }
+    }
+
+    const targetFrame = occupied ? 2 : 0;
+    if (plate.currentFrame === targetFrame) {
+      plateAnimTimers.delete(plate.plateId);
+      continue;
+    }
+
+    // Accumulate animation time
+    const currentTimer = (plateAnimTimers.get(plate.plateId) ?? 0) + dt;
+    if (currentTimer >= frameInterval) {
+      plateAnimTimers.set(plate.plateId, currentTimer - frameInterval);
+
+      // Step toward target frame
+      if (plate.currentFrame < targetFrame) {
+        plate.currentFrame++;
+      } else {
+        plate.currentFrame--;
+      }
+
+      // Update sprite texture
+      const frameTex = assets.pressurePlateFrames[plate.currentFrame];
+      if (frameTex) {
+        plate.sprite.texture = frameTex;
+      }
+    } else {
+      plateAnimTimers.set(plate.plateId, currentTimer);
+    }
+  }
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -438,12 +660,13 @@ async function main(): Promise<void> {
 
       const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
       currentMap = layout.map;
+      currentLayout = layout;
       mapPixelW = currentMap.width * currentMap.tileSize;
       mapPixelH = currentMap.height * currentMap.tileSize;
 
       // ── Build chunk-based tilemap ──────────────────────────────────────
       tilemapRenderer?.destroy();
-      tilemapRenderer = new TilemapRenderer(currentMap, layout.gates, layout.dirtMask, assets, app.renderer);
+      tilemapRenderer = new TilemapRenderer(currentMap, layout.gates, layout.pressurePlates, layout.dirtMask, assets, app.renderer);
 
       // Attach layers: background and shadow go before entityLayer,
       // entityLayer is already a child of worldContainer.
@@ -470,6 +693,11 @@ async function main(): Promise<void> {
       // Add runestone sprites to entityLayer for Y-sorting
       for (const rs of tilemapRenderer.runestoneSprites) {
         entityLayer.addChild(rs.sprite);
+      }
+
+      // Add pressure plate sprites to entityLayer
+      for (const plate of tilemapRenderer.pressurePlateSprites) {
+        entityLayer.addChild(plate.sprite);
       }
 
       if (statusEl) {
@@ -538,6 +766,15 @@ async function main(): Promise<void> {
         );
         minimap?.setPortalPosition(gameState.portal.x, gameState.portal.y);
         console.info(`[Main] Late-join: portal already active at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`);
+      }
+
+      // ── Late-join gate state sync ────────────────────────────────────
+      if (gameState.gateStates && currentLayout) {
+        for (const gs of gameState.gateStates) {
+          if (gs.open) {
+            applyGateState(gs.gateIndex, true, currentLayout.gates, currentMap!, tilemapRenderer!, assets);
+          }
+        }
       }
 
       // ── Interaction prompt ─────────────────────────────────────────
@@ -671,6 +908,13 @@ async function main(): Promise<void> {
       if (statusEl) {
         statusEl.textContent = `🔴 Error: ${message}`;
         statusEl.classList.add('error');
+      }
+    },
+
+    onGateStateChanged: (gateIndex, open) => {
+      console.info(`[Main] Gate ${gateIndex} ${open ? 'OPENED' : 'CLOSED'}`);
+      if (currentLayout && currentMap && tilemapRenderer) {
+        applyGateState(gateIndex, open, currentLayout.gates, currentMap, tilemapRenderer, assets);
       }
     },
 
@@ -815,6 +1059,9 @@ async function main(): Promise<void> {
       portal.update(dtSeconds);
     }
 
+    // ── 4e. Gate slide animations ────────────────────────────────────
+    updateGateSlideAnimations(dtSeconds);
+
     // ── 5. Runestone interaction prompt ──────────────────────────────
     if (interactPrompt && tilemapRenderer) {
       let nearestRS: RunestoneSpriteData | null = null;
@@ -842,6 +1089,11 @@ async function main(): Promise<void> {
       } else {
         interactPrompt.visible = false;
       }
+    }
+
+    // ── 6. Pressure plate animations ───────────────────────────────────
+    if (tilemapRenderer && latestServerState) {
+      updatePressurePlateAnimations(tilemapRenderer, latestServerState, dtSeconds, assets);
     }
   });
 

@@ -14,7 +14,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Container, Sprite, Texture, Renderer, Rectangle } from 'pixi.js';
-import type { TileMapData, GatePlacement } from '@labyrinth/shared';
+import type { TileMapData, GatePlacement, PressurePlateInfo } from '@labyrinth/shared';
 import {
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
@@ -35,6 +35,7 @@ import {
   TILE_RUNESTONE_3,
   TILE_GATE_HORIZONTAL,
   TILE_GATE_VERTICAL,
+  TILE_PRESSURE_PLATE,
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
 } from '@labyrinth/shared';
@@ -48,6 +49,17 @@ export interface RunestoneSpriteData {
   tileX: number;
   tileY: number;
   activated: boolean;
+}
+
+export interface PressurePlateSpriteData {
+  sprite: Sprite;
+  plateId: number;
+  gateIndex: number;
+  tileX: number;
+  tileY: number;
+  side: 'spawn' | 'hub';
+  /** Current animation frame index (0=up, 1=mid, 2=pressed). */
+  currentFrame: number;
 }
 
 const FRONT_GATE_WIDTH_TILES = 6;
@@ -179,7 +191,8 @@ function usesGroundBackgroundTile(tileId: number): boolean {
     tileId === TILE_RUNESTONE_2 ||
     tileId === TILE_RUNESTONE_3 ||
     tileId === TILE_GATE_HORIZONTAL ||
-    tileId === TILE_GATE_VERTICAL;
+    tileId === TILE_GATE_VERTICAL ||
+    tileId === TILE_PRESSURE_PLATE;
 }
 
 function isGateTileId(tileId: number): boolean {
@@ -190,7 +203,8 @@ function usesGroundShadowOverlay(tileId: number): boolean {
   return tileId === TILE_FLOOR ||
     tileId === TILE_FLOOR_SHADOW ||
     tileId === TILE_GATE_HORIZONTAL ||
-    tileId === TILE_GATE_VERTICAL;
+    tileId === TILE_GATE_VERTICAL ||
+    tileId === TILE_PRESSURE_PLATE;
 }
 
 function isSouthGroundShadowCasterTileId(tileId: number): boolean {
@@ -292,6 +306,7 @@ export class TilemapRenderer {
   readonly treeSprites: Sprite[] = [];
   readonly runestoneSprites: RunestoneSpriteData[] = [];
   readonly gateSprites: Sprite[] = [];
+  readonly pressurePlateSprites: PressurePlateSpriteData[] = [];
 
   // ── Internal tracking for culling + cleanup ────────────────────────────
   private allChunks: ChunkMeta[] = [];
@@ -301,6 +316,7 @@ export class TilemapRenderer {
   constructor(
     map: TileMapData,
     gates: GatePlacement[],
+    pressurePlates: PressurePlateInfo[],
     dirtMask: Uint8Array,
     assets: GameAssets,
     renderer: Renderer,
@@ -555,6 +571,28 @@ export class TilemapRenderer {
       }
     }
 
+    // ── Step 3b: Extract Pressure Plate Sprites ────────────────────────
+    for (const plate of pressurePlates) {
+      const plateTex = assets.pressurePlateFrames[0]; // Start at frame 0 (up)
+      const plateSprite = new Sprite(plateTex);
+      plateSprite.anchor.set(0, 0);
+      plateSprite.x = plate.tileX * ts;
+      plateSprite.y = plate.tileY * ts;
+      plateSprite.width = ts;
+      plateSprite.height = ts;
+      plateSprite.zIndex = plate.tileY * ts; // Below player feet
+
+      this.pressurePlateSprites.push({
+        sprite: plateSprite,
+        plateId: plate.id,
+        gateIndex: plate.gateIndex,
+        tileX: plate.tileX,
+        tileY: plate.tileY,
+        side: plate.side,
+        currentFrame: 0,
+      });
+    }
+
     if (assets.frontGateTextures) {
       for (const gate of gates) {
         if (gate.orientation !== 'horizontal') continue;
@@ -615,10 +653,16 @@ export class TilemapRenderer {
       gate.destroy();
     }
 
+    for (const plate of this.pressurePlateSprites) {
+      plate.sprite.parent?.removeChild(plate.sprite);
+      plate.sprite.destroy();
+    }
+
     this.wallRowChunks.length = 0;
     this.treeSprites.length = 0;
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;
+    this.pressurePlateSprites.length = 0;
     this.allChunks.length = 0;
   }
 }

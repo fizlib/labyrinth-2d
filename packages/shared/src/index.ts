@@ -39,7 +39,9 @@ export {
   TILE_RUNESTONE_3,
   TILE_GATE_HORIZONTAL,
   TILE_GATE_VERTICAL,
+  TILE_PRESSURE_PLATE,
   MAZE_SIZE,
+  CELL_SIZE,
   computeSpawnPoints,
   computePortalPosition,
   generateMazeLayout,
@@ -47,7 +49,9 @@ export {
   type TileMapData,
   type SpawnPoint,
   type GateOrientation,
+  type GateSpawnDirection,
   type GatePlacement,
+  type PressurePlateInfo,
   type GeneratedMazeLayout,
   type HubTileBounds,
   getHubTileBounds,
@@ -131,6 +135,7 @@ export enum MessageType {
   RunestoneActivated = 'RUNESTONE_ACTIVATED',
   AllRunestonesActivated = 'ALL_RUNESTONES_ACTIVATED',
   WisdomOrbUsed = 'WISDOM_ORB_USED',
+  GateStateChanged = 'GATE_STATE_CHANGED',
   Error = 'ERROR',
 }
 
@@ -230,6 +235,14 @@ export interface ErrorMessage {
   message: string;
 }
 
+export interface GateStateChangedMessage {
+  type: MessageType.GateStateChanged;
+  /** Index into the gates array. */
+  gateIndex: number;
+  /** Whether the gate is now open (passable). */
+  open: boolean;
+}
+
 // ── Runestone State ─────────────────────────────────────────────────────────
 
 export interface RunestoneInfo {
@@ -243,6 +256,12 @@ export interface RunestoneInfo {
   activated: boolean;
 }
 
+/** Per-gate open/closed state. */
+export interface GateState {
+  gateIndex: number;
+  open: boolean;
+}
+
 // ── Game State ──────────────────────────────────────────────────────────────
 
 export interface GameState {
@@ -251,6 +270,8 @@ export interface GameState {
   runestones: RunestoneInfo[];
   /** Portal position in pixel coordinates. null until all runestones are activated. */
   portal: { x: number; y: number } | null;
+  /** Per-gate open/closed state. */
+  gateStates: GateState[];
 }
 
 // ── Union Types ─────────────────────────────────────────────────────────────
@@ -269,4 +290,5 @@ export type ServerToClientMessage =
   | RunestoneActivatedMessage
   | AllRunestonesActivatedMessage
   | WisdomOrbUsedMessage
+  | GateStateChangedMessage
   | ErrorMessage;
