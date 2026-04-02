@@ -249,44 +249,54 @@ function deriveFacingFromKeys(): FacingDirection {
 function createDebugUI(): void {
   const debugDiv = document.createElement('div');
   debugDiv.id = 'debug-ui';
+
   const flags = DebugSettings.getFlags();
+  if (flags.minimized) {
+    debugDiv.classList.add('minimized');
+  }
+
   debugDiv.innerHTML = `
-    <h1>🏰 Labyrinth 2D — Network Debug</h1>
-    <div class="status" id="connection-status">⏳ Connecting...</div>
-    <div class="stats">
-      <div class="stat-card">
-        <span class="stat-label">Tick</span>
-        <span class="stat-value" id="tick-counter">—</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Pending</span>
-        <span class="stat-value" id="pending-count">0</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Snaps</span>
-        <span class="stat-value" id="snapshot-count">0</span>
-      </div>
+    <div class="debug-header">
+      <h1>🏰 Labyrinth 2D — Network Debug</h1>
+      <button id="debug-minimize-btn" title="Toggle Minimize">${flags.minimized ? '+' : '−'}</button>
     </div>
-    <h2>Players</h2>
-    <ul id="player-list"></ul>
-    <h2>Debug Settings</h2>
-    <div class="debug-toggles">
-      <label class="debug-toggle" id="toggle-master">
-        <input type="checkbox" ${flags.masterEnabled ? 'checked' : ''} data-flag="masterEnabled">
-        <span>Master Enable</span>
-      </label>
-      <label class="debug-toggle" id="toggle-scroll-zoom">
-        <input type="checkbox" ${flags.scrollZoom ? 'checked' : ''} data-flag="scrollZoom">
-        <span>Scroll Zoom</span>
-      </label>
-      <label class="debug-toggle" id="toggle-zoom-toggle">
-        <input type="checkbox" ${flags.zoomToggle ? 'checked' : ''} data-flag="zoomToggle">
-        <span>Zoom Toggle (−)</span>
-      </label>
-      <label class="debug-toggle" id="toggle-click-teleport">
-        <input type="checkbox" ${flags.clickTeleport ? 'checked' : ''} data-flag="clickTeleport">
-        <span>Click Teleport</span>
-      </label>
+    <div class="debug-content">
+      <div class="status" id="connection-status">⏳ Connecting...</div>
+      <div class="stats">
+        <div class="stat-card">
+          <span class="stat-label">Tick</span>
+          <span class="stat-value" id="tick-counter">—</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Pending</span>
+          <span class="stat-value" id="pending-count">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Snaps</span>
+          <span class="stat-value" id="snapshot-count">0</span>
+        </div>
+      </div>
+      <h2>Players</h2>
+      <ul id="player-list"></ul>
+      <h2>Debug Settings</h2>
+      <div class="debug-toggles">
+        <label class="debug-toggle" id="toggle-master">
+          <input type="checkbox" ${flags.masterEnabled ? 'checked' : ''} data-flag="masterEnabled">
+          <span>Master Enable</span>
+        </label>
+        <label class="debug-toggle" id="toggle-scroll-zoom">
+          <input type="checkbox" ${flags.scrollZoom ? 'checked' : ''} data-flag="scrollZoom">
+          <span>Scroll Zoom</span>
+        </label>
+        <label class="debug-toggle" id="toggle-zoom-toggle">
+          <input type="checkbox" ${flags.zoomToggle ? 'checked' : ''} data-flag="zoomToggle">
+          <span>Zoom Toggle (−)</span>
+        </label>
+        <label class="debug-toggle" id="toggle-click-teleport">
+          <input type="checkbox" ${flags.clickTeleport ? 'checked' : ''} data-flag="clickTeleport">
+          <span>Click Teleport</span>
+        </label>
+      </div>
     </div>
   `;
   document.body.appendChild(debugDiv);
@@ -299,12 +309,23 @@ function setupDebugToggles(): void {
   // Allow pointer events on the toggles area
   debugUI.style.pointerEvents = 'auto';
 
+  // Toggle flags
   debugUI.addEventListener('change', (e: Event) => {
     const target = e.target as HTMLInputElement;
     const flag = target.dataset.flag as keyof ReturnType<typeof DebugSettings.getFlags>;
     if (!flag) return;
     DebugSettings.setFlag(flag, target.checked);
   });
+
+  // Minimize button
+  const minimizeBtn = document.getElementById('debug-minimize-btn');
+  if (minimizeBtn) {
+    minimizeBtn.addEventListener('click', () => {
+      const isMinimized = debugUI.classList.toggle('minimized');
+      DebugSettings.setFlag('minimized', isMinimized);
+      minimizeBtn.textContent = isMinimized ? '+' : '−';
+    });
+  }
 }
 
 function updateDebugUI(state: GameState, playerId: string | null): void {

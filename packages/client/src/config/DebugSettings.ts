@@ -15,6 +15,8 @@ export interface DebugFlags {
   zoomToggle: boolean;
   /** Click anywhere on the map to teleport the local player there */
   clickTeleport: boolean;
+  /** Whether the network debug window is minimized */
+  minimized: boolean;
 }
 
 const DEFAULTS: DebugFlags = {
@@ -22,6 +24,7 @@ const DEFAULTS: DebugFlags = {
   scrollZoom: true,
   zoomToggle: true,
   clickTeleport: true,
+  minimized: false,
 };
 
 /** Load persisted settings from localStorage, falling back to defaults. */

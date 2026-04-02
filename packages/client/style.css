@@ -65,14 +65,68 @@ canvas {
   z-index: 1000;
   pointer-events: none; /* Don't block game interaction */
   font-size: 0.8rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#debug-ui.minimized {
+  width: auto;
+  min-width: 240px;
+  padding: 10px 14px;
+}
+
+#debug-ui.minimized .debug-content {
+  display: none;
+}
+
+#debug-ui .debug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+#debug-ui.minimized .debug-header {
+  margin-bottom: 0;
 }
 
 #debug-ui h1 {
   font-size: 0.95rem;
   color: #f0e68c;
-  margin-bottom: 10px;
-  text-align: center;
+  margin-bottom: 0;
+  text-align: left;
   letter-spacing: 1px;
+  flex-grow: 1;
+}
+
+#debug-minimize-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #2a2a4a;
+  color: #7f8fa6;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: auto;
+  margin-left: 12px;
+}
+
+#debug-minimize-btn:hover {
+  background: rgba(106, 90, 205, 0.2);
+  color: #ffffff;
+  border-color: #6a5acd;
+  box-shadow: 0 0 10px rgba(106, 90, 205, 0.3);
+  transform: scale(1.05);
+}
+
+#debug-minimize-btn:active {
+  transform: scale(0.95);
 }
 
 #debug-ui h2 {
