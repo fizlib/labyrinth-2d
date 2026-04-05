@@ -13,7 +13,6 @@ import type uWS from 'uWebSockets.js';
 import {
   MessageType,
   SERVER_TICK_MS,
-  SERVER_TICK_S,
   MAX_PLAYERS_PER_ROOM,
   PLAYERS_PER_TEAM,
   MAX_TEAMS,
@@ -72,6 +71,7 @@ interface QueuedInput {
   down: boolean;
   left: boolean;
   right: boolean;
+  dt: number;
 }
 
 /** Pixel distance threshold for runestone activation (1.5 tiles). */
@@ -308,6 +308,7 @@ export class Room {
         down: msg.down,
         left: msg.left,
         right: msg.right,
+        dt: msg.dt,
       });
     }
   }
@@ -465,14 +466,14 @@ export class Room {
         continue;
       }
 
-      const dtPerInput = SERVER_TICK_S / queue.length;
-
       for (const input of queue) {
+        // Use client-provided dt, clamped for anti-cheat safety
+        const dt = Math.min(Math.max(input.dt, 0), 0.1);
         const result = applyInputWithCollision(
           player.x,
           player.y,
           input,
-          dtPerInput,
+          dt,
           this.map,
           this.portalPosition,
         );

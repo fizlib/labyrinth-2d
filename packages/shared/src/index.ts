@@ -154,6 +154,8 @@ export interface PlayerInputMessage {
   down: boolean;
   left: boolean;
   right: boolean;
+  /** Client-side frame delta (seconds) used for this input's prediction. */
+  dt: number;
 }
 
 export interface ActivateRunestoneMessage {

@@ -972,17 +972,32 @@ async function main(): Promise<void> {
         // Skip entire server reconciliation while a debug teleport is active —
         // the server doesn't know about the teleport so its position is stale.
         if (!debugTeleportActive) {
-          localX = localPlayerData.x;
-          localY = localPlayerData.y;
+          // Compute reconciled position from server state + pending input replay
+          let reconciledX = localPlayerData.x;
+          let reconciledY = localPlayerData.y;
 
           pendingInputs = pendingInputs.filter(
             (input) => input.sequenceNumber > localPlayerData.lastProcessedInput,
           );
 
           for (const input of pendingInputs) {
-            const result = applyInputWithCollision(localX, localY, input, input.dt, currentMap!, latestServerState?.portal);
-            localX = result.x;
-            localY = result.y;
+            const result = applyInputWithCollision(reconciledX, reconciledY, input, input.dt, currentMap!, latestServerState?.portal);
+            reconciledX = result.x;
+            reconciledY = result.y;
+          }
+
+          // Smooth the correction to hide jitter
+          const cdx = reconciledX - localX;
+          const cdy = reconciledY - localY;
+          const correctionDistSq = cdx * cdx + cdy * cdy;
+
+          // Hard snap if correction is large (teleport/respawn), smooth otherwise
+          if (correctionDistSq > 25) { // > 5 pixels
+            localX = reconciledX;
+            localY = reconciledY;
+          } else {
+            localX = localX + cdx * 0.3;
+            localY = localY + cdy * 0.3;
           }
         }
 
@@ -1146,7 +1161,7 @@ async function main(): Promise<void> {
 
       pendingInputs.push(input);
 
-      net.sendInput(input.sequenceNumber, input.up, input.down, input.left, input.right);
+      net.sendInput(input.sequenceNumber, input.up, input.down, input.left, input.right, dtSeconds);
     }
 
     const localData = playerSprites.get(net.playerId);

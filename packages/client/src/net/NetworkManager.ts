@@ -175,6 +175,7 @@ export class NetworkManager {
     down: boolean,
     left: boolean,
     right: boolean,
+    dt: number,
   ): void {
     const msg: PlayerInputMessage = {
       type: MessageType.PlayerInput,
@@ -183,6 +184,7 @@ export class NetworkManager {
       down,
       left,
       right,
+      dt,
     };
     this.send(msg);
   }
