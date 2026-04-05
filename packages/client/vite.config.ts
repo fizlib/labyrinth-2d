@@ -8,6 +8,9 @@ export default defineConfig({
     alias: {
       // Allow clean imports like `@/systems/input`
       '@': path.resolve(__dirname, 'src'),
+      // Resolve shared package to TypeScript source so Vite can bundle it
+      // directly without needing a pre-build step for the shared package.
+      '@labyrinth/shared': path.resolve(__dirname, '../shared/src/index.ts'),
     },
   },
 
