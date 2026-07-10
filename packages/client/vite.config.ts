@@ -24,13 +24,6 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true, // Listen on all interfaces (including LAN/IPv4)
-    // Proxy WebSocket connections to the game server during development
-    proxy: {
-      '/ws': {
-        target: 'ws://localhost:9001',
-        ws: true,
-      },
-    },
   },
 
   // ── Build ─────────────────────────────────────────────────────────────────

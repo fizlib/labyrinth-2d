@@ -34,8 +34,17 @@ export interface NetworkCallbacks {
 }
 
 export class NetworkManager {
+  private static readonly INITIAL_RECONNECT_DELAY_MS = 500;
+  private static readonly MAX_RECONNECT_DELAY_MS = 5_000;
+
   private ws: WebSocket | null = null;
   private callbacks: NetworkCallbacks;
+  private connectionUrl: string | null = null;
+  private roomId: string = DEFAULT_ROOM_ID;
+  private displayName: string = 'Player';
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private shouldReconnect = false;
 
   /** The latest game state received from the server. */
   private _gameState: GameState | null = null;
@@ -70,21 +79,36 @@ export class NetworkManager {
       return;
     }
 
-    console.info(`[Net] Connecting to ${url}...`);
-    this.ws = new WebSocket(url);
+    this.connectionUrl = url;
+    this.roomId = roomId;
+    this.displayName = displayName;
+    this.shouldReconnect = true;
+    this.reconnectAttempt = 0;
+    this.clearReconnectTimer();
+    this.openConnection();
+  }
 
-    this.ws.onopen = () => {
+  private openConnection(): void {
+    if (!this.connectionUrl || this.ws) return;
+
+    const url = this.connectionUrl;
+    console.info(`[Net] Connecting to ${url}...`);
+    const ws = new WebSocket(url);
+    this.ws = ws;
+
+    ws.onopen = () => {
       console.info('[Net] Connected — sending JoinRoom');
+      this.reconnectAttempt = 0;
 
       const joinMsg: JoinRoomMessage = {
         type: MessageType.JoinRoom,
-        roomId,
-        displayName,
+        roomId: this.roomId,
+        displayName: this.displayName,
       };
       this.send(joinMsg);
     };
 
-    this.ws.onmessage = (event: MessageEvent) => {
+    ws.onmessage = (event: MessageEvent) => {
       try {
         const msg: ServerToClientMessage = JSON.parse(event.data as string);
         this.handleMessage(msg);
@@ -93,23 +117,58 @@ export class NetworkManager {
       }
     };
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      // A stale socket can close after a newer reconnect has begun.
+      if (this.ws !== ws) return;
+
       console.info('[Net] Disconnected');
       this.ws = null;
       this._playerId = null;
       this.callbacks.onDisconnect();
+      this.scheduleReconnect();
     };
 
-    this.ws.onerror = (err) => {
+    ws.onerror = (err) => {
       console.error('[Net] WebSocket error:', err);
     };
   }
 
   /** Gracefully close the connection. */
   disconnect(): void {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    this.shouldReconnect = false;
+    this.clearReconnectTimer();
+
+    const ws = this.ws;
+    if (!ws) return;
+
+    // Clear our reference before closing so a new connect() can start right
+    // away; the stale socket's close handler is deliberately ignored.
+    this.ws = null;
+    this._playerId = null;
+    ws.close();
+    this.callbacks.onDisconnect();
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.shouldReconnect || this.reconnectTimer !== null) return;
+
+    const delayMs = Math.min(
+      NetworkManager.INITIAL_RECONNECT_DELAY_MS * 2 ** this.reconnectAttempt,
+      NetworkManager.MAX_RECONNECT_DELAY_MS,
+    );
+    this.reconnectAttempt += 1;
+    console.info(`[Net] Reconnecting in ${delayMs}ms...`);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.openConnection();
+    }, delayMs);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 

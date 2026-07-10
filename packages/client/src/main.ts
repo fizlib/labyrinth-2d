@@ -1404,7 +1404,17 @@ async function main(): Promise<void> {
 
   // ── Connect to Server ─────────────────────────────────────────────────
   const envUrl = import.meta.env.VITE_SERVER_URL;
-  const wsUrl = envUrl || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+  // In development, connect straight to the game server. This avoids routing
+  // the long-lived game socket through Vite's HMR server/proxy. uWebSockets is
+  // bound to IPv4, so normalise localhost to IPv4 instead of relying on a
+  // browser's IPv4/IPv6 resolution preference (which differs in Chrome).
+  const devServerHost = window.location.hostname === 'localhost'
+    ? '127.0.0.1'
+    : window.location.hostname;
+  const defaultWsUrl = import.meta.env.DEV
+    ? `ws://${devServerHost}:9001/ws`
+    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+  const wsUrl = envUrl || defaultWsUrl;
   const displayName = `Explorer-${Math.floor(Math.random() * 9999).toString().padStart(4, '0')}`;
 
   net.connect(wsUrl, 'default', displayName);
