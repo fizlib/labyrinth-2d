@@ -43,6 +43,8 @@ export {
   MAZE_SIZE,
   CELL_SIZE,
   computeSpawnPoints,
+  CELL_STEP,
+  GRID_CELLS,
   computePortalPosition,
   generateMazeLayout,
   generateMaze,

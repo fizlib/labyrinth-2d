@@ -30,6 +30,8 @@ export interface DebugFlags {
   zoomToggle: boolean;
   /** Click anywhere on the map to teleport the local player there */
   clickTeleport: boolean;
+  /** Draw the logical maze-cell boundaries over the world. */
+  cellBoundaries: boolean;
   /** Whether the network debug window is minimized */
   minimized: boolean;
 }
@@ -39,6 +41,7 @@ const DEFAULTS: DebugFlags = {
   scrollZoom: SESSION_DEBUG_ENABLED,
   zoomToggle: SESSION_DEBUG_ENABLED,
   clickTeleport: SESSION_DEBUG_ENABLED,
+  cellBoundaries: false,
   minimized: false,
 };
 
@@ -50,6 +53,7 @@ function constrainToSession(flags: DebugFlags): DebugFlags {
     scrollZoom: false,
     zoomToggle: false,
     clickTeleport: false,
+    cellBoundaries: false,
   };
 }
 

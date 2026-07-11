@@ -17,6 +17,8 @@ import {
   MAZE_SIZE,
   MAX_TEAMS,
   CELL_SIZE,
+  CELL_STEP,
+  GRID_CELLS,
   SPAWN_DISTANCE,
   FEET_HITBOX_W,
   FEET_HITBOX_H,
@@ -138,6 +140,7 @@ const snapshotBuffer = new SnapshotBuffer();
 
 let minimap: Minimap | null = null;
 let tilemapRenderer: TilemapRenderer | null = null;
+let cellBoundaryOverlay: Graphics | null = null;
 
 /** Current layout data for gate/pressure plate reference. */
 let currentLayout: GeneratedMazeLayout | null = null;
@@ -237,6 +240,34 @@ function updateCamera(
   world.x = Math.round(camX);
   world.y = Math.round(camY);
 }
+/**
+ * Draws the 15×15 logical maze cells used by spawn-distance BFS. The overlay
+ * covers each 6×6 floor cell only; the intervening walls remain uncovered.
+ */
+function createCellBoundaryOverlay(): Graphics {
+  const overlay = new Graphics();
+  const cellStepPx = CELL_STEP * TILE_SIZE;
+  const gridOffsetPx = (MAZE_SIZE - GRID_CELLS * CELL_STEP) * TILE_SIZE;
+  const cellSizePx = CELL_SIZE * TILE_SIZE;
+
+  for (let cy = 0; cy < GRID_CELLS; cy++) {
+    for (let cx = 0; cx < GRID_CELLS; cx++) {
+      const x = gridOffsetPx + cx * cellStepPx;
+      const y = gridOffsetPx + cy * cellStepPx;
+      const fillColor = (cx + cy) % 2 === 0 ? 0x38bdf8 : 0x818cf8;
+
+      overlay
+        .rect(x, y, cellSizePx, cellSizePx)
+        .fill({ color: fillColor, alpha: 0.07 })
+        .stroke({ color: 0xe0f2fe, alpha: 0.85, width: 1 });
+    }
+  }
+
+  overlay.visible = false;
+  overlay.eventMode = 'none';
+  return overlay;
+}
+
 
 // ── Interpolation ───────────────────────────────────────────────────────────
 
@@ -387,6 +418,10 @@ function createDebugUI(): DebugUiDom {
         <label class="debug-toggle" id="toggle-click-teleport">
           <input type="checkbox" ${flags.clickTeleport ? 'checked' : ''} data-flag="clickTeleport">
           <span>Click Teleport</span>
+        </label>
+        <label class="debug-toggle" id="toggle-cell-boundaries">
+          <input type="checkbox" ${flags.cellBoundaries ? 'checked' : ''} data-flag="cellBoundaries">
+          <span>Cell Boundaries</span>
         </label>
       </div>
     </div>
@@ -813,6 +848,12 @@ async function main(): Promise<void> {
       // ── Build chunk-based tilemap ──────────────────────────────────────
       tilemapRenderer?.destroy();
       tilemapRenderer = new TilemapRenderer(currentMap, layout.gates, layout.pressurePlates, layout.dirtMask, assets, app.renderer);
+      if (cellBoundaryOverlay?.parent === worldContainer) {
+        worldContainer.removeChild(cellBoundaryOverlay);
+      }
+      cellBoundaryOverlay?.destroy();
+      cellBoundaryOverlay = createCellBoundaryOverlay();
+
 
       // Attach layers: background and shadow go before entityLayer,
       // entityLayer is already a child of worldContainer.
@@ -821,6 +862,7 @@ async function main(): Promise<void> {
       worldContainer.addChild(tilemapRenderer.backgroundLayer);
       worldContainer.addChild(tilemapRenderer.shadowLayer);
       worldContainer.addChild(entityLayer);
+      worldContainer.addChild(cellBoundaryOverlay);
 
       // Add wall row chunks to entityLayer for Y-sorting with players
       for (const wallChunk of tilemapRenderer.wallRowChunks) {
@@ -1207,6 +1249,9 @@ async function main(): Promise<void> {
     // ── 3b. Viewport culling — hide off-screen tilemap chunks ────────
     if (tilemapRenderer) {
       tilemapRenderer.updateVisibility(worldContainer.x, worldContainer.y, zoomLevel);
+    }
+    if (cellBoundaryOverlay) {
+      cellBoundaryOverlay.visible = DebugSettings.isEnabled('cellBoundaries');
     }
 
     // ── 4. Minimap ────────────────────────────────────────────────────
