@@ -292,6 +292,32 @@ function shouldRenderNorthEdge(x: number, y: number, map: TileMapData): boolean 
     hasNorthEdgeExposureAlongRow(x, y, 1, map);
 }
 
+function isTopLeftForestCorner(x: number, y: number, map: TileMapData): boolean {
+  return isForestAt(x, y, map) &&
+    !isForestAt(x - 1, y, map) &&
+    !isForestAt(x, y - 1, map) &&
+    isForestAt(x + 1, y, map) &&
+    isForestAt(x, y + 1, map);
+}
+
+function isTopRightForestCorner(x: number, y: number, map: TileMapData): boolean {
+  return isForestAt(x, y, map) &&
+    !isForestAt(x + 1, y, map) &&
+    !isForestAt(x, y - 1, map) &&
+    isForestAt(x - 1, y, map) &&
+    isForestAt(x, y + 1, map);
+}
+
+function isInsideTopLeftCornerModule(x: number, y: number, map: TileMapData): boolean {
+  // The 33x32px module starts one tile above and half a tile left.
+  for (let cornerY = y; cornerY <= y + 1; cornerY++) {
+    for (let cornerX = x - 1; cornerX <= x + 1; cornerX++) {
+      if (isTopLeftForestCorner(cornerX, cornerY, map)) return true;
+    }
+  }
+  return false;
+}
+
 function getForestGroundTexture(assets: GameAssets): Texture {
   // The source map keeps the space behind the transparent canopy/trunk tiles
   // nearly black. Using the playable grass here caused visible rectangular
@@ -510,7 +536,7 @@ function buildForestStyleRows(
     for (let x = 0; x < map.width; x++) {
       let runRow = 0;
       for (let y = 0; y < map.height; y++) {
-        if (!shouldRenderEastEdge(x, y, map)) {
+        if (!shouldRenderEastEdge(x, y, map) || isInsideTopLeftCornerModule(x, y, map)) {
           runRow = 0;
           continue;
         }
@@ -544,37 +570,37 @@ function buildForestStyleRows(
     }
   }
 
-  // The top of a horizontal wall alternates two exact JSON-authored stacks:
-  // 539 over 589, then 493 over 590. Continue the phase through maze turns.
-  const northEdgeTopEven = assets.forestWallTextures.styleDecorationTextures[539];
-  const northEdgeTopOdd = assets.forestWallTextures.styleDecorationTextures[493];
-  const northEdgeBottomEven = assets.forestWallTextures.styleDecorationTextures[589];
-  const northEdgeBottomOdd = assets.forestWallTextures.styleDecorationTextures[590];
+  // The top of a horizontal wall repeats export (12)'s exact two-column
+  // module: 493/590, then 539/589.
+  const northEdgeTopEven = assets.forestWallTextures.styleDecorationTextures[493];
+  const northEdgeTopOdd = assets.forestWallTextures.styleDecorationTextures[539];
+  const northEdgeBottomEven = assets.forestWallTextures.styleDecorationTextures[590];
+  const northEdgeBottomOdd = assets.forestWallTextures.styleDecorationTextures[589];
   if (northEdgeTopEven && northEdgeTopOdd && northEdgeBottomEven && northEdgeBottomOdd) {
     for (let y = 0; y < map.height; y++) {
       let runColumn = 0;
       for (let x = 0; x < map.width; x++) {
-        if (!shouldRenderNorthEdge(x, y, map)) {
+        if (!shouldRenderNorthEdge(x, y, map) || isInsideTopLeftCornerModule(x, y, map)) {
           runColumn = 0;
           continue;
         }
         const odd = runColumn % 2 === 1;
         addWorldPlacement(
-          odd ? 'north-edge-top-493' : 'north-edge-top-539',
+          odd ? 'north-edge-top-539' : 'north-edge-top-493',
           odd ? northEdgeTopOdd : northEdgeTopEven,
-          x * ts - 5 * ts / authoredTileSize,
-          y * ts - 14 * ts / authoredTileSize,
+          (x - 1) * ts + ts / authoredTileSize,
+          (y - 1) * ts + 2 * ts / authoredTileSize,
           ts,
-          14 * ts / authoredTileSize,
+          (odd ? 15 : 14) * ts / authoredTileSize,
           211,
           false,
           false,
           'south',
         );
         addWorldPlacement(
-          odd ? 'north-edge-bottom-590' : 'north-edge-bottom-589',
+          odd ? 'north-edge-bottom-589' : 'north-edge-bottom-590',
           odd ? northEdgeBottomOdd : northEdgeBottomEven,
-          x * ts - 10 * ts / authoredTileSize,
+          (x - 1) * ts + ts / authoredTileSize,
           y * ts,
           ts,
           ts,
@@ -584,6 +610,78 @@ function buildForestStyleRows(
           'south',
         );
         runColumn++;
+      }
+    }
+  }
+
+  // Convex top-left corner copied verbatim from export (12).
+  const topLeft492 = assets.forestWallTextures.styleDecorationTextures[492];
+  const topLeft539 = assets.forestWallTextures.styleDecorationTextures[539];
+  const topLeft549 = assets.forestWallTextures.styleDecorationTextures[549];
+  const topLeft543 = assets.forestWallTextures.styleDecorationTextures[543];
+  if (topLeft492 && topLeft539 && topLeft549 && topLeft543) {
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        if (!isTopLeftForestCorner(x, y, map)) continue;
+        const cornerX = x * ts - ts / 2 + 2 * ts / authoredTileSize;
+        const cornerY = (y - 1) * ts;
+        addWorldPlacement('top-left-492', topLeft492,
+          cornerX + 5 * ts / authoredTileSize,
+          cornerY + 4 * ts / authoredTileSize,
+          12 * ts / authoredTileSize, 12 * ts / authoredTileSize,
+          120, false, false, 'east');
+        addWorldPlacement('top-left-539', topLeft539,
+          cornerX + 17 * ts / authoredTileSize,
+          cornerY + 1 * ts / authoredTileSize,
+          ts, 15 * ts / authoredTileSize,
+          120, false, false, 'east');
+        addWorldPlacement('top-left-549', topLeft549,
+          cornerX + 1 * ts / authoredTileSize,
+          cornerY + ts,
+          ts, ts,
+          121, false, false, 'east');
+        addWorldPlacement('top-left-543', topLeft543,
+          cornerX + 17 * ts / authoredTileSize,
+          cornerY + ts,
+          ts, ts,
+          120, false, false, 'east');
+      }
+    }
+  }
+
+  // Convex top-right corner: mirror export (12)'s 492+539 top cap.
+  const topRight492 = assets.forestWallTextures.styleDecorationTextures[492];
+  const topRight539 = assets.forestWallTextures.styleDecorationTextures[539];
+  if (topRight492 && topRight539) {
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        if (!isTopRightForestCorner(x, y, map)) continue;
+        const capX = x * ts - ts / 2;
+        const capY = (y - 1) * ts;
+        addWorldPlacement(
+          'top-right-539',
+          topRight539,
+          capX,
+          capY + ts / authoredTileSize,
+          ts,
+          15 * ts / authoredTileSize,
+          300,
+          true,
+          false,
+          'west',
+        );
+        addWorldPlacement(
+          'top-right-492',
+          topRight492,
+          capX + ts,
+          capY + 4 * ts / authoredTileSize,
+          12 * ts / authoredTileSize,
+          12 * ts / authoredTileSize,
+          300,
+          true,
+          false,
+          'west',
+        );
       }
     }
   }
