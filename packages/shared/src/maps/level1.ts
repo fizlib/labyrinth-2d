@@ -139,10 +139,10 @@ export const TILE_PRESSURE_PLATE = 19;
 // ── Constants ───────────────────────────────────────────────────────────────
 
 export const CELL_SIZE = 6;
-const WALL_SIZE = 8;
+export const WALL_SIZE = 10;
 export const CELL_STEP = CELL_SIZE + WALL_SIZE;
 export const GRID_CELLS = 15;
-export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 218
+export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 250
 const TILE_PX = 16;
 
 /** Size of the central hub room in tiles. Matches CELL_SIZE to prevent cutting wall corners, resulting in a clean cross-shaped hub area. */
@@ -572,9 +572,52 @@ function isWalkableTileId(tile: number): boolean {
 
 function spawnPointToCell(spawnPoint: SpawnPoint): CellCoord {
   return {
-    cx: Math.round((spawnPoint.x - (CELL_SIZE - 1) / 2 - WALL_SIZE) / CELL_STEP),
-    cy: Math.round((spawnPoint.y - (CELL_SIZE - 1) / 2 - WALL_SIZE) / CELL_STEP),
+    cx: Math.round((spawnPoint.x - Math.floor(CELL_SIZE / 2) - WALL_SIZE) / CELL_STEP),
+    cy: Math.round((spawnPoint.y - Math.floor(CELL_SIZE / 2) - WALL_SIZE) / CELL_STEP),
   };
+}
+
+function findSafeSpawnPoint(data: number[], requested: SpawnPoint): SpawnPoint {
+  const cell = spawnPointToCell(requested);
+  const { tx, ty } = cellToTile(cell.cx, cell.cy);
+  const center = Math.floor(CELL_SIZE / 2);
+  const candidates: Array<{ x: number; y: number; distance: number }> = [];
+
+  for (let dy = 0; dy < CELL_SIZE; dy++) {
+    for (let dx = 0; dx < CELL_SIZE; dx++) {
+      candidates.push({
+        x: tx + dx,
+        y: ty + dy,
+        distance: Math.abs(dx - center) + Math.abs(dy - center),
+      });
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance || a.y - b.y || a.x - b.x);
+
+  for (const candidate of candidates) {
+    const feetTile = data[candidate.y * MAP_SIZE + candidate.x];
+    const bodyTile = candidate.y > 0
+      ? data[(candidate.y - 1) * MAP_SIZE + candidate.x]
+      : TILE_WALL_INTERIOR;
+    if (isWalkableTileId(feetTile) && isWalkableTileId(bodyTile)) {
+      return { x: candidate.x, y: candidate.y };
+    }
+  }
+
+  // Defensive fallback for a malformed cell: choose the closest walkable map
+  // tile rather than ever returning a solid-wall coordinate.
+  let closest: SpawnPoint | null = null;
+  let closestDistance = Number.POSITIVE_INFINITY;
+  for (let y = 0; y < MAP_SIZE; y++) {
+    for (let x = 0; x < MAP_SIZE; x++) {
+      if (!isWalkableTileId(data[y * MAP_SIZE + x])) continue;
+      const distance = Math.abs(x - requested.x) + Math.abs(y - requested.y);
+      if (distance >= closestDistance) continue;
+      closest = { x, y };
+      closestDistance = distance;
+    }
+  }
+  return closest ?? requested;
 }
 
 function getGateOrientationForCell(data: number[], cx: number, cy: number): GateOrientation | null {
@@ -814,6 +857,9 @@ export function generateMazeLayout(
     }
   }
 
+  const safeSpawnPoints = spawnPoints.map((spawnPoint) =>
+    findSafeSpawnPoint(gatedData, spawnPoint));
+
   return {
     map: {
       width: MAP_SIZE,
@@ -821,7 +867,7 @@ export function generateMazeLayout(
       tileSize: TILE_PX,
       data: gatedData,
     },
-    spawnPoints,
+    spawnPoints: safeSpawnPoints,
     gates,
     pressurePlates,
     dirtMask,
@@ -985,8 +1031,8 @@ export function computeSpawnPoints(
     if (best) {
       const { tx, ty } = cellToTile(best.cx, best.cy);
       picked.push({
-        x: tx + (CELL_SIZE - 1) / 2,
-        y: ty + (CELL_SIZE - 1) / 2,
+        x: tx + Math.floor(CELL_SIZE / 2),
+        y: ty + Math.floor(CELL_SIZE / 2),
       });
       // Remove this candidate so other sectors don't reuse it
       candidates = candidates.filter((c) => c.cx !== best.cx || c.cy !== best.cy);

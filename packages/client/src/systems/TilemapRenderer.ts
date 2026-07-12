@@ -29,6 +29,10 @@ import {
   TILE_PRESSURE_PLATE,
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
+  CELL_STEP,
+  CELL_SIZE,
+  WALL_SIZE,
+  GRID_CELLS,
 } from '@labyrinth/shared';
 import type { DirtTextures, GameAssets, FrontGateTextures } from '../assets/AssetLoader';
 
@@ -74,8 +78,50 @@ const BG_CHUNK_SIZE = 32;
 const FOREST_CHUNK_WIDTH = 64;
 const FOREST_CANOPY_OVERFLOW = 16;
 const FOREST_SIDE_OVERFLOW = 16;
-const FOREST_FACE_HEIGHT = 8;
-const FOREST_NORTH_HEDGE_HEIGHT = 3;
+
+type ForestStyleDirection = 'north' | 'south' | 'west' | 'east';
+type ForestStyleTuple = readonly [
+  assetId: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  zIndex: number,
+  flipX: 0 | 1,
+  flipY: 0 | 1,
+];
+
+/**
+ * The authored additions in style export (12)'s labyrinth-style-v1.json.
+ * Coordinates are pixels in its 352x352 sample (an eight-tile wall around one
+ * six-tile maze cell). The ordinary grass and canopy entries are assembled
+ * separately; this stencil retains all 106 exported wall-detail sprites so
+ * the inner-boundary subset can be selected without changing their geometry.
+ */
+const FOREST_STYLE_STENCIL: readonly ForestStyleTuple[] = [
+  [440,128,127,16,6,1,0,0],[441,144,127,16,6,1,0,0],[442,160,127,16,6,1,0,0],[443,176,126,16,6,1,0,0],[438,192,128,16,6,1,0,0],[439,208,128,16,6,1,0,0],
+  [1281,224,48,16,16,120,0,0],[1231,224,32,16,16,120,0,0],[1181,224,16,16,16,120,0,0],[1131,224,6,11,10,120,0,0],[549,220,64,16,16,121,0,0],[550,236,64,16,16,120,0,0],[1282,236,48,16,16,125,0,0],[1232,240,32,16,16,126,0,0],
+  [599,221,80,14,16,120,0,0],[600,235,80,16,16,120,0,0],[549,220,96,16,16,121,0,0],[550,236,96,16,16,120,0,0],[599,221,112,14,16,120,0,0],[600,235,112,16,16,120,0,0],[549,220,128,16,16,121,0,0],[550,236,128,16,16,120,0,0],[599,221,144,14,16,120,0,0],[600,235,144,16,16,120,0,0],[549,220,160,16,16,121,0,0],[550,236,160,16,16,120,0,0],[599,221,176,14,16,120,0,0],[600,235,176,16,16,120,0,0],[549,220,192,16,16,121,0,0],[550,236,192,16,16,120,0,0],[592,219,208,16,16,120,0,0],[593,235,208,16,16,120,0,0],
+  [493,203,210,16,14,120,0,0],[539,187,210,16,14,120,0,0],[493,171,210,16,14,120,0,0],[539,155,210,16,14,120,0,0],[493,139,210,16,14,120,0,0],[539,123,210,16,14,120,0,0],[587,118,208,16,16,121,0,0],
+  [580,118,176,14,16,120,0,0],[580,118,144,14,16,120,0,0],[580,118,112,14,16,120,0,0],[580,118,80,14,16,120,0,0],[580,118,48,14,16,120,0,0],
+  [1181,112,16,16,16,120,1,0],[1232,96,33,16,16,126,1,0],[550,102,64,16,16,120,1,1],[550,102,96,16,16,120,1,1],[600,102,48,16,16,120,1,1],[600,102,80,16,16,120,1,1],[550,102,128,16,16,120,1,1],[550,102,160,16,16,120,1,1],[600,102,112,16,16,120,1,1],[600,102,144,16,16,120,1,1],[550,102,192,16,16,120,1,1],[600,102,176,16,16,120,1,1],[600,102,208,16,16,120,1,1],
+  [636,102,224,16,16,120,0,0],[589,118,224,16,16,120,0,0],[590,134,224,16,16,120,0,0],[589,150,224,16,16,120,0,0],[590,166,224,16,16,120,0,0],[589,182,224,16,16,120,0,0],[590,198,224,16,16,120,0,0],[589,214,224,16,16,120,0,0],[590,230,224,16,16,120,0,0],[636,235,224,16,16,121,1,0],
+  [549,0,80,16,16,121,0,0],[550,16,80,16,16,120,0,0],[599,1,96,14,16,120,0,0],[600,15,96,16,16,120,0,0],[549,0,112,16,16,121,0,0],[550,16,112,16,16,120,0,0],[599,1,128,14,16,120,0,0],[600,15,128,16,16,120,0,0],[549,0,144,16,16,121,0,0],[550,16,144,16,16,120,0,0],[599,1,160,14,16,120,0,0],[600,15,160,16,16,120,0,0],[549,0,176,16,16,121,0,0],[550,16,176,16,16,120,0,0],[599,1,192,14,16,120,0,0],[600,15,192,16,16,120,0,0],[549,0,208,16,16,121,0,0],[550,16,208,16,16,120,0,0],
+  [549,0,48,16,16,121,0,0],[550,16,48,16,16,120,0,0],[599,1,64,14,16,120,0,0],[600,15,64,16,16,120,0,0],[599,1,32,14,16,120,0,0],[600,15,32,16,16,120,0,0],[492,5,4,12,12,120,0,0],[599,5,36,14,16,120,0,0],[549,1,16,16,16,121,0,0],[539,17,1,16,15,120,0,0],[543,17,16,16,16,120,0,0],[493,33,2,16,14,120,0,0],[590,33,16,16,16,120,0,0],[539,49,2,16,15,120,0,0],[589,49,17,16,16,120,0,0],[493,65,3,16,14,120,0,0],[590,65,17,16,16,120,0,0],
+  [599,1,224,14,16,120,0,0],[600,15,224,16,16,120,0,0],[549,0,240,16,16,121,0,0],[550,16,240,16,16,120,0,0],
+];
+
+interface ForestStylePlacement {
+  texture: Texture;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  flipX: boolean;
+  flipY: boolean;
+  direction: ForestStyleDirection;
+}
 
 // ── Internal chunk metadata ─────────────────────────────────────────────────
 
@@ -162,73 +208,88 @@ function isForestAt(x: number, y: number, map: TileMapData): boolean {
   return isForestWallTileId(map.data[y * map.width + x]);
 }
 
-/**
- * Return the row in the original eight-piece Fiorwoods south-facing tree
- * facade for this solid tile, or null when it is not part of such a facade.
- */
 function getSouthForestFaceRow(x: number, y: number, map: TileMapData): number | null {
-  for (let distanceToBase = 0; distanceToBase < FOREST_FACE_HEIGHT; distanceToBase++) {
+  const faceHeight = 8;
+  for (let distanceToBase = 0; distanceToBase < faceHeight; distanceToBase++) {
     if (!isForestAt(x, y + distanceToBase, map)) return null;
     if (!isForestAt(x, y + distanceToBase + 1, map)) {
-      return FOREST_FACE_HEIGHT - distanceToBase - 1;
+      return faceHeight - distanceToBase - 1;
     }
   }
   return null;
 }
 
-/** Return the row in the low foliage treatment used on a north-facing edge. */
-function getNorthForestHedgeRow(x: number, y: number, map: TileMapData): number | null {
-  for (let distanceFromTop = 0; distanceFromTop < FOREST_NORTH_HEDGE_HEIGHT; distanceFromTop++) {
-    if (!isForestAt(x, y - distanceFromTop, map)) return null;
-    if (!isForestAt(x, y - distanceFromTop - 1, map)) return distanceFromTop;
-  }
-  return null;
-}
-
-function isInsideEastForestEdge(x: number, y: number, map: TileMapData): boolean {
-  return isForestAt(x, y, map) && !isForestAt(x - 1, y, map);
-}
-
-function getInsideEastEdgeRow(x: number, y: number, map: TileMapData): number | null {
-  if (!isInsideEastForestEdge(x, y, map)) return null;
-  let startY = y;
-  while (isInsideEastForestEdge(x, startY - 1, map)) startY--;
-  return y - startY;
-}
-
-function getInsideEastEdgeStartBelow(x: number, y: number, map: TileMapData): number | null {
-  for (let distance = 1; distance <= FOREST_FACE_HEIGHT; distance++) {
-    const edgeY = y + distance;
-    if (isInsideEastForestEdge(x, edgeY, map) && !isInsideEastForestEdge(x, edgeY - 1, map)) {
-      return distance;
-    }
-  }
-  return null;
-}
-
-function getInsideNorthEdgeColumn(x: number, y: number, map: TileMapData): number | null {
-  if (!isForestAt(x, y, map) || isForestAt(x, y + 1, map)) return null;
-  let startX = x;
-  while (isForestAt(startX - 1, y, map) && !isForestAt(startX - 1, y + 1, map)) startX--;
-  const column = x - startX;
-  return column % 6;
-}
-
-function isNorthHedgeReplacedByInsideCorner(
+function hasWestEdgeExposureAlongColumn(
   x: number,
   y: number,
-  northHedgeRow: number,
+  directionY: -1 | 1,
   map: TileMapData,
 ): boolean {
-  const edgeStartY = y - northHedgeRow + FOREST_FACE_HEIGHT;
-  for (let offsetX = 0; offsetX < 4; offsetX++) {
-    const edgeX = x - offsetX;
-    if (isInsideEastForestEdge(edgeX, edgeStartY, map) &&
-        !isInsideEastForestEdge(edgeX, edgeStartY - 1, map)) {
-      return true;
-    }
+  for (let distance = 1; distance <= CELL_STEP; distance++) {
+    const candidateY = y + distance * directionY;
+    // A carved passage through the wall column is a real interruption.
+    if (!isForestAt(x, candidateY, map)) return false;
+    if (!isForestAt(x + 1, candidateY, map)) return true;
   }
   return false;
+}
+
+function shouldRenderWestEdge(x: number, y: number, map: TileMapData): boolean {
+  if (!isForestAt(x, y, map)) return false;
+  if (!isForestAt(x + 1, y, map)) return true;
+
+  // At a perpendicular maze turn, the adjoining horizontal wall temporarily
+  // occupies the open side. Keep the vertical pattern when it resumes on both
+  // sides of that junction instead of drawing an artificial corner break.
+  return hasWestEdgeExposureAlongColumn(x, y, -1, map) &&
+    hasWestEdgeExposureAlongColumn(x, y, 1, map);
+}
+
+function hasEastEdgeExposureAlongColumn(
+  x: number,
+  y: number,
+  directionY: -1 | 1,
+  map: TileMapData,
+): boolean {
+  for (let distance = 1; distance <= CELL_STEP; distance++) {
+    const candidateY = y + distance * directionY;
+    if (!isForestAt(x, candidateY, map)) return false;
+    if (!isForestAt(x - 1, candidateY, map)) return true;
+  }
+  return false;
+}
+
+function shouldRenderEastEdge(x: number, y: number, map: TileMapData): boolean {
+  if (!isForestAt(x, y, map)) return false;
+  if (!isForestAt(x - 1, y, map)) return true;
+
+  return hasEastEdgeExposureAlongColumn(x, y, -1, map) &&
+    hasEastEdgeExposureAlongColumn(x, y, 1, map);
+}
+
+function hasNorthEdgeExposureAlongRow(
+  x: number,
+  y: number,
+  directionX: -1 | 1,
+  map: TileMapData,
+): boolean {
+  for (let distance = 1; distance <= CELL_STEP; distance++) {
+    const candidateX = x + distance * directionX;
+    // A carved passage through the wall row is a real interruption.
+    if (!isForestAt(candidateX, y, map)) return false;
+    if (!isForestAt(candidateX, y - 1, map)) return true;
+  }
+  return false;
+}
+
+function shouldRenderNorthEdge(x: number, y: number, map: TileMapData): boolean {
+  if (!isForestAt(x, y, map)) return false;
+  if (!isForestAt(x, y - 1, map)) return true;
+
+  // Preserve a horizontal edge through a perpendicular wall junction when
+  // the same exposed edge resumes to both the left and right.
+  return hasNorthEdgeExposureAlongRow(x, y, -1, map) &&
+    hasNorthEdgeExposureAlongRow(x, y, 1, map);
 }
 
 function getForestGroundTexture(assets: GameAssets): Texture {
@@ -236,6 +297,381 @@ function getForestGroundTexture(assets: GameAssets): Texture {
   // nearly black. Using the playable grass here caused visible rectangular
   // patches on the east and west walls.
   return assets.forestWallTextures.interiorTexture;
+}
+
+function getStyleDirection(tuple: ForestStyleTuple): ForestStyleDirection {
+  const [, x, y, width, height] = tuple;
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const floorStart = 8 * 16;
+  const floorEnd = 14 * 16;
+
+  if (centerY < floorStart) return 'north';
+  if (centerY >= floorEnd) return 'south';
+  if (centerX < floorStart) return 'west';
+  if (centerX >= floorEnd) return 'east';
+
+  const distances: Array<[ForestStyleDirection, number]> = [
+    ['north', centerY - floorStart],
+    ['south', floorEnd - centerY],
+    ['west', centerX - floorStart],
+    ['east', floorEnd - centerX],
+  ];
+  distances.sort((a, b) => a[1] - b[1]);
+  return distances[0][0];
+}
+
+function buildForestStyleRows(
+  map: TileMapData,
+  assets: GameAssets,
+): ReadonlyMap<number, readonly ForestStylePlacement[]> {
+  const ts = map.tileSize;
+  const authoredTileSize = 16;
+  const authoredWallSize = 8;
+  const templateShift = (WALL_SIZE - authoredWallSize) * authoredTileSize;
+  const rows = new Map<number, ForestStylePlacement[]>();
+  const seen = new Set<string>();
+
+  const addWorldPlacement = (
+    placementId: string,
+    texture: Texture,
+    worldX: number,
+    worldY: number,
+    worldWidth: number,
+    worldHeight: number,
+    zIndex: number,
+    flipX: boolean,
+    flipY: boolean,
+    direction: ForestStyleDirection,
+    renderRow?: number,
+  ): void => {
+    const key = [placementId, worldX, worldY, worldWidth, worldHeight, flipX, flipY].join(':');
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    const row = renderRow ?? Math.floor(worldY / ts);
+    const placements = rows.get(row) ?? [];
+    placements.push({
+      texture,
+      x: worldX,
+      y: worldY,
+      width: worldWidth,
+      height: worldHeight,
+      zIndex,
+      flipX,
+      flipY,
+      direction,
+    });
+    rows.set(row, placements);
+  };
+
+  const addPlacement = (
+    placementId: string,
+    texture: Texture,
+    originTileX: number,
+    originTileY: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    zIndex: number,
+    flipX: boolean,
+    flipY: boolean,
+    direction: ForestStyleDirection,
+  ): void => {
+    const centerTileX = Math.floor((x + width / 2) / authoredTileSize);
+    const centerTileY = Math.floor((y + height / 2) / authoredTileSize);
+    const ownerLocalX = direction === 'west'
+      ? Math.min(WALL_SIZE - 1, centerTileX)
+      : direction === 'east'
+        ? Math.max(WALL_SIZE + CELL_SIZE, centerTileX)
+        : centerTileX;
+    const ownerLocalY = direction === 'north'
+      ? Math.min(WALL_SIZE - 1, centerTileY)
+      : direction === 'south'
+        ? Math.max(WALL_SIZE + CELL_SIZE, centerTileY)
+        : centerTileY;
+    if (!isForestAt(originTileX + ownerLocalX, originTileY + ownerLocalY, map)) return;
+
+    addWorldPlacement(
+      placementId,
+      texture,
+      originTileX * ts + x * ts / authoredTileSize,
+      originTileY * ts + y * ts / authoredTileSize,
+      width * ts / authoredTileSize,
+      height * ts / authoredTileSize,
+      zIndex,
+      flipX,
+      flipY,
+      direction,
+    );
+  };
+
+  // Northern walls are continuous topology, not one facade per maze cell.
+  // Repeat the exported six-column trunk row across each uninterrupted run.
+  for (let y = 0; y < map.height; y++) {
+    let runColumn = 0;
+    for (let x = 0; x < map.width; x++) {
+      const faceRow = getSouthForestFaceRow(x, y, map);
+      if (faceRow === null) {
+        runColumn = 0;
+        continue;
+      }
+
+      const column = runColumn % 6;
+      const texture = assets.forestWallTextures.southFaceRows[faceRow]?.[column];
+      if (texture) {
+        addWorldPlacement(
+          `continuous-face-${faceRow}-${column}`,
+          texture,
+          x * ts,
+          y * ts,
+          ts,
+          ts,
+          100 + faceRow,
+          false,
+          false,
+          'north',
+        );
+      }
+
+      if (faceRow === 7) {
+        // Repeating left-to-right order requested for South face columns:
+        // 438, 439, 440, 441, 442, 443.
+        const fringe = assets.forestWallTextures.insideNorthEdgeTextures[column];
+        if (fringe) {
+          // Preserve export (12)'s authored Y positions. These intentionally
+          // overlap the root row by 0-2px so the grass blends into the trunks.
+          const authoredYOffsets = [16, 16, 15, 15, 15, 14];
+          addWorldPlacement(
+            `continuous-fringe-${column}`,
+            fringe,
+            x * ts,
+            y * ts + authoredYOffsets[column] * ts / authoredTileSize,
+            ts,
+            6 * ts / authoredTileSize,
+            1,
+            false,
+            false,
+            'north',
+            y,
+          );
+        }
+      }
+      runColumn++;
+    }
+  }
+
+  // The exported west/left wall uses one invariant two-piece row. From the
+  // playable side toward the forest mass: Side hedge 7,12 (sprite 32), then
+  // Sprite_Fiorwoods_550 flipped on both axes, exactly as in the JSON. Repeat
+  // it for every exposed tile; do not alternate in sprites 580/587/600.
+  const westSideHedge = assets.forestWallTextures.sideHedgeTextures[2];
+  const westSideFill = assets.forestWallTextures.styleDecorationTextures[550];
+  if (westSideHedge && westSideFill) {
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        if (!shouldRenderWestEdge(x, y, map)) continue;
+        addWorldPlacement(
+          'west-side-550',
+          westSideFill,
+          x * ts - 10 * ts / authoredTileSize,
+          y * ts,
+          ts,
+          ts,
+          201,
+          true,
+          true,
+          'west',
+        );
+        addWorldPlacement(
+          'west-side-32',
+          westSideHedge,
+          x * ts + 6 * ts / authoredTileSize,
+          y * ts,
+          ts,
+          ts,
+          200,
+          false,
+          false,
+          'west',
+        );
+      }
+    }
+  }
+
+  // The opposite vertical face alternates the two JSON-authored rows
+  // 549+550 and 599+600. Keep one phase for the full uninterrupted edge.
+  const eastSideEvenLeft = assets.forestWallTextures.styleDecorationTextures[549];
+  const eastSideEvenRight = assets.forestWallTextures.styleDecorationTextures[550];
+  const eastSideOddLeft = assets.forestWallTextures.styleDecorationTextures[599];
+  const eastSideOddRight = assets.forestWallTextures.styleDecorationTextures[600];
+  if (eastSideEvenLeft && eastSideEvenRight && eastSideOddLeft && eastSideOddRight) {
+    for (let x = 0; x < map.width; x++) {
+      let runRow = 0;
+      for (let y = 0; y < map.height; y++) {
+        if (!shouldRenderEastEdge(x, y, map)) {
+          runRow = 0;
+          continue;
+        }
+        const odd = runRow % 2 === 1;
+        addWorldPlacement(
+          odd ? 'east-side-left-599' : 'east-side-left-549',
+          odd ? eastSideOddLeft : eastSideEvenLeft,
+          x * ts - (odd ? 3 : 4) * ts / authoredTileSize,
+          y * ts,
+          (odd ? 14 : 16) * ts / authoredTileSize,
+          ts,
+          201,
+          false,
+          false,
+          'east',
+        );
+        addWorldPlacement(
+          odd ? 'east-side-right-600' : 'east-side-right-550',
+          odd ? eastSideOddRight : eastSideEvenRight,
+          x * ts + (odd ? 11 : 12) * ts / authoredTileSize,
+          y * ts,
+          ts,
+          ts,
+          200,
+          false,
+          false,
+          'east',
+        );
+        runRow++;
+      }
+    }
+  }
+
+  // The top of a horizontal wall alternates two exact JSON-authored stacks:
+  // 539 over 589, then 493 over 590. Continue the phase through maze turns.
+  const northEdgeTopEven = assets.forestWallTextures.styleDecorationTextures[539];
+  const northEdgeTopOdd = assets.forestWallTextures.styleDecorationTextures[493];
+  const northEdgeBottomEven = assets.forestWallTextures.styleDecorationTextures[589];
+  const northEdgeBottomOdd = assets.forestWallTextures.styleDecorationTextures[590];
+  if (northEdgeTopEven && northEdgeTopOdd && northEdgeBottomEven && northEdgeBottomOdd) {
+    for (let y = 0; y < map.height; y++) {
+      let runColumn = 0;
+      for (let x = 0; x < map.width; x++) {
+        if (!shouldRenderNorthEdge(x, y, map)) {
+          runColumn = 0;
+          continue;
+        }
+        const odd = runColumn % 2 === 1;
+        addWorldPlacement(
+          odd ? 'north-edge-top-493' : 'north-edge-top-539',
+          odd ? northEdgeTopOdd : northEdgeTopEven,
+          x * ts - 5 * ts / authoredTileSize,
+          y * ts - 14 * ts / authoredTileSize,
+          ts,
+          14 * ts / authoredTileSize,
+          211,
+          false,
+          false,
+          'south',
+        );
+        addWorldPlacement(
+          odd ? 'north-edge-bottom-590' : 'north-edge-bottom-589',
+          odd ? northEdgeBottomOdd : northEdgeBottomEven,
+          x * ts - 10 * ts / authoredTileSize,
+          y * ts,
+          ts,
+          ts,
+          210,
+          false,
+          false,
+          'south',
+        );
+        runColumn++;
+      }
+    }
+  }
+
+  for (let cellY = 0; cellY < GRID_CELLS; cellY++) {
+    for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
+      const originTileX = cellX * CELL_STEP;
+      const originTileY = cellY * CELL_STEP;
+      const faceBaseY = originTileY + WALL_SIZE - 1;
+      const faceStartX = originTileX + WALL_SIZE;
+      const faceEndX = faceStartX + CELL_SIZE - 1;
+      const hasCellFace = getSouthForestFaceRow(faceStartX, faceBaseY, map) === 7;
+      const showWestDetails = getSouthForestFaceRow(faceStartX - 1, faceBaseY, map) === null;
+      const showEastDetails = getSouthForestFaceRow(faceEndX + 1, faceBaseY, map) === null;
+
+      // Six canopy pieces in export (12): one northwest cap and the five
+      // explicitly spaced modules down the inner west edge.
+      const northWestCap = assets.forestWallTextures.northHedgeRows[2];
+      if (northWestCap && hasCellFace && showWestDetails) {
+        addPlacement('canopy-380', northWestCap, originTileX, originTileY,
+          112 + templateShift, 32 + templateShift, 16, 16, 102, false, false, 'north');
+      }
+      const westCanopy = assets.forestWallTextures.sideHedgeTextures[2];
+      if (westCanopy && showWestDetails) {
+        for (const y of [64, 96]) {
+          addPlacement(`canopy-32-${y}`, westCanopy, originTileX, originTileY,
+            118 + templateShift, y + templateShift, 16, 16, 112, false, false,
+            y < 128 ? 'north' : 'west');
+        }
+      }
+
+      // The JSON also contains decorations on the sample image's outer frame.
+      // They demonstrate clipping at the preview boundary and are not part of
+      // the central playable cell. Only x>=96 belongs to its inner wall/corners.
+      for (const tuple of FOREST_STYLE_STENCIL) {
+        const [assetId, x, y, width, height, zIndex, flipX, flipY] = tuple;
+        if (x + width / 2 < 6 * authoredTileSize) continue;
+        const texture = assets.forestWallTextures.styleDecorationTextures[assetId];
+        if (!texture) continue;
+        const direction = getStyleDirection(tuple);
+        const centerX = x + width / 2;
+
+        // West-facing straight walls are generated above from the exact
+        // invariant 32 + flipped-550 pair.
+        if (direction === 'west') continue;
+
+        // East-facing straight walls are generated above from continuous
+        // alternating 549/550 and 599/600 rows.
+        if (direction === 'east') continue;
+
+        // North-facing horizontal edges are generated above as continuous
+        // alternating 539/589 and 493/590 stacks.
+        if (direction === 'south') continue;
+
+        // The face fringe is generated along the continuous run above. Cell
+        // copies would restart its six-column phase and leave seams.
+        if (assetId >= 438 && assetId <= 443) continue;
+
+        // Corner/side decorations belong only at the true ends of a trunk
+        // run. Internal logical-cell boundaries must remain uninterrupted bark.
+        if (direction === 'north' && centerX < 128 && !showWestDetails) {
+          continue;
+        }
+        if (direction === 'north' && centerX >= 224 && !showEastDetails) {
+          continue;
+        }
+        addPlacement(
+          `detail-${assetId}`,
+          texture,
+          originTileX,
+          originTileY,
+          x + templateShift,
+          y + templateShift,
+          width,
+          height,
+          zIndex,
+          flipX === 1,
+          flipY === 1,
+          direction,
+        );
+      }
+    }
+  }
+
+  for (const placements of rows.values()) {
+    placements.sort((a, b) => a.zIndex - b.zIndex || a.y - b.y || a.x - b.x);
+  }
+  return rows;
 }
 
 function usesGroundBackgroundTile(tileId: number): boolean {
@@ -359,8 +795,10 @@ export class TilemapRenderer {
   /** Shadow overlay chunks. Attach after backgroundLayer. */
   readonly shadowLayer: Container;
 
-  // ── Forest/gate row chunks — add individually for feet-based Y-sorting ─
+  // ── Forest/gate row chunks — attach to the foreground wall layer ──────
   readonly wallRowChunks: Container[] = [];
+  /** Northern tree facades retain normal feet-based sorting with players. */
+  readonly northWallRowChunks: Container[] = [];
 
   // ── Extracted entities — add individually to entityLayer ────────────────
   readonly treeSprites: Sprite[] = [];
@@ -383,6 +821,7 @@ export class TilemapRenderer {
   ) {
     const ts = map.tileSize;
     const renderSimpleHorizontalGates = !assets.frontGateTextures;
+    const forestStyleRows = buildForestStyleRows(map, assets);
 
     this.backgroundLayer = new Container();
     this.shadowLayer = new Container();
@@ -533,11 +972,9 @@ export class TilemapRenderer {
       }
     }
 
-    // ── Step 2: Build hand-authored Fiorwoods tree-wall row chunks ──────
-    // Tree walls are a directional tile assembly, not a scatter of tree
-    // sprites. The eight-row south face, low north hedge, and mirrored side
-    // hedges follow the source Fiorwoods map layouts while retaining this
-    // game's collision grid and Y-sorting behaviour.
+    // ── Step 2: Build JSON-authored Fiorwoods wall row chunks ───────────
+    // Placements come from the inner wall and corner layout in style export
+    // (12). No positional hashing or procedural side-tile selection is used.
     const forestChunkCols = Math.ceil(map.width / FOREST_CHUNK_WIDTH);
 
     for (let y = 0; y < map.height; y++) {
@@ -545,35 +982,9 @@ export class TilemapRenderer {
         const startX = chunkCol * FOREST_CHUNK_WIDTH;
         const endX = Math.min(startX + FOREST_CHUNK_WIDTH, map.width);
         const rowContainer = new Container();
+        const northRowContainer = new Container();
         let hasContent = false;
-
-        const addForestModule = (texture: Texture, localX: number, flipX = false): void => {
-          const module = new Sprite(texture);
-          const moduleHeight = Math.round(texture.height * ts / texture.width);
-          module.anchor.set(flipX ? 1 : 0, 1);
-          module.x = localX + (flipX ? ts : 0);
-          module.y = ts;
-          module.width = ts;
-          module.height = moduleHeight;
-          rowContainer.addChild(module);
-          hasContent = true;
-        };
-
-        const addSizedForestModule = (
-          texture: Texture,
-          localX: number,
-          localY: number,
-          width: number,
-          height: number,
-        ): void => {
-          const module = new Sprite(texture);
-          module.x = localX;
-          module.y = localY;
-          module.width = width;
-          module.height = height;
-          rowContainer.addChild(module);
-          hasContent = true;
-        };
+        let northHasContent = false;
 
         for (let x = startX; x < endX; x++) {
           const tileId = map.data[y * map.width + x];
@@ -591,99 +1002,41 @@ export class TilemapRenderer {
             gateSprite.y = 0;
             gateSprite.width = ts;
             gateSprite.height = ts;
-            rowContainer.addChild(gateSprite);
-            hasContent = true;
+            northRowContainer.addChild(gateSprite);
+            northHasContent = true;
           }
 
-          if (!isForestWallTileId(tileId)) continue;
-
-          const eastOpen = !isForestAt(x + 1, y, map);
-          const westOpen = !isForestAt(x - 1, y, map);
-
-          const insideNorthColumn = getInsideNorthEdgeColumn(x, y, map);
-
-          const insideEastRow = getInsideEastEdgeRow(x, y, map);
-          const edgeStartBelow = getInsideEastEdgeStartBelow(x, y, map);
-          const extendedEastRow = insideEastRow ?? (edgeStartBelow !== null && edgeStartBelow <= 4
-            ? 4 - edgeStartBelow
-            : null);
-          if (extendedEastRow !== null) {
-            const odd = extendedEastRow % 2 === 1;
-            const pair = odd
-              ? assets.forestWallTextures.insideEastOddTextures
-              : assets.forestWallTextures.insideEastEvenTextures;
-            addSizedForestModule(pair[0], localX - (odd ? 3 : 4), 0, odd ? 14 : ts, ts);
-            addSizedForestModule(pair[1], localX + (odd ? 11 : 12), 0, ts, ts);
-          } else if (edgeStartBelow !== null && edgeStartBelow >= 5) {
-            const capRow = assets.forestWallTextures.insideNorthEastCapRows[8 - edgeStartBelow];
-            if (edgeStartBelow === 8) {
-              addSizedForestModule(capRow[0], localX, 6, 11, 10);
-            } else {
-              addSizedForestModule(capRow[0], localX, 0, ts, ts);
-              if (capRow[1]) addSizedForestModule(capRow[1], localX + 12, 0, ts, ts);
-            }
-          }
-
-          const southFaceRow = getSouthForestFaceRow(x, y, map);
-          if (southFaceRow !== null) {
-            // Fiorwoods softens a face/side junction over two rows before the
-            // trunks begin. This avoids a rectangular cutoff where a western
-            // or eastern hedge meets the south-facing tree wall.
-            const sideCorner = westOpen || eastOpen;
-            if (!sideCorner || southFaceRow >= 2) {
-              const faceRow = assets.forestWallTextures.southFaceRows[southFaceRow];
-              addForestModule(faceRow[x % faceRow.length], localX);
-            }
-
-            // The source corner leaves the uppermost cell open and places the
-            // small diagonal hedge cap one row below it. That two-step taper is
-            // what turns the tree front into the rounded side wall shown in the
-            // Fiorwoods layouts.
-            if (sideCorner && southFaceRow === 1) {
-              addForestModule(assets.forestWallTextures.sideHedgeTextures[0], localX, westOpen);
-            }
-
-            if (sideCorner && southFaceRow === 2) {
-              // The transparent triangular module is positioned in the open
-              // neighbour cell, exactly as in the source tilemap stencil.
-              addForestModule(
-                assets.forestWallTextures.southFaceCornerTexture,
-                westOpen ? localX - ts : localX + ts,
-                eastOpen,
-              );
-            }
-
-            // Draw the JSON-authored ground-shadow fringe after the tree face
-            // so its dark pixels are not covered by the facade's bottom row.
-            if (insideNorthColumn !== null) {
-              const texture = assets.forestWallTextures.insideNorthEdgeTextures[insideNorthColumn];
-              const yOffsets = [15, 15, 15, 14, 16, 16];
-              addSizedForestModule(texture, localX, yOffsets[insideNorthColumn], ts, 6);
-            }
-            continue;
-          }
-
-          const northHedgeRow = getNorthForestHedgeRow(x, y, map);
-          if (northHedgeRow !== null) {
-            if (!isNorthHedgeReplacedByInsideCorner(x, y, northHedgeRow, map)) {
-              addForestModule(assets.forestWallTextures.northHedgeRows[
-                northHedgeRow % assets.forestWallTextures.northHedgeRows.length
-              ], localX);
-            }
-            continue;
-          }
-
-          if (eastOpen || westOpen) {
-            if (westOpen) continue;
-            const isVerticalEnd = !isForestAt(x, y - 1, map) || !isForestAt(x, y + 1, map);
-            const sideIndex = isVerticalEnd
-              ? 0
-              : 1 + (positionHash(x, y, 29) % (assets.forestWallTextures.sideHedgeTextures.length - 1));
-            addForestModule(assets.forestWallTextures.sideHedgeTextures[sideIndex], localX, westOpen);
-          }
         }
 
-        if (hasContent) {
+        // Add this row's exact template pieces, preserving the JSON z-order.
+        for (const placement of forestStyleRows.get(y) ?? []) {
+          const chunkLeft = startX * ts;
+          const chunkRight = endX * ts;
+          if (placement.x < chunkLeft || placement.x >= chunkRight) continue;
+
+          const northWall = placement.direction === 'north';
+          const module = new Sprite(placement.texture);
+          module.anchor.set(0.5);
+          module.x = placement.x - chunkLeft + placement.width / 2;
+          module.y = placement.y - y * ts + placement.height / 2;
+          module.width = placement.width;
+          module.height = placement.height;
+          module.scale.x = Math.abs(module.scale.x) * (placement.flipX ? -1 : 1);
+          module.scale.y = Math.abs(module.scale.y) * (placement.flipY ? -1 : 1);
+          (northWall ? northRowContainer : rowContainer).addChild(module);
+          if (northWall) northHasContent = true;
+          else hasContent = true;
+        }
+
+        const bakeRow = (
+          source: Container,
+          content: boolean,
+          destination: Container[],
+        ): void => {
+          if (!content) {
+            source.destroy({ children: true });
+            return;
+          }
           const chunkPixelWidth = (endX - startX) * ts;
           const frame = new Rectangle(
             -FOREST_SIDE_OVERFLOW,
@@ -692,7 +1045,7 @@ export class TilemapRenderer {
             FOREST_CANOPY_OVERFLOW + ts + 48,
           );
           const texture = renderer.generateTexture({
-            target: rowContainer,
+            target: source,
             frame,
             resolution: 1,
             antialias: false,
@@ -704,7 +1057,7 @@ export class TilemapRenderer {
           rowSprite.x = startX * ts - FOREST_SIDE_OVERFLOW;
           rowSprite.y = y * ts - FOREST_CANOPY_OVERFLOW;
           rowSprite.zIndex = (y + 1) * ts;
-          this.wallRowChunks.push(rowSprite);
+          destination.push(rowSprite);
           this.allChunks.push({
             container: rowSprite,
             worldLeft: rowSprite.x,
@@ -713,8 +1066,11 @@ export class TilemapRenderer {
             worldBottom: (y + 4) * ts + 16,
             isVisible: true,
           });
-          rowContainer.destroy({ children: true });
-        }
+          source.destroy({ children: true });
+        };
+
+        bakeRow(rowContainer, hasContent, this.wallRowChunks);
+        bakeRow(northRowContainer, northHasContent, this.northWallRowChunks);
       }
     }
 
@@ -854,6 +1210,11 @@ export class TilemapRenderer {
       chunk.destroy({ children: true });
     }
 
+    for (const chunk of this.northWallRowChunks) {
+      chunk.parent?.removeChild(chunk);
+      chunk.destroy({ children: true });
+    }
+
     for (const tree of this.treeSprites) {
       tree.parent?.removeChild(tree);
       tree.destroy();
@@ -875,6 +1236,7 @@ export class TilemapRenderer {
     }
 
     this.wallRowChunks.length = 0;
+    this.northWallRowChunks.length = 0;
     this.treeSprites.length = 0;
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;

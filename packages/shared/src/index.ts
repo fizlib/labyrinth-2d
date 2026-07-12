@@ -42,6 +42,7 @@ export {
   TILE_PRESSURE_PLATE,
   MAZE_SIZE,
   CELL_SIZE,
+  WALL_SIZE,
   computeSpawnPoints,
   CELL_STEP,
   GRID_CELLS,

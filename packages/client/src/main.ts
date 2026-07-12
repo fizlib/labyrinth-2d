@@ -739,10 +739,15 @@ async function main(): Promise<void> {
   const worldContainer = new Container();
   app.stage.addChild(worldContainer);
 
-  // Entity layer globally Y-sorts players alongside wall row chunks
+  // Dynamic entities retain normal feet-based Y sorting.
   const entityLayer = new Container();
   entityLayer.sortableChildren = true;
   worldContainer.addChild(entityLayer);
+
+  // Forest walls are an unconditional foreground: their canopy and trunks
+  // must always cover player characters, regardless of player Y position.
+  const forestWallLayer = new Container();
+  worldContainer.addChild(forestWallLayer);
 
   let mapPixelW = MAZE_SIZE * TILE_SIZE;
   let mapPixelH = MAZE_SIZE * TILE_SIZE;
@@ -861,17 +866,23 @@ async function main(): Promise<void> {
       cellBoundaryOverlay = createCellBoundaryOverlay();
 
 
-      // Attach layers: background and shadow go before entityLayer,
-      // entityLayer is already a child of worldContainer.
-      // Remove entityLayer, insert layers in order, re-add entityLayer.
+      // Rebuild the fixed layer order. Forest walls remain above every entity.
       worldContainer.removeChild(entityLayer);
+      worldContainer.removeChild(forestWallLayer);
       worldContainer.addChild(tilemapRenderer.backgroundLayer);
       worldContainer.addChild(tilemapRenderer.shadowLayer);
       worldContainer.addChild(entityLayer);
+      worldContainer.addChild(forestWallLayer);
       worldContainer.addChild(cellBoundaryOverlay);
 
-      // Add wall row chunks to entityLayer for Y-sorting with players
+      // Wall chunks intentionally do not participate in player Y-sorting.
       for (const wallChunk of tilemapRenderer.wallRowChunks) {
+        forestWallLayer.addChild(wallChunk);
+      }
+
+      // Northern walls sort naturally with players; only west/east/south
+      // walls belong to the unconditional foreground layer.
+      for (const wallChunk of tilemapRenderer.northWallRowChunks) {
         entityLayer.addChild(wallChunk);
       }
 
