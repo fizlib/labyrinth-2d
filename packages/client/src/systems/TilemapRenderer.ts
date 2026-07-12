@@ -185,6 +185,52 @@ function getNorthForestHedgeRow(x: number, y: number, map: TileMapData): number 
   return null;
 }
 
+function isInsideEastForestEdge(x: number, y: number, map: TileMapData): boolean {
+  return isForestAt(x, y, map) && !isForestAt(x - 1, y, map);
+}
+
+function getInsideEastEdgeRow(x: number, y: number, map: TileMapData): number | null {
+  if (!isInsideEastForestEdge(x, y, map)) return null;
+  let startY = y;
+  while (isInsideEastForestEdge(x, startY - 1, map)) startY--;
+  return y - startY;
+}
+
+function getInsideEastEdgeStartBelow(x: number, y: number, map: TileMapData): number | null {
+  for (let distance = 1; distance <= FOREST_FACE_HEIGHT; distance++) {
+    const edgeY = y + distance;
+    if (isInsideEastForestEdge(x, edgeY, map) && !isInsideEastForestEdge(x, edgeY - 1, map)) {
+      return distance;
+    }
+  }
+  return null;
+}
+
+function getInsideNorthEdgeColumn(x: number, y: number, map: TileMapData): number | null {
+  if (!isForestAt(x, y, map) || isForestAt(x, y + 1, map)) return null;
+  let startX = x;
+  while (isForestAt(startX - 1, y, map) && !isForestAt(startX - 1, y + 1, map)) startX--;
+  const column = x - startX;
+  return column % 6;
+}
+
+function isNorthHedgeReplacedByInsideCorner(
+  x: number,
+  y: number,
+  northHedgeRow: number,
+  map: TileMapData,
+): boolean {
+  const edgeStartY = y - northHedgeRow + FOREST_FACE_HEIGHT;
+  for (let offsetX = 0; offsetX < 4; offsetX++) {
+    const edgeX = x - offsetX;
+    if (isInsideEastForestEdge(edgeX, edgeStartY, map) &&
+        !isInsideEastForestEdge(edgeX, edgeStartY - 1, map)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function getForestGroundTexture(assets: GameAssets): Texture {
   // The source map keeps the space behind the transparent canopy/trunk tiles
   // nearly black. Using the playable grass here caused visible rectangular
@@ -513,6 +559,22 @@ export class TilemapRenderer {
           hasContent = true;
         };
 
+        const addSizedForestModule = (
+          texture: Texture,
+          localX: number,
+          localY: number,
+          width: number,
+          height: number,
+        ): void => {
+          const module = new Sprite(texture);
+          module.x = localX;
+          module.y = localY;
+          module.width = width;
+          module.height = height;
+          rowContainer.addChild(module);
+          hasContent = true;
+        };
+
         for (let x = startX; x < endX; x++) {
           const tileId = map.data[y * map.width + x];
           const localX = (x - startX) * ts;
@@ -537,6 +599,31 @@ export class TilemapRenderer {
 
           const eastOpen = !isForestAt(x + 1, y, map);
           const westOpen = !isForestAt(x - 1, y, map);
+
+          const insideNorthColumn = getInsideNorthEdgeColumn(x, y, map);
+
+          const insideEastRow = getInsideEastEdgeRow(x, y, map);
+          const edgeStartBelow = getInsideEastEdgeStartBelow(x, y, map);
+          const extendedEastRow = insideEastRow ?? (edgeStartBelow !== null && edgeStartBelow <= 4
+            ? 4 - edgeStartBelow
+            : null);
+          if (extendedEastRow !== null) {
+            const odd = extendedEastRow % 2 === 1;
+            const pair = odd
+              ? assets.forestWallTextures.insideEastOddTextures
+              : assets.forestWallTextures.insideEastEvenTextures;
+            addSizedForestModule(pair[0], localX - (odd ? 3 : 4), 0, odd ? 14 : ts, ts);
+            addSizedForestModule(pair[1], localX + (odd ? 11 : 12), 0, ts, ts);
+          } else if (edgeStartBelow !== null && edgeStartBelow >= 5) {
+            const capRow = assets.forestWallTextures.insideNorthEastCapRows[8 - edgeStartBelow];
+            if (edgeStartBelow === 8) {
+              addSizedForestModule(capRow[0], localX, 6, 11, 10);
+            } else {
+              addSizedForestModule(capRow[0], localX, 0, ts, ts);
+              if (capRow[1]) addSizedForestModule(capRow[1], localX + 12, 0, ts, ts);
+            }
+          }
+
           const southFaceRow = getSouthForestFaceRow(x, y, map);
           if (southFaceRow !== null) {
             // Fiorwoods softens a face/side junction over two rows before the
@@ -565,18 +652,29 @@ export class TilemapRenderer {
                 eastOpen,
               );
             }
+
+            // Draw the JSON-authored ground-shadow fringe after the tree face
+            // so its dark pixels are not covered by the facade's bottom row.
+            if (insideNorthColumn !== null) {
+              const texture = assets.forestWallTextures.insideNorthEdgeTextures[insideNorthColumn];
+              const yOffsets = [15, 15, 15, 14, 16, 16];
+              addSizedForestModule(texture, localX, yOffsets[insideNorthColumn], ts, 6);
+            }
             continue;
           }
 
           const northHedgeRow = getNorthForestHedgeRow(x, y, map);
           if (northHedgeRow !== null) {
-            addForestModule(assets.forestWallTextures.northHedgeRows[
-              northHedgeRow % assets.forestWallTextures.northHedgeRows.length
-            ], localX);
+            if (!isNorthHedgeReplacedByInsideCorner(x, y, northHedgeRow, map)) {
+              addForestModule(assets.forestWallTextures.northHedgeRows[
+                northHedgeRow % assets.forestWallTextures.northHedgeRows.length
+              ], localX);
+            }
             continue;
           }
 
           if (eastOpen || westOpen) {
+            if (westOpen) continue;
             const isVerticalEnd = !isForestAt(x, y - 1, map) || !isForestAt(x, y + 1, map);
             const sideIndex = isVerticalEnd
               ? 0

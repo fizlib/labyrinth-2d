@@ -72,6 +72,13 @@ export interface ForestWallTextures {
   southFaceCornerTexture: Texture;
   /** Dark underlay used behind transparent tree-wall modules. */
   interiorTexture: Texture;
+  /** Six-piece grass fringe along the inside base of a northern wall. */
+  insideNorthEdgeTextures: Texture[];
+  /** Alternating two-piece rows forming the inside face of an eastern wall. */
+  insideEastEvenTextures: Texture[];
+  insideEastOddTextures: Texture[];
+  /** Four rows that turn the north wall into the inside eastern wall. */
+  insideNorthEastCapRows: Texture[][];
 }
 
 export interface PlayerAnimationSet {
@@ -195,6 +202,10 @@ export async function loadAssets(): Promise<GameAssets> {
     sideHedgeTextures: [],
     southFaceCornerTexture: Texture.EMPTY,
     interiorTexture: Texture.EMPTY,
+    insideNorthEdgeTextures: [],
+    insideEastEvenTextures: [],
+    insideEastOddTextures: [],
+    insideNorthEastCapRows: [],
   };
   let forestShadowTexture: Texture;
   let shadowTopTexture: Texture;
@@ -423,6 +434,15 @@ export async function loadAssets(): Promise<GameAssets> {
       sideHedgeTextures: await Promise.all([80, 31, 32].map(loadFiorwoodsTile)),
       southFaceCornerTexture: await loadFiorwoodsTile(379),
       interiorTexture: await loadFiorwoodsTile(301),
+      insideNorthEdgeTextures: await Promise.all([440, 441, 442, 443, 438, 439].map(loadFiorwoodsTile)),
+      insideEastEvenTextures: await Promise.all([549, 550].map(loadFiorwoodsTile)),
+      insideEastOddTextures: await Promise.all([599, 600].map(loadFiorwoodsTile)),
+      insideNorthEastCapRows: await Promise.all([
+        [1131],
+        [1181],
+        [1231, 1232],
+        [1281, 1282],
+      ].map((row) => Promise.all(row.map(loadFiorwoodsTile)))),
     };
     // These grass modules are the same ground-family tiles used on Fiorwoods'
     // playable floor layers. They replace the earlier generic green fill.
@@ -437,6 +457,10 @@ export async function loadAssets(): Promise<GameAssets> {
       sideHedgeTextures: forestCanopyTextures.slice(0, 3),
       southFaceCornerTexture: forestCanopyTextures[0],
       interiorTexture: forestGroundTextures[0],
+      insideNorthEdgeTextures: forestCanopyTextures.slice(0, 6),
+      insideEastEvenTextures: forestCanopyTextures.slice(0, 2),
+      insideEastOddTextures: forestCanopyTextures.slice(2, 4),
+      insideNorthEastCapRows: forestCanopyTextures.slice(0, 4).map((texture) => [texture]),
     };
     console.warn('[Assets] Fiorwoods wall modules unavailable — using curated forest fallback');
   }
