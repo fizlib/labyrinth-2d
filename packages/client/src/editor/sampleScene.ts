@@ -3,8 +3,10 @@ import type { EditorCollider, EditorElement, SemanticRole, StyleEditorDocumentV1
 const TILE = 16;
 const CELL_TILES = 6;
 const WALL_TILES = 8;
-const WIDTH_TILES = WALL_TILES * 2 + CELL_TILES;
-const HEIGHT_TILES = WIDTH_TILES;
+const SIZE_TILES = WALL_TILES * 2 + CELL_TILES;
+const SAMPLE_SIZE = SIZE_TILES * TILE;
+const FIORWOODS_ROOT = '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods';
+const SOUTH_FACE_ROW_STARTS = [38, 88, 138, 188, 238, 288, 338, 388];
 let sequence = 0;
 
 function id(prefix: string): string {
@@ -12,142 +14,108 @@ function id(prefix: string): string {
   return `${prefix}-${sequence}`;
 }
 
-function element(
-  name: string,
-  role: SemanticRole,
-  assetPath: string,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  zIndex: number,
-  nativeWidth = width,
-  nativeHeight = height,
-): EditorElement {
+function fiorwoodsAsset(assetId: number): string {
+  return `${FIORWOODS_ROOT}/Sprite_Fiorwoods_${assetId}.png`;
+}
+
+function element(name: string, role: SemanticRole, assetId: number, tileX: number, tileY: number, zIndex: number, flipX = false): EditorElement {
   return {
-    id: id('element'),
-    name,
-    role,
-    assetPath,
-    nativeWidth,
-    nativeHeight,
-    x,
-    y,
-    width,
-    height,
-    zIndex,
-    opacity: 1,
-    flipX: false,
-    flipY: false,
-    visible: true,
+    id: id('element'), name, role, assetPath: fiorwoodsAsset(assetId),
+    nativeWidth: 32, nativeHeight: 32, x: tileX * TILE, y: tileY * TILE,
+    width: TILE, height: TILE, zIndex, opacity: 1, flipX, flipY: false, visible: true,
   };
 }
 
-function collider(
-  name: string,
-  ownerRole: EditorCollider['ownerRole'],
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  ownerId: string | null = null,
-): EditorCollider {
-  return { id: id('collider'), name, ownerId, ownerRole, x, y, width, height, enabled: true };
+function collider(name: string, x: number, y: number, width: number, height: number): EditorCollider {
+  return { id: id('collider'), name, ownerId: null, ownerRole: 'wall.solid', x, y, width, height, enabled: true };
+}
+
+function isWall(x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= SIZE_TILES || y >= SIZE_TILES) return false;
+  const cellStart = WALL_TILES;
+  const cellEnd = cellStart + CELL_TILES;
+  return x < cellStart || x >= cellEnd || y < cellStart || y >= cellEnd;
+}
+
+function southFaceRow(x: number, y: number): number | null {
+  for (let distanceToBase = 0; distanceToBase < WALL_TILES; distanceToBase++) {
+    if (!isWall(x, y + distanceToBase)) return null;
+    if (!isWall(x, y + distanceToBase + 1)) return WALL_TILES - distanceToBase - 1;
+  }
+  return null;
+}
+
+function northHedgeRow(x: number, y: number): number | null {
+  for (let distanceFromTop = 0; distanceFromTop < 3; distanceFromTop++) {
+    if (!isWall(x, y - distanceFromTop)) return null;
+    if (!isWall(x, y - distanceFromTop - 1)) return distanceFromTop;
+  }
+  return null;
 }
 
 export function createSampleDocument(): StyleEditorDocumentV1 {
   sequence = 0;
   const elements: EditorElement[] = [];
   const colliders: EditorCollider[] = [];
-  const canopy = Array.from({ length: 8 }, (_, index) => `/assets/forest/fior_canopy_${index}.png`);
-  const largeTrees = ['/assets/forest/tree_primary_02.png', '/assets/forest/tree_primary_03.png'];
-  const smallTrees = ['/assets/forest/tree_small_04.png', '/assets/forest/tree_small_05.png'];
-  const bushes = [1, 2, 3, 4].map((index) => `/assets/forest/bush_0${index}.png`);
+  const grassIds = [102, 105, 108, 154];
+
+  for (let y = 0; y < SIZE_TILES; y++) {
+    for (let x = 0; x < SIZE_TILES; x++) {
+      if (isWall(x, y)) {
+        elements.push(element(`Forest interior ${x},${y}`, 'ground.forest', 301, x, y, 0));
+      } else {
+        elements.push(element(`Grass ${x},${y}`, 'ground.grass', grassIds[(x * 17 + y * 31) % grassIds.length], x, y, 0));
+      }
+    }
+  }
+
+  for (let y = 0; y < SIZE_TILES; y++) {
+    for (let x = 0; x < SIZE_TILES; x++) {
+      if (!isWall(x, y)) continue;
+      const eastOpen = !isWall(x + 1, y);
+      const westOpen = !isWall(x - 1, y);
+      const faceRow = southFaceRow(x, y);
+
+      if (faceRow !== null) {
+        const sideCorner = eastOpen || westOpen;
+        if (!sideCorner || faceRow >= 2) {
+          elements.push(element(`South face ${x},${y}`, 'wall.canopy', SOUTH_FACE_ROW_STARTS[faceRow] + (x % 6), x, y, 100 + y));
+        }
+        if (sideCorner && faceRow === 1) {
+          elements.push(element(`Side cap ${x},${y}`, 'wall.canopy', 80, x, y, 110 + y, westOpen));
+        }
+        if (sideCorner && faceRow === 2) {
+          elements.push(element(`Rounded face corner ${x},${y}`, 'wall.canopy', 379, westOpen ? x - 1 : x + 1, y, 110 + y, eastOpen));
+        }
+        continue;
+      }
+
+      const hedgeRow = northHedgeRow(x, y);
+      if (hedgeRow !== null) {
+        elements.push(element(`North hedge ${x},${y}`, 'wall.canopy', [381, 382, 380][hedgeRow], x, y, 100 + y));
+      } else if (eastOpen || westOpen) {
+        const verticalEnd = !isWall(x, y - 1) || !isWall(x, y + 1);
+        const assetId = verticalEnd ? 80 : [31, 32][(x * 17 + y * 29) % 2];
+        elements.push(element(`Side hedge ${x},${y}`, 'wall.canopy', assetId, x, y, 100 + y, westOpen));
+      }
+    }
+  }
+
   const wallSize = WALL_TILES * TILE;
   const cellSize = CELL_TILES * TILE;
-  const sampleSize = WIDTH_TILES * TILE;
-  const cellStart = wallSize;
-  const cellEnd = cellStart + cellSize;
-
-  // Five simple ground regions keep the sample readable and make replacing
-  // the cell floor or any wall bed a single operation.
-  elements.push(
-    element('Cell grass', 'ground.grass', '/assets/forest/fior_grass_0.png', cellStart, cellStart, cellSize, cellSize, 0, TILE, TILE),
-    element('North forest ground', 'ground.forest', '/assets/forest/fior_ground_0.png', 0, 0, sampleSize, wallSize, 1, TILE, TILE),
-    element('South forest ground', 'ground.forest', '/assets/forest/fior_ground_1.png', 0, cellEnd, sampleSize, wallSize, 1, TILE, TILE),
-    element('West forest ground', 'ground.forest', '/assets/forest/fior_ground_2.png', 0, cellStart, wallSize, cellSize, 1, TILE, TILE),
-    element('East forest ground', 'ground.forest', '/assets/forest/fior_ground_3.png', cellEnd, cellStart, wallSize, cellSize, 1, TILE, TILE),
-  );
-
-  // These four rectangles are the exact 8-tile wall bands used around a real
-  // 6x6 maze cell. Together they form one uninterrupted solid ring.
+  const cellEnd = wallSize + cellSize;
   colliders.push(
-    collider('North wall collider', 'wall.solid', 0, 0, sampleSize, wallSize),
-    collider('South wall collider', 'wall.solid', 0, cellEnd, sampleSize, wallSize),
-    collider('West wall collider', 'wall.solid', 0, cellStart, wallSize, cellSize),
-    collider('East wall collider', 'wall.solid', cellEnd, cellStart, wallSize, cellSize),
+    collider('North wall collider', 0, 0, SAMPLE_SIZE, wallSize),
+    collider('South wall collider', 0, cellEnd, SAMPLE_SIZE, wallSize),
+    collider('West wall collider', 0, wallSize, wallSize, cellSize),
+    collider('East wall collider', cellEnd, wallSize, wallSize, cellSize),
   );
-
-  const addCanopy = (name: string, x: number, y: number, index: number, zIndex: number): void => {
-    elements.push(element(name, 'wall.canopy', canopy[index % canopy.length], x, y, 34, 34, zIndex));
-  };
-
-  // Canopy modules stay inside their wall bands and sit behind the trunks.
-  for (let x = 8, index = 0; x < sampleSize - 24; x += 32, index++) {
-    addCanopy(`North canopy ${index + 1}`, x, wallSize - 58 - (index % 2) * 6, index, 20);
-    addCanopy(`South canopy ${index + 1}`, x, cellEnd + 18 + (index % 2) * 5, index + 3, 20);
-  }
-  for (let y = cellStart + 4, index = 0; y < cellEnd - 24; y += 32, index++) {
-    addCanopy(`West canopy ${index + 1}`, wallSize - 58 - (index % 2) * 5, y, index + 5, 21 + y);
-    addCanopy(`East canopy ${index + 1}`, cellEnd + 18 + (index % 2) * 5, y, index + 1, 21 + y);
-  }
-
-  const addTree = (
-    name: string,
-    role: 'tree.large' | 'tree.small',
-    assetPath: string,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    zIndex: number,
-  ): void => {
-    elements.push(element(`${name} shadow`, 'shadow', '/assets/forest/tree_shadow.png', x + width * 0.18, y + height - 16, width * 0.64, 18, zIndex - 1));
-    elements.push(element(name, role, assetPath, x, y, width, height, zIndex));
-  };
-
-  // The north face ends at y=128. The south trees begin at y=224, keeping
-  // their crowns out of the 96px walkable cell exactly as requested.
-  for (let x = 10, index = 0; x < sampleSize - 55; x += 54, index++) {
-    addTree(`North large tree ${index + 1}`, 'tree.large', largeTrees[index % 2], x, wallSize - 96, 70, 96, 120 + index);
-    addTree(`South large tree ${index + 1}`, 'tree.large', largeTrees[(index + 1) % 2], x + 5, cellEnd + 8, 70, 96, 320 + index);
-  }
-
-  addTree('West small tree 1', 'tree.small', smallTrees[0], 54, cellStart + 6, 38, 58, 190);
-  addTree('West small tree 2', 'tree.small', smallTrees[1], 72, cellStart + 43, 38, 58, 230);
-  addTree('East small tree 1', 'tree.small', smallTrees[1], cellEnd + 34, cellStart + 5, 38, 58, 190);
-  addTree('East small tree 2', 'tree.small', smallTrees[0], cellEnd + 54, cellStart + 42, 38, 58, 230);
-
-  const bushPositions = [
-    ['North bush 1', 104, wallSize - 25, 0],
-    ['North bush 2', 218, wallSize - 24, 1],
-    ['South bush 1', 94, cellEnd + 8, 2],
-    ['South bush 2', 232, cellEnd + 10, 3],
-    ['West bush', wallSize - 28, cellStart + 35, 1],
-    ['East bush', cellEnd + 6, cellStart + 35, 2],
-  ] as const;
-  for (const [name, x, y, variant] of bushPositions) {
-    elements.push(element(name, 'bush', bushes[variant], x, y, 28, 26, 400 + y));
-  }
 
   const now = new Date().toISOString();
   return {
-    version: 1,
-    createdAt: now,
-    updatedAt: now,
-    sample: { name: 'Single Maze Cell — 6×6 Floor + 8-Tile Forest Walls', width: sampleSize, height: HEIGHT_TILES * TILE, tileSize: TILE },
-    notes: 'This sample matches one live maze cell: a 6×6-tile walkable floor enclosed by 8-tile solid forest-wall bands.',
-    elements,
-    colliders,
+    version: 1, createdAt: now, updatedAt: now,
+    sample: { name: 'Current Fiorwoods Maze Cell', width: SAMPLE_SIZE, height: SAMPLE_SIZE, tileSize: TILE },
+    notes: 'Matches the current in-game maze cell: Fiorwoods grass, dark forest interiors, an 8-row south tree face, a 3-row north hedge, and directional side hedges.',
+    elements, colliders,
   };
 }

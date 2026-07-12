@@ -95,15 +95,15 @@ world.addChild(sceneLayer, colliderLayer, overlayLayer);
 app.stage.addChild(world);
 
 const selectionFrame = new Graphics();
-const resizeHandle = new Graphics().rect(-5, -5, 10, 10).fill(0xffdf68).stroke({ color: 0x18120a, width: 1 });
+const resizeHandle = new Graphics().rect(-3, -3, 6, 6).fill({ color: 0xffdf68, alpha: 0.5 }).stroke({ color: 0x18120a, width: 0.5, alpha: 0.5 });
 const selectionLabel = new Text({ text: '', style: { fill: 0xfff1a8, fontSize: 12, fontFamily: 'Consolas' } });
 resizeHandle.eventMode = 'static';
 resizeHandle.cursor = 'nwse-resize';
 overlayLayer.addChild(selectionFrame, selectionLabel, resizeHandle);
 
 let documentState = loadLocalDocument() ?? createSampleDocument();
-let selectedElementId: string | null = null;
-let selectedColliderId: string | null = null;
+const selectedElementIds = new Set<string>();
+const selectedColliderIds = new Set<string>();
 let selectedAsset: AssetCatalogEntry | null = null;
 let currentTool: EditorTool = 'select';
 let currentSnap = 1;
@@ -123,8 +123,16 @@ interface InteractionState {
   startY: number;
   startWidth: number;
   startHeight: number;
+  /** Start positions for all selected items during multi-move */
+  startPositions: Map<string, { x: number; y: number }>;
 }
 let interaction: InteractionState | null = null;
+
+interface ClipboardData {
+  elements: EditorElement[];
+  colliders: EditorCollider[];
+}
+let clipboard: ClipboardData | null = null;
 
 const catalogQuery: CatalogQuery = { q: '', category: '', collection: '', source: '', offset: 0, limit: PAGE_SIZE };
 let catalogResultTotal = 0;
@@ -141,12 +149,26 @@ function loadLocalDocument(): StyleEditorDocumentV1 | null {
   }
 }
 
+/** Returns the single selected element when exactly one is selected, or null otherwise. */
 function selectedElement(): EditorElement | null {
-  return documentState.elements.find((element) => element.id === selectedElementId) ?? null;
+  if (selectedElementIds.size !== 1) return null;
+  const id = selectedElementIds.values().next().value as string;
+  return documentState.elements.find((element) => element.id === id) ?? null;
 }
 
+/** Returns the single selected collider when exactly one is selected, or null otherwise. */
 function selectedCollider(): EditorCollider | null {
-  return documentState.colliders.find((collider) => collider.id === selectedColliderId) ?? null;
+  if (selectedColliderIds.size !== 1) return null;
+  const id = selectedColliderIds.values().next().value as string;
+  return documentState.colliders.find((collider) => collider.id === id) ?? null;
+}
+
+function selectedElements(): EditorElement[] {
+  return documentState.elements.filter((element) => selectedElementIds.has(element.id));
+}
+
+function selectedColliders(): EditorCollider[] {
+  return documentState.colliders.filter((collider) => selectedColliderIds.has(collider.id));
 }
 
 function snap(value: number, size = currentSnap): number {
@@ -182,8 +204,8 @@ function restoreHistory(index: number): void {
   if (index < 0 || index >= history.length) return;
   historyIndex = index;
   documentState = JSON.parse(history[index]) as StyleEditorDocumentV1;
-  selectedElementId = null;
-  selectedColliderId = null;
+  selectedElementIds.clear();
+  selectedColliderIds.clear();
   void rebuildScene();
   scheduleAutosave();
   updateHistoryButtons();
@@ -247,7 +269,7 @@ function rebuildColliders(): void {
   colliderGraphicById.clear();
   for (const collider of documentState.colliders) {
     if (!collider.enabled) continue;
-    const selected = collider.id === selectedColliderId;
+    const selected = selectedColliderIds.has(collider.id);
     const graphic = new Graphics()
       .rect(collider.x, collider.y, collider.width, collider.height)
       .fill({ color: selected ? 0xff9f2f : 0xff2222, alpha: selected ? 0.12 : 0.035 })
@@ -262,8 +284,25 @@ function rebuildColliders(): void {
 }
 
 function setSelection(elementId: string | null, colliderId: string | null): void {
-  selectedElementId = elementId;
-  selectedColliderId = colliderId;
+  selectedElementIds.clear();
+  selectedColliderIds.clear();
+  if (elementId) selectedElementIds.add(elementId);
+  if (colliderId) selectedColliderIds.add(colliderId);
+  rebuildColliders();
+  updateSelectionOverlay();
+  renderInspector();
+  renderLayers();
+}
+
+function addToSelection(elementId: string | null, colliderId: string | null): void {
+  if (elementId) {
+    if (selectedElementIds.has(elementId)) selectedElementIds.delete(elementId);
+    else selectedElementIds.add(elementId);
+  }
+  if (colliderId) {
+    if (selectedColliderIds.has(colliderId)) selectedColliderIds.delete(colliderId);
+    else selectedColliderIds.add(colliderId);
+  }
   rebuildColliders();
   updateSelectionOverlay();
   renderInspector();
@@ -272,22 +311,61 @@ function setSelection(elementId: string | null, colliderId: string | null): void
 
 function updateSelectionOverlay(): void {
   selectionFrame.clear();
-  const element = selectedElement();
-  const collider = selectedCollider();
-  if (element) {
-    selectionFrame.rect(element.x, element.y, element.width, element.height).stroke({ color: 0xffdf68, width: 2 });
+  const elements = selectedElements();
+  const colliders = selectedColliders();
+  const totalCount = elements.length + colliders.length;
+
+  if (totalCount === 0) {
+    resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = false;
+    return;
+  }
+
+  // Compute bounding box across all selected items
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const el of elements) {
+    minX = Math.min(minX, el.x);
+    minY = Math.min(minY, el.y);
+    maxX = Math.max(maxX, el.x + el.width);
+    maxY = Math.max(maxY, el.y + el.height);
+  }
+  for (const col of colliders) {
+    minX = Math.min(minX, col.x);
+    minY = Math.min(minY, col.y);
+    maxX = Math.max(maxX, col.x + col.width);
+    maxY = Math.max(maxY, col.y + col.height);
+  }
+
+  const isMulti = totalCount > 1;
+  const color = colliders.length > 0 && elements.length === 0 ? 0xffa73d : 0xffdf68;
+  selectionFrame.rect(minX, minY, maxX - minX, maxY - minY).stroke({ color, width: 1, alpha: 0.6 });
+
+  // Draw individual frames for each item in multi-select
+  if (isMulti) {
+    for (const el of elements) {
+      selectionFrame.rect(el.x, el.y, el.width, el.height).stroke({ color: 0xffdf68, width: 0.5, alpha: 0.35 });
+    }
+    for (const col of colliders) {
+      selectionFrame.rect(col.x, col.y, col.width, col.height).stroke({ color: 0xffa73d, width: 0.5, alpha: 0.35 });
+    }
+  }
+
+  if (isMulti) {
+    selectionLabel.text = `${totalCount} items selected`;
+    selectionLabel.position.set(minX, Math.max(0, minY - 18));
+    resizeHandle.visible = false;
+    selectionLabel.visible = selectionFrame.visible = true;
+  } else if (elements.length === 1) {
+    const element = elements[0];
     resizeHandle.position.set(element.x + element.width, element.y + element.height);
     selectionLabel.text = `${Math.round(element.width)}×${Math.round(element.height)} px`;
     selectionLabel.position.set(element.x, Math.max(0, element.y - 18));
     resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = true;
-  } else if (collider) {
-    selectionFrame.rect(collider.x, collider.y, collider.width, collider.height).stroke({ color: 0xffa73d, width: 2 });
+  } else {
+    const collider = colliders[0];
     resizeHandle.position.set(collider.x + collider.width, collider.y + collider.height);
     selectionLabel.text = `Collider ${Math.round(collider.width)}×${Math.round(collider.height)} px`;
     selectionLabel.position.set(collider.x, Math.max(0, collider.y - 18));
     resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = true;
-  } else {
-    resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = false;
   }
 }
 
@@ -295,7 +373,20 @@ function worldPoint(event: FederatedPointerEvent): { x: number; y: number } {
   return world.toLocal(event.global);
 }
 
+function startPan(event: FederatedPointerEvent): void {
+  event.stopPropagation();
+  interaction = {
+    kind: 'pan', startGlobalX: event.global.x, startGlobalY: event.global.y,
+    startX: world.x, startY: world.y, startWidth: 0, startHeight: 0,
+    startPositions: new Map(),
+  };
+}
+
 function onElementPointerDown(event: FederatedPointerEvent, id: string): void {
+  if (event.button === 2) {
+    startPan(event);
+    return;
+  }
   if (currentTool === 'erase') {
     event.stopPropagation();
     removeElement(id);
@@ -313,16 +404,49 @@ function onElementPointerDown(event: FederatedPointerEvent, id: string): void {
   }
   if (currentTool !== 'select') return;
   event.stopPropagation();
-  setSelection(id, null);
-  const element = selectedElement();
-  if (!element) return;
+
+  // If the clicked element is not selected but a selected element exists under the cursor,
+  // prefer the selected element so that dragging an already-selected item isn't hijacked
+  // by an overlapping background element.
+  let effectiveId = id;
+  if (!selectedElementIds.has(id) && !(event.ctrlKey || event.metaKey) && selectedElementIds.size > 0) {
+    const point = worldPoint(event);
+    for (const selId of selectedElementIds) {
+      const el = documentState.elements.find((e) => e.id === selId);
+      if (el && point.x >= el.x && point.x <= el.x + el.width && point.y >= el.y && point.y <= el.y + el.height) {
+        effectiveId = selId;
+        break;
+      }
+    }
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    addToSelection(effectiveId, null);
+  } else if (!selectedElementIds.has(effectiveId)) {
+    setSelection(effectiveId, null);
+  }
+
+  // Build start positions for all selected elements
+  const startPositions = new Map<string, { x: number; y: number }>();
+  for (const elId of selectedElementIds) {
+    const el = documentState.elements.find((e) => e.id === elId);
+    if (el) startPositions.set(elId, { x: el.x, y: el.y });
+  }
+
+  const clickedElement = documentState.elements.find((e) => e.id === effectiveId);
+  if (!clickedElement) return;
   interaction = {
     kind: 'element-move', startGlobalX: event.global.x, startGlobalY: event.global.y,
-    startX: element.x, startY: element.y, startWidth: element.width, startHeight: element.height,
+    startX: clickedElement.x, startY: clickedElement.y, startWidth: clickedElement.width, startHeight: clickedElement.height,
+    startPositions,
   };
 }
 
 function onColliderPointerDown(event: FederatedPointerEvent, id: string): void {
+  if (event.button === 2) {
+    startPan(event);
+    return;
+  }
   if (currentTool === 'erase') {
     event.stopPropagation();
     documentState.colliders = documentState.colliders.filter((collider) => collider.id !== id);
@@ -332,16 +456,34 @@ function onColliderPointerDown(event: FederatedPointerEvent, id: string): void {
   }
   if (currentTool !== 'select' && currentTool !== 'collider') return;
   event.stopPropagation();
-  setSelection(null, id);
-  const collider = selectedCollider();
-  if (!collider) return;
+
+  if (event.ctrlKey || event.metaKey) {
+    addToSelection(null, id);
+  } else if (!selectedColliderIds.has(id)) {
+    setSelection(null, id);
+  }
+
+  // Build start positions for all selected colliders
+  const startPositions = new Map<string, { x: number; y: number }>();
+  for (const colId of selectedColliderIds) {
+    const col = documentState.colliders.find((c) => c.id === colId);
+    if (col) startPositions.set(colId, { x: col.x, y: col.y });
+  }
+
+  const clickedCollider = documentState.colliders.find((c) => c.id === id);
+  if (!clickedCollider) return;
   interaction = {
     kind: 'collider-move', startGlobalX: event.global.x, startGlobalY: event.global.y,
-    startX: collider.x, startY: collider.y, startWidth: collider.width, startHeight: collider.height,
+    startX: clickedCollider.x, startY: clickedCollider.y, startWidth: clickedCollider.width, startHeight: clickedCollider.height,
+    startPositions,
   };
 }
 
 resizeHandle.on('pointerdown', (event: FederatedPointerEvent) => {
+  if (event.button === 2) {
+    startPan(event);
+    return;
+  }
   event.stopPropagation();
   const element = selectedElement();
   const collider = selectedCollider();
@@ -349,22 +491,21 @@ resizeHandle.on('pointerdown', (event: FederatedPointerEvent) => {
     interaction = {
       kind: 'element-resize', startGlobalX: event.global.x, startGlobalY: event.global.y,
       startX: element.x, startY: element.y, startWidth: element.width, startHeight: element.height,
+      startPositions: new Map(),
     };
   } else if (collider) {
     interaction = {
       kind: 'collider-resize', startGlobalX: event.global.x, startGlobalY: event.global.y,
       startX: collider.x, startY: collider.y, startWidth: collider.width, startHeight: collider.height,
+      startPositions: new Map(),
     };
   }
 });
 
 app.stage.on('pointerdown', (event: FederatedPointerEvent) => {
   host.focus();
-  if (event.button === 1 || currentTool === 'pan') {
-    interaction = {
-      kind: 'pan', startGlobalX: event.global.x, startGlobalY: event.global.y,
-      startX: world.x, startY: world.y, startWidth: 0, startHeight: 0,
-    };
+  if (event.button === 1 || event.button === 2 || currentTool === 'pan') {
+    startPan(event);
     return;
   }
   const point = worldPoint(event);
@@ -382,26 +523,40 @@ app.stage.on('pointermove', (event: FederatedPointerEvent) => {
     world.position.set(interaction.startX + event.global.x - interaction.startGlobalX, interaction.startY + event.global.y - interaction.startGlobalY);
     return;
   }
-  const element = selectedElement();
-  const collider = selectedCollider();
-  if (interaction.kind === 'element-move' && element) {
-    element.x = snap(interaction.startX + dx);
-    element.y = snap(interaction.startY + dy);
-    const sprite = spriteById.get(element.id);
-    if (sprite) applyElementToSprite(element, sprite);
-  } else if (interaction.kind === 'element-resize' && element) {
-    element.width = Math.max(1, snap(interaction.startWidth + dx));
-    element.height = Math.max(1, snap(interaction.startHeight + dy));
-    const sprite = spriteById.get(element.id);
-    if (sprite) applyElementToSprite(element, sprite);
-  } else if (interaction.kind === 'collider-move' && collider) {
-    collider.x = snap(interaction.startX + dx);
-    collider.y = snap(interaction.startY + dy);
+  if (interaction.kind === 'element-move') {
+    // Move all selected elements
+    for (const [elId, startPos] of interaction.startPositions) {
+      const el = documentState.elements.find((e) => e.id === elId);
+      if (!el) continue;
+      el.x = snap(startPos.x + dx);
+      el.y = snap(startPos.y + dy);
+      const sprite = spriteById.get(el.id);
+      if (sprite) applyElementToSprite(el, sprite);
+    }
+  } else if (interaction.kind === 'element-resize') {
+    const element = selectedElement();
+    if (element) {
+      element.width = Math.max(1, snap(interaction.startWidth + dx));
+      element.height = Math.max(1, snap(interaction.startHeight + dy));
+      const sprite = spriteById.get(element.id);
+      if (sprite) applyElementToSprite(element, sprite);
+    }
+  } else if (interaction.kind === 'collider-move') {
+    // Move all selected colliders
+    for (const [colId, startPos] of interaction.startPositions) {
+      const col = documentState.colliders.find((c) => c.id === colId);
+      if (!col) continue;
+      col.x = snap(startPos.x + dx);
+      col.y = snap(startPos.y + dy);
+    }
     rebuildColliders();
-  } else if (interaction.kind === 'collider-resize' && collider) {
-    collider.width = Math.max(1, snap(interaction.startWidth + dx));
-    collider.height = Math.max(1, snap(interaction.startHeight + dy));
-    rebuildColliders();
+  } else if (interaction.kind === 'collider-resize') {
+    const collider = selectedCollider();
+    if (collider) {
+      collider.width = Math.max(1, snap(interaction.startWidth + dx));
+      collider.height = Math.max(1, snap(interaction.startHeight + dy));
+      rebuildColliders();
+    }
   }
   updateSelectionOverlay();
   renderInspector();
@@ -415,6 +570,7 @@ const finishInteraction = (): void => {
 };
 app.stage.on('pointerup', finishInteraction);
 app.stage.on('pointerupoutside', finishInteraction);
+host.addEventListener('contextmenu', (event) => event.preventDefault());
 
 function inferredRole(asset: AssetCatalogEntry): SemanticRole {
   if (asset.category === 'Trees') return 'tree.small';
@@ -477,28 +633,105 @@ function addColliderAt(point: { x: number; y: number }): void {
 function removeElement(id: string): void {
   documentState.elements = documentState.elements.filter((element) => element.id !== id);
   documentState.colliders = documentState.colliders.filter((collider) => collider.ownerId !== id);
-  setSelection(null, null);
+  selectedElementIds.delete(id);
   commitHistory();
   void rebuildScene();
 }
 
 function deleteSelection(): void {
-  const element = selectedElement();
-  const collider = selectedCollider();
-  if (element) removeElement(element.id);
-  else if (collider) {
-    documentState.colliders = documentState.colliders.filter((item) => item.id !== collider.id);
-    setSelection(null, null);
-    commitHistory();
-  }
+  const elements = selectedElements();
+  const colliders = selectedColliders();
+  if (elements.length === 0 && colliders.length === 0) return;
+
+  const elementIdsToRemove = new Set(elements.map((el) => el.id));
+  documentState.elements = documentState.elements.filter((el) => !elementIdsToRemove.has(el.id));
+  // Also remove colliders owned by the deleted elements
+  documentState.colliders = documentState.colliders.filter((col) => !elementIdsToRemove.has(col.ownerId ?? ''));
+
+  const colliderIdsToRemove = new Set(colliders.map((col) => col.id));
+  documentState.colliders = documentState.colliders.filter((col) => !colliderIdsToRemove.has(col.id));
+
+  setSelection(null, null);
+  commitHistory();
+  void rebuildScene();
 }
 
 function duplicateSelection(): void {
-  const element = selectedElement();
-  if (!element) return;
-  const copy = { ...element, id: createEditorId(), name: `${element.name} copy`, x: element.x + currentSnap * 4, y: element.y + currentSnap * 4 };
-  documentState.elements.push(copy);
-  setSelection(copy.id, null);
+  const elements = selectedElements();
+  const colliders = selectedColliders();
+  if (elements.length === 0 && colliders.length === 0) return;
+
+  const offset = currentSnap * 4;
+  const newElementIds = new Set<string>();
+  const newColliderIds = new Set<string>();
+
+  for (const element of elements) {
+    const copy = { ...element, id: createEditorId(), name: `${element.name} copy`, x: element.x + offset, y: element.y + offset };
+    documentState.elements.push(copy);
+    newElementIds.add(copy.id);
+  }
+  for (const collider of colliders) {
+    const copy = { ...collider, id: createEditorId(), name: `${collider.name} copy`, x: collider.x + offset, y: collider.y + offset };
+    documentState.colliders.push(copy);
+    newColliderIds.add(copy.id);
+  }
+
+  selectedElementIds.clear();
+  selectedColliderIds.clear();
+  for (const id of newElementIds) selectedElementIds.add(id);
+  for (const id of newColliderIds) selectedColliderIds.add(id);
+
+  rebuildColliders();
+  updateSelectionOverlay();
+  renderInspector();
+  renderLayers();
+  commitHistory();
+  void rebuildScene();
+}
+
+function copySelection(): void {
+  const elements = selectedElements();
+  const colliders = selectedColliders();
+  if (elements.length === 0 && colliders.length === 0) return;
+  clipboard = {
+    elements: elements.map((el) => ({ ...el })),
+    colliders: colliders.map((col) => ({ ...col })),
+  };
+}
+
+function pasteClipboard(): void {
+  if (!clipboard || (clipboard.elements.length === 0 && clipboard.colliders.length === 0)) return;
+
+  const offset = currentSnap * 4;
+  const newElementIds = new Set<string>();
+  const newColliderIds = new Set<string>();
+  const oldToNewId = new Map<string, string>();
+
+  for (const element of clipboard.elements) {
+    const newId = createEditorId();
+    oldToNewId.set(element.id, newId);
+    const copy = { ...element, id: newId, x: element.x + offset, y: element.y + offset };
+    documentState.elements.push(copy);
+    newElementIds.add(newId);
+  }
+  for (const collider of clipboard.colliders) {
+    const newId = createEditorId();
+    // Remap ownerId if it was part of the pasted set
+    const newOwnerId = collider.ownerId ? (oldToNewId.get(collider.ownerId) ?? collider.ownerId) : null;
+    const copy = { ...collider, id: newId, ownerId: newOwnerId, x: collider.x + offset, y: collider.y + offset };
+    documentState.colliders.push(copy);
+    newColliderIds.add(newId);
+  }
+
+  selectedElementIds.clear();
+  selectedColliderIds.clear();
+  for (const id of newElementIds) selectedElementIds.add(id);
+  for (const id of newColliderIds) selectedColliderIds.add(id);
+
+  rebuildColliders();
+  updateSelectionOverlay();
+  renderInspector();
+  renderLayers();
   commitHistory();
   void rebuildScene();
 }
@@ -550,11 +783,19 @@ function setTool(tool: EditorTool): void {
 function renderInspector(): void {
   const element = selectedElement();
   const collider = selectedCollider();
-  elementInspector.classList.toggle('disabled', !element);
-  colliderInspector.classList.toggle('disabled', !collider);
-  selectionKind.textContent = element ? element.role : collider ? 'Collider' : 'Nothing selected';
+  const totalSelected = selectedElementIds.size + selectedColliderIds.size;
+  const isMulti = totalSelected > 1;
 
-  if (element) {
+  elementInspector.classList.toggle('disabled', !element || isMulti);
+  colliderInspector.classList.toggle('disabled', !collider || isMulti);
+
+  if (isMulti) {
+    selectionKind.textContent = `${totalSelected} items selected`;
+  } else {
+    selectionKind.textContent = element ? element.role : collider ? 'Collider' : 'Nothing selected';
+  }
+
+  if (element && !isMulti) {
     required<HTMLInputElement>('prop-name').value = element.name;
     required<HTMLSelectElement>('prop-role').value = element.role;
     required<HTMLInputElement>('prop-x').value = String(Math.round(element.x));
@@ -569,7 +810,7 @@ function renderInspector(): void {
     required<HTMLDivElement>('dimension-readout').textContent = `Native ${element.nativeWidth}×${element.nativeHeight}px · Rendered ${Math.round(element.width)}×${Math.round(element.height)}px · Position ${Math.round(element.x)}, ${Math.round(element.y)}`;
     required<HTMLDivElement>('asset-path-readout').textContent = element.assetPath;
   }
-  if (collider) {
+  if (collider && !isMulti) {
     required<HTMLInputElement>('collider-name').value = collider.name;
     required<HTMLInputElement>('collider-role').value = collider.ownerRole;
     required<HTMLInputElement>('collider-x').value = String(Math.round(collider.x));
@@ -588,13 +829,19 @@ function renderLayers(): void {
   groundSummary.innerHTML = `<span>Ground tiles</span><small>${groundCount}</small>`;
   layerList.appendChild(groundSummary);
   const items = documentState.elements
-    .filter((element) => !element.role.startsWith('ground.') || element.id === selectedElementId)
+    .filter((element) => !element.role.startsWith('ground.') || selectedElementIds.has(element.id))
     .sort((a, b) => b.zIndex - a.zIndex || a.name.localeCompare(b.name));
   for (const element of items) {
     const button = document.createElement('button');
-    button.className = `layer-item${element.id === selectedElementId ? ' selected' : ''}`;
+    button.className = `layer-item${selectedElementIds.has(element.id) ? ' selected' : ''}`;
     button.innerHTML = `<span>${escapeHtml(element.name)}</span><small>${element.role} · ${element.zIndex}</small>`;
-    button.addEventListener('click', () => setSelection(element.id, null));
+    button.addEventListener('click', (event) => {
+      if (event.ctrlKey || event.metaKey) {
+        addToSelection(element.id, null);
+      } else {
+        setSelection(element.id, null);
+      }
+    });
     layerList.appendChild(button);
   }
 }
@@ -791,8 +1038,8 @@ async function importDocument(file: File): Promise<void> {
     raw = new TextDecoder().decode(bytes);
   }
   documentState = validateDocument(JSON.parse(raw));
-  selectedElementId = null;
-  selectedColliderId = null;
+  selectedElementIds.clear();
+  selectedColliderIds.clear();
   history.splice(0, history.length, JSON.stringify(documentState));
   historyIndex = 0;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
@@ -811,7 +1058,7 @@ required<HTMLButtonElement>('delete-selection').addEventListener('click', delete
 required<HTMLButtonElement>('reset-document').addEventListener('click', () => {
   if (!window.confirm('Reset the editor sample and discard the current local layout?')) return;
   documentState = createSampleDocument();
-  selectedElementId = null; selectedColliderId = null;
+  selectedElementIds.clear(); selectedColliderIds.clear();
   history.splice(0, history.length, JSON.stringify(documentState)); historyIndex = 0;
   notesField.value = '';
   void rebuildScene().then(fitWorld);
@@ -839,16 +1086,27 @@ window.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); restoreHistory(historyIndex - 1); return; }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); restoreHistory(historyIndex + 1); return; }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection(); return; }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteClipboard(); return; }
   if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
   const directions: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   const direction = directions[event.key];
   if (!direction) return;
   const amount = event.shiftKey ? 8 : currentSnap;
-  const element = selectedElement();
-  const collider = selectedCollider();
-  if (element) { element.x += direction[0] * amount; element.y += direction[1] * amount; const sprite = spriteById.get(element.id); if (sprite) applyElementToSprite(element, sprite); }
-  else if (collider) { collider.x += direction[0] * amount; collider.y += direction[1] * amount; rebuildColliders(); }
-  else return;
+  const elements = selectedElements();
+  const colliders = selectedColliders();
+  if (elements.length === 0 && colliders.length === 0) return;
+  for (const element of elements) {
+    element.x += direction[0] * amount;
+    element.y += direction[1] * amount;
+    const sprite = spriteById.get(element.id);
+    if (sprite) applyElementToSprite(element, sprite);
+  }
+  for (const collider of colliders) {
+    collider.x += direction[0] * amount;
+    collider.y += direction[1] * amount;
+  }
+  if (colliders.length > 0) rebuildColliders();
   event.preventDefault(); updateSelectionOverlay(); renderInspector(); commitHistory();
 });
 

@@ -56,6 +56,24 @@ export interface DirtTextures {
   northWest: Texture;
 }
 
+/**
+ * Fiorwoods tree-wall modules. The original maps build a south-facing tree
+ * facade from eight 32px rows, with a separate low hedge treatment for the
+ * other exposed sides of a forest mass.
+ */
+export interface ForestWallTextures {
+  /** Top-to-bottom rows of the full tree face; every row has six repeatable columns. */
+  southFaceRows: Texture[][];
+  /** Top-to-bottom foliage rows for a north-facing hedge. */
+  northHedgeRows: Texture[];
+  /** Foliage tiles for a vertical exposed side. Mirror them for the opposite side. */
+  sideHedgeTextures: Texture[];
+  /** Triangular canopy transition that rounds a side hedge into a tree face. */
+  southFaceCornerTexture: Texture;
+  /** Dark underlay used behind transparent tree-wall modules. */
+  interiorTexture: Texture;
+}
+
 export interface PlayerAnimationSet {
   animations: Record<string, Texture[]>;
   /** Animation keys whose source frames should be mirrored horizontally. */
@@ -120,6 +138,8 @@ export interface GameAssets {
   forestGroundTextures: Texture[];
   /** Mossy path tiles using the same transition contract as dirtTextures. */
   forestPathTextures: DirtTextures;
+  /** Directional Fiorwoods modules used to assemble the labyrinth's tree walls. */
+  forestWallTextures: ForestWallTextures;
   /** Soft oval contact shadow rendered beneath forest vegetation. */
   forestShadowTexture: Texture;
   /** Shadow overlay for tiles directly below a north wall. */
@@ -169,6 +189,13 @@ export async function loadAssets(): Promise<GameAssets> {
   let forestUnderstoryTextures: Texture[] = [];
   let forestGroundTextures: Texture[] = [];
   let forestPathTextures = createFallbackDirtTextures();
+  let forestWallTextures: ForestWallTextures = {
+    southFaceRows: [],
+    northHedgeRows: [],
+    sideHedgeTextures: [],
+    southFaceCornerTexture: Texture.EMPTY,
+    interiorTexture: Texture.EMPTY,
+  };
   let forestShadowTexture: Texture;
   let shadowTopTexture: Texture;
   let shadowLeftTexture: Texture;
@@ -369,6 +396,49 @@ export async function loadAssets(): Promise<GameAssets> {
     forestGroundTextures = [floorShadowTexture, floorShadowTexture, floorShadowTexture, floorShadowTexture];
     forestPathTextures = dirtTextures;
     forestShadowTexture = generateShadowCornerTexture();
+  }
+
+  // Fiorwoods uses hand-authored 32px wall modules rather than a random
+  // scattering of trees. Keep them in the source library so the module names
+  // and placement match the extracted map layouts exactly.
+  try {
+    const fiorwoodsRoot = 'assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods';
+    const loadFiorwoodsTile = async (id: number): Promise<Texture> => {
+      const texture = await Assets.load<Texture>(`${fiorwoodsRoot}/Sprite_Fiorwoods_${id}.png`);
+      texture.source.scaleMode = 'nearest';
+      return texture;
+    };
+    const faceRowStarts = [38, 88, 138, 188, 238, 288, 338, 388];
+    forestWallTextures = {
+      southFaceRows: await Promise.all(
+        faceRowStarts.map((start) =>
+          Promise.all(Array.from({ length: 6 }, (_, column) => loadFiorwoodsTile(start + column))),
+        ),
+      ),
+      // The three modules are the bright crown, dark leaf underside, and
+      // deep canopy that Fiorwoods stacks on its north-facing tree edges.
+      northHedgeRows: await Promise.all([381, 382, 380].map(loadFiorwoodsTile)),
+      // 80 is the cap; 31/32 are the paired, vertical hedge modules used on
+      // the east and west sides of Fiorwoods clearings.
+      sideHedgeTextures: await Promise.all([80, 31, 32].map(loadFiorwoodsTile)),
+      southFaceCornerTexture: await loadFiorwoodsTile(379),
+      interiorTexture: await loadFiorwoodsTile(301),
+    };
+    // These grass modules are the same ground-family tiles used on Fiorwoods'
+    // playable floor layers. They replace the earlier generic green fill.
+    grassVariantTextures = await Promise.all([102, 105, 108, 154].map(loadFiorwoodsTile));
+    console.info('[Assets] Loaded Fiorwoods terrain and directional tree-wall modules');
+  } catch {
+    // The smaller curated forest pack remains a complete fallback for builds
+    // that do not include the locally licensed source library.
+    forestWallTextures = {
+      southFaceRows: Array.from({ length: 8 }, () => forestCanopyTextures),
+      northHedgeRows: forestCanopyTextures.slice(0, 3),
+      sideHedgeTextures: forestCanopyTextures.slice(0, 3),
+      southFaceCornerTexture: forestCanopyTextures[0],
+      interiorTexture: forestGroundTextures[0],
+    };
+    console.warn('[Assets] Fiorwoods wall modules unavailable — using curated forest fallback');
   }
 
   // ── Shadow overlay assets (16×16 semi-transparent PNGs) ───────────────────
@@ -667,6 +737,7 @@ export async function loadAssets(): Promise<GameAssets> {
     forestUnderstoryTextures,
     forestGroundTextures,
     forestPathTextures,
+    forestWallTextures,
     forestShadowTexture,
     shadowTopTexture,
     shadowLeftTexture,

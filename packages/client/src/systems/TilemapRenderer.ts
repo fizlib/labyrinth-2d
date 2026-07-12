@@ -72,8 +72,10 @@ const BG_CHUNK_SIZE = 32;
 
 /** Width in tiles for a baked, Y-sorted vegetation row segment. */
 const FOREST_CHUNK_WIDTH = 64;
-const FOREST_CANOPY_OVERFLOW = 116;
-const FOREST_SIDE_OVERFLOW = 52;
+const FOREST_CANOPY_OVERFLOW = 16;
+const FOREST_SIDE_OVERFLOW = 16;
+const FOREST_FACE_HEIGHT = 8;
+const FOREST_NORTH_HEDGE_HEIGHT = 3;
 
 // ── Internal chunk metadata ─────────────────────────────────────────────────
 
@@ -160,17 +162,34 @@ function isForestAt(x: number, y: number, map: TileMapData): boolean {
   return isForestWallTileId(map.data[y * map.width + x]);
 }
 
-function isForestBoundaryAt(x: number, y: number, map: TileMapData): boolean {
-  return isForestAt(x, y, map) && (
-    !isForestAt(x, y - 1, map) ||
-    !isForestAt(x + 1, y, map) ||
-    !isForestAt(x, y + 1, map) ||
-    !isForestAt(x - 1, y, map)
-  );
+/**
+ * Return the row in the original eight-piece Fiorwoods south-facing tree
+ * facade for this solid tile, or null when it is not part of such a facade.
+ */
+function getSouthForestFaceRow(x: number, y: number, map: TileMapData): number | null {
+  for (let distanceToBase = 0; distanceToBase < FOREST_FACE_HEIGHT; distanceToBase++) {
+    if (!isForestAt(x, y + distanceToBase, map)) return null;
+    if (!isForestAt(x, y + distanceToBase + 1, map)) {
+      return FOREST_FACE_HEIGHT - distanceToBase - 1;
+    }
+  }
+  return null;
 }
 
-function getForestGroundTexture(x: number, y: number, textures: Texture[]): Texture {
-  return textures[positionHash(x, y, 5) % textures.length];
+/** Return the row in the low foliage treatment used on a north-facing edge. */
+function getNorthForestHedgeRow(x: number, y: number, map: TileMapData): number | null {
+  for (let distanceFromTop = 0; distanceFromTop < FOREST_NORTH_HEDGE_HEIGHT; distanceFromTop++) {
+    if (!isForestAt(x, y - distanceFromTop, map)) return null;
+    if (!isForestAt(x, y - distanceFromTop - 1, map)) return distanceFromTop;
+  }
+  return null;
+}
+
+function getForestGroundTexture(assets: GameAssets): Texture {
+  // The source map keeps the space behind the transparent canopy/trunk tiles
+  // nearly black. Using the playable grass here caused visible rectangular
+  // patches on the east and west walls.
+  return assets.forestWallTextures.interiorTexture;
 }
 
 function usesGroundBackgroundTile(tileId: number): boolean {
@@ -279,7 +298,7 @@ function getGroundTexture(
 
   const tileId = map.data[y * map.width + x];
   if (isForestWallTileId(tileId)) {
-    return getForestGroundTexture(x, y, assets.forestGroundTextures);
+    return getForestGroundTexture(assets);
   }
 
   return getGrassTexture(x, y, assets.grassVariantTextures);
@@ -468,10 +487,11 @@ export class TilemapRenderer {
       }
     }
 
-    // ── Step 2: Build deterministic forest row chunks ─────────────────
-    // Only exposed forest cells receive vegetation. Solid interiors are filled
-    // by the dark ground baked above, while overlapping edge vegetation creates
-    // a natural silhouette without changing the collision map.
+    // ── Step 2: Build hand-authored Fiorwoods tree-wall row chunks ──────
+    // Tree walls are a directional tile assembly, not a scatter of tree
+    // sprites. The eight-row south face, low north hedge, and mirrored side
+    // hedges follow the source Fiorwoods map layouts while retaining this
+    // game's collision grid and Y-sorting behaviour.
     const forestChunkCols = Math.ceil(map.width / FOREST_CHUNK_WIDTH);
 
     for (let y = 0; y < map.height; y++) {
@@ -480,10 +500,22 @@ export class TilemapRenderer {
         const endX = Math.min(startX + FOREST_CHUNK_WIDTH, map.width);
         const rowContainer = new Container();
         let hasContent = false;
-        let lastPrimaryX = startX - 8;
+
+        const addForestModule = (texture: Texture, localX: number, flipX = false): void => {
+          const module = new Sprite(texture);
+          const moduleHeight = Math.round(texture.height * ts / texture.width);
+          module.anchor.set(flipX ? 1 : 0, 1);
+          module.x = localX + (flipX ? ts : 0);
+          module.y = ts;
+          module.width = ts;
+          module.height = moduleHeight;
+          rowContainer.addChild(module);
+          hasContent = true;
+        };
 
         for (let x = startX; x < endX; x++) {
           const tileId = map.data[y * map.width + x];
+          const localX = (x - startX) * ts;
 
           // Keep simple gates visible when the full front-gate atlas is absent.
           const gateTexture = tileId === TILE_GATE_VERTICAL
@@ -493,7 +525,7 @@ export class TilemapRenderer {
               : null;
           if (gateTexture) {
             const gateSprite = new Sprite(gateTexture);
-            gateSprite.x = (x - startX) * ts;
+            gateSprite.x = localX;
             gateSprite.y = 0;
             gateSprite.width = ts;
             gateSprite.height = ts;
@@ -501,101 +533,56 @@ export class TilemapRenderer {
             hasContent = true;
           }
 
-          // Native Fiorwoods foliage modules fill only the forest interior.
-          // Exposed collision cells are reserved for trunks, saplings, shadows,
-          // and deliberate gaps so the face reads as a wooded barrier.
-          if (isForestWallTileId(tileId) && !isForestBoundaryAt(x, y, map)) {
-            const canopyHash = positionHash(x, y, 37);
-            const canopyTexture = assets.forestCanopyTextures[
-              canopyHash % assets.forestCanopyTextures.length
-            ];
-            const canopyWidth = 29 + (canopyHash % 7);
+          if (!isForestWallTileId(tileId)) continue;
 
-            const canopy = new Sprite(canopyTexture);
-            canopy.anchor.set(0.5);
-            canopy.x = (x - startX) * ts + ts / 2 + ((canopyHash >>> 8) % 9) - 4;
-            canopy.y = ts / 2 + ((canopyHash >>> 12) % 9) - 4;
-            canopy.width = canopyWidth;
-            canopy.height = Math.round(canopyTexture.height * canopyWidth / canopyTexture.width);
-            rowContainer.addChild(canopy);
-            hasContent = true;
-          }
-
-          if (!isForestBoundaryAt(x, y, map)) continue;
-
-          const northOpen = !isForestAt(x, y - 1, map);
           const eastOpen = !isForestAt(x + 1, y, map);
-          const southOpen = !isForestAt(x, y + 1, map);
           const westOpen = !isForestAt(x - 1, y, map);
-          const hash = positionHash(x, y, 11);
-          const minSpacing = southOpen ? 3 : 6;
-          const primaryThreshold = southOpen ? 78 : 18;
-          const usePrimary = x - lastPrimaryX >= minSpacing && hash % 100 < primaryThreshold;
+          const southFaceRow = getSouthForestFaceRow(x, y, map);
+          if (southFaceRow !== null) {
+            // Fiorwoods softens a face/side junction over two rows before the
+            // trunks begin. This avoids a rectangular cutoff where a western
+            // or eastern hedge meets the south-facing tree wall.
+            const sideCorner = westOpen || eastOpen;
+            if (!sideCorner || southFaceRow >= 2) {
+              const faceRow = assets.forestWallTextures.southFaceRows[southFaceRow];
+              addForestModule(faceRow[x % faceRow.length], localX);
+            }
 
-          let footX = (x - startX) * ts + ts / 2 + ((hash >>> 8) % 9) - 4;
-          let footY = ts - 2 + ((hash >>> 12) % 5) - 2;
-          if (westOpen && !eastOpen) footX += 17;
-          if (eastOpen && !westOpen) footX -= 17;
-          if (northOpen && !southOpen) footY += 32;
-          if (southOpen) footY -= 6;
+            // The source corner leaves the uppermost cell open and places the
+            // small diagonal hedge cap one row below it. That two-step taper is
+            // what turns the tree front into the rounded side wall shown in the
+            // Fiorwoods layouts.
+            if (sideCorner && southFaceRow === 1) {
+              addForestModule(assets.forestWallTextures.sideHedgeTextures[0], localX, westOpen);
+            }
 
-          const faceRoll = (hash >>> 16) % 100;
-          const understoryIndex = southOpen && assets.forestUnderstoryTextures.length > 3
-            ? faceRoll < 72
-              ? (hash >>> 20) % Math.min(3, assets.forestUnderstoryTextures.length)
-              : 3 + ((hash >>> 20) % (assets.forestUnderstoryTextures.length - 3))
-            : hash % assets.forestUnderstoryTextures.length;
-          const texture = usePrimary
-            ? assets.forestTreeTextures[hash % assets.forestTreeTextures.length]
-            : assets.forestUnderstoryTextures[understoryIndex];
-
-          if (!usePrimary && hash % 100 >= (southOpen ? 55 : 68)) continue;
-
-          let targetHeight: number;
-          if (usePrimary) {
-            targetHeight = 84 + (hash % 9);
-            lastPrimaryX = x;
-          } else {
-            targetHeight = understoryIndex < 3
-              ? 45 + ((hash >>> 16) % 15)
-              : 22 + ((hash >>> 16) % 9);
+            if (sideCorner && southFaceRow === 2) {
+              // The transparent triangular module is positioned in the open
+              // neighbour cell, exactly as in the source tilemap stencil.
+              addForestModule(
+                assets.forestWallTextures.southFaceCornerTexture,
+                westOpen ? localX - ts : localX + ts,
+                eastOpen,
+              );
+            }
+            continue;
           }
-          const targetWidth = Math.max(16, Math.round(texture.width * targetHeight / texture.height));
 
-          const contactShadow = new Sprite(assets.forestShadowTexture);
-          contactShadow.anchor.set(0.5);
-          contactShadow.x = footX;
-          contactShadow.y = footY - 3;
-          contactShadow.width = usePrimary ? 50 : 34;
-          contactShadow.height = usePrimary ? 23 : 16;
-          contactShadow.alpha = usePrimary ? 0.62 : 0.42;
-          rowContainer.addChild(contactShadow);
-
-          const vegetation = new Sprite(texture);
-          vegetation.anchor.set(0.5, 1);
-          vegetation.x = footX;
-          vegetation.y = footY;
-          vegetation.width = targetWidth;
-          vegetation.height = targetHeight;
-          rowContainer.addChild(vegetation);
-
-          // Break up exposed big trunks with a low shrub layer on the face.
-          if (usePrimary && southOpen && ((hash >>> 20) % 100) < 24) {
-            const bushStart = Math.min(3, assets.forestUnderstoryTextures.length - 1);
-            const bushCount = Math.max(1, assets.forestUnderstoryTextures.length - bushStart);
-            const bushTexture = assets.forestUnderstoryTextures[
-              bushStart + ((hash >>> 24) % bushCount)
-            ];
-            const bushHeight = 22 + ((hash >>> 18) % 9);
-            const bush = new Sprite(bushTexture);
-            bush.anchor.set(0.5, 1);
-            bush.x = footX + (((hash >>> 22) % 2) === 0 ? -13 : 13);
-            bush.y = footY + 2;
-            bush.width = Math.max(16, Math.round(bushTexture.width * bushHeight / bushTexture.height));
-            bush.height = bushHeight;
-            rowContainer.addChild(bush);
+          const northHedgeRow = getNorthForestHedgeRow(x, y, map);
+          if (northHedgeRow !== null) {
+            addForestModule(assets.forestWallTextures.northHedgeRows[
+              northHedgeRow % assets.forestWallTextures.northHedgeRows.length
+            ], localX);
+            continue;
           }
-          hasContent = true;
+
+          if (eastOpen || westOpen) {
+            const isVerticalEnd = !isForestAt(x, y - 1, map) || !isForestAt(x, y + 1, map);
+            const sideIndex = isVerticalEnd
+              ? 0
+              : 1 + (positionHash(x, y, 29) % (assets.forestWallTextures.sideHedgeTextures.length - 1));
+            addForestModule(assets.forestWallTextures.sideHedgeTextures[sideIndex], localX, westOpen);
+          }
         }
 
         if (hasContent) {
