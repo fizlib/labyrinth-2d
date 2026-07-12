@@ -109,6 +109,7 @@ let currentTool: EditorTool = 'select';
 let currentSnap = 1;
 let renderGeneration = 0;
 let saveTimer: number | null = null;
+let shiftHeld = false;
 const spriteById = new Map<string, Sprite>();
 const colliderGraphicById = new Map<string, Graphics>();
 
@@ -311,6 +312,12 @@ function addToSelection(elementId: string | null, colliderId: string | null): vo
 
 function updateSelectionOverlay(): void {
   selectionFrame.clear();
+
+  if (shiftHeld) {
+    resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = false;
+    return;
+  }
+
   const elements = selectedElements();
   const colliders = selectedColliders();
   const totalCount = elements.length + colliders.length;
@@ -567,6 +574,7 @@ const finishInteraction = (): void => {
   const shouldCommit = interaction.kind !== 'pan';
   interaction = null;
   if (shouldCommit) commitHistory();
+  updateSelectionOverlay();
 };
 app.stage.on('pointerup', finishInteraction);
 app.stage.on('pointerupoutside', finishInteraction);
@@ -1111,6 +1119,20 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('resize', () => { app.stage.hitArea = app.screen; });
+
+// Hide selection overlay while Shift is held
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Shift' && !shiftHeld) {
+    shiftHeld = true;
+    updateSelectionOverlay();
+  }
+});
+window.addEventListener('keyup', (event) => {
+  if (event.key === 'Shift') {
+    shiftHeld = false;
+    updateSelectionOverlay();
+  }
+});
 bindElementInspector();
 notesField.value = documentState.notes;
 setTool('select');
