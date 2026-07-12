@@ -1,0 +1,863 @@
+import {
+  Application,
+  Assets,
+  Container,
+  FederatedPointerEvent,
+  Graphics,
+  Rectangle,
+  Sprite,
+  Text,
+  Texture,
+} from 'pixi.js';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { loadCatalogMeta, loadCatalogPage, type CatalogQuery } from './assetCatalog';
+import { createSampleDocument } from './sampleScene';
+import {
+  SEMANTIC_ROLES,
+  type AssetCatalogEntry,
+  type EditorCollider,
+  type EditorElement,
+  type EditorTool,
+  type SemanticRole,
+  type StyleEditorDocumentV1,
+} from './types';
+
+const STORAGE_KEY = 'labyrinth-style-editor-v1-cell-sample';
+const PAGE_SIZE = 200;
+let fallbackIdSequence = 0;
+
+function createEditorId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+
+  fallbackIdSequence += 1;
+  const randomValues = new Uint32Array(2);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(randomValues);
+  } else {
+    randomValues[0] = Math.floor(Math.random() * 0xffffffff);
+    randomValues[1] = Math.floor(Math.random() * 0xffffffff);
+  }
+  return `editor-${Date.now().toString(36)}-${fallbackIdSequence.toString(36)}-${Array.from(randomValues, (value) => value.toString(36)).join('-')}`;
+}
+
+function required<T extends HTMLElement>(id: string): T {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`Missing editor element #${id}`);
+  return element as T;
+}
+
+const host = required<HTMLDivElement>('canvas-host');
+const saveStatus = required<HTMLSpanElement>('save-status');
+const assetGrid = required<HTMLDivElement>('asset-grid');
+const assetTotal = required<HTMLSpanElement>('asset-total');
+const assetPageLabel = required<HTMLSpanElement>('asset-page');
+const assetSearch = required<HTMLInputElement>('asset-search');
+const assetSource = required<HTMLSelectElement>('asset-source');
+const assetCategory = required<HTMLSelectElement>('asset-category');
+const assetCollection = required<HTMLInputElement>('asset-collection');
+const assetCollections = required<HTMLDataListElement>('asset-collections');
+const selectedAssetView = required<HTMLDivElement>('selected-asset');
+const replaceAssetButton = required<HTMLButtonElement>('replace-asset');
+const addAssetButton = required<HTMLButtonElement>('add-asset');
+const previousAssetsButton = required<HTMLButtonElement>('asset-prev');
+const nextAssetsButton = required<HTMLButtonElement>('asset-next');
+const elementInspector = required<HTMLDivElement>('element-inspector');
+const colliderInspector = required<HTMLDivElement>('collider-inspector');
+const selectionKind = required<HTMLSpanElement>('selection-kind');
+const layerList = required<HTMLDivElement>('layer-list');
+const zoomReadout = required<HTMLSpanElement>('zoom-readout');
+const snapSizeSelect = required<HTMLSelectElement>('snap-size');
+const showCollidersCheckbox = required<HTMLInputElement>('show-colliders');
+const notesField = required<HTMLTextAreaElement>('style-notes');
+const undoButton = required<HTMLButtonElement>('undo');
+const redoButton = required<HTMLButtonElement>('redo');
+
+const app = new Application();
+await app.init({
+  resizeTo: host,
+  antialias: false,
+  roundPixels: true,
+  resolution: 1,
+  backgroundColor: 0x080b11,
+});
+host.appendChild(app.canvas);
+app.stage.eventMode = 'static';
+app.stage.hitArea = app.screen;
+
+const world = new Container();
+const sceneLayer = new Container();
+const colliderLayer = new Container();
+const overlayLayer = new Container();
+sceneLayer.sortableChildren = true;
+world.addChild(sceneLayer, colliderLayer, overlayLayer);
+app.stage.addChild(world);
+
+const selectionFrame = new Graphics();
+const resizeHandle = new Graphics().rect(-5, -5, 10, 10).fill(0xffdf68).stroke({ color: 0x18120a, width: 1 });
+const selectionLabel = new Text({ text: '', style: { fill: 0xfff1a8, fontSize: 12, fontFamily: 'Consolas' } });
+resizeHandle.eventMode = 'static';
+resizeHandle.cursor = 'nwse-resize';
+overlayLayer.addChild(selectionFrame, selectionLabel, resizeHandle);
+
+let documentState = loadLocalDocument() ?? createSampleDocument();
+let selectedElementId: string | null = null;
+let selectedColliderId: string | null = null;
+let selectedAsset: AssetCatalogEntry | null = null;
+let currentTool: EditorTool = 'select';
+let currentSnap = 1;
+let renderGeneration = 0;
+let saveTimer: number | null = null;
+const spriteById = new Map<string, Sprite>();
+const colliderGraphicById = new Map<string, Graphics>();
+
+const history: string[] = [JSON.stringify(documentState)];
+let historyIndex = 0;
+
+interface InteractionState {
+  kind: 'element-move' | 'element-resize' | 'collider-move' | 'collider-resize' | 'pan';
+  startGlobalX: number;
+  startGlobalY: number;
+  startX: number;
+  startY: number;
+  startWidth: number;
+  startHeight: number;
+}
+let interaction: InteractionState | null = null;
+
+const catalogQuery: CatalogQuery = { q: '', category: '', collection: '', source: '', offset: 0, limit: PAGE_SIZE };
+let catalogResultTotal = 0;
+let catalogRequest = 0;
+
+function loadLocalDocument(): StyleEditorDocumentV1 | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StyleEditorDocumentV1;
+    return parsed.version === 1 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function selectedElement(): EditorElement | null {
+  return documentState.elements.find((element) => element.id === selectedElementId) ?? null;
+}
+
+function selectedCollider(): EditorCollider | null {
+  return documentState.colliders.find((collider) => collider.id === selectedColliderId) ?? null;
+}
+
+function snap(value: number, size = currentSnap): number {
+  return Math.round(value / size) * size;
+}
+
+function scheduleAutosave(): void {
+  saveStatus.textContent = 'Unsaved changes…';
+  if (saveTimer !== null) window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    documentState.updatedAt = new Date().toISOString();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
+    saveStatus.textContent = 'Autosaved locally';
+    saveTimer = null;
+  }, 350);
+}
+
+function commitHistory(): void {
+  documentState.updatedAt = new Date().toISOString();
+  const snapshot = JSON.stringify(documentState);
+  if (history[historyIndex] === snapshot) return;
+  history.splice(historyIndex + 1);
+  history.push(snapshot);
+  if (history.length > 80) history.shift();
+  historyIndex = history.length - 1;
+  scheduleAutosave();
+  updateHistoryButtons();
+  renderInspector();
+  renderLayers();
+}
+
+function restoreHistory(index: number): void {
+  if (index < 0 || index >= history.length) return;
+  historyIndex = index;
+  documentState = JSON.parse(history[index]) as StyleEditorDocumentV1;
+  selectedElementId = null;
+  selectedColliderId = null;
+  void rebuildScene();
+  scheduleAutosave();
+  updateHistoryButtons();
+}
+
+function updateHistoryButtons(): void {
+  undoButton.disabled = historyIndex <= 0;
+  redoButton.disabled = historyIndex >= history.length - 1;
+}
+
+function applyElementToSprite(element: EditorElement, sprite: Sprite): void {
+  sprite.anchor.set(0.5);
+  sprite.position.set(element.x + element.width / 2, element.y + element.height / 2);
+  sprite.width = Math.max(1, Math.abs(element.width));
+  sprite.height = Math.max(1, Math.abs(element.height));
+  sprite.scale.x = Math.abs(sprite.scale.x) * (element.flipX ? -1 : 1);
+  sprite.scale.y = Math.abs(sprite.scale.y) * (element.flipY ? -1 : 1);
+  sprite.alpha = element.opacity;
+  sprite.visible = element.visible;
+  sprite.zIndex = element.zIndex;
+}
+
+async function textureFor(path: string): Promise<Texture> {
+  try {
+    const texture = await Assets.load<Texture>(path);
+    texture.source.scaleMode = 'nearest';
+    return texture;
+  } catch {
+    return Texture.WHITE;
+  }
+}
+
+async function rebuildScene(): Promise<void> {
+  const generation = ++renderGeneration;
+  const uniquePaths = [...new Set(documentState.elements.map((element) => element.assetPath))];
+  const textures = new Map<string, Texture>();
+  await Promise.all(uniquePaths.map(async (path) => textures.set(path, await textureFor(path))));
+  if (generation !== renderGeneration) return;
+
+  for (const child of sceneLayer.removeChildren()) child.destroy();
+  spriteById.clear();
+  const sorted = [...documentState.elements].sort((a, b) => a.zIndex - b.zIndex || a.id.localeCompare(b.id));
+  for (const element of sorted) {
+    const sprite = new Sprite(textures.get(element.assetPath) ?? Texture.WHITE);
+    sprite.label = element.name;
+    sprite.eventMode = 'static';
+    sprite.cursor = 'pointer';
+    applyElementToSprite(element, sprite);
+    sprite.on('pointerdown', (event: FederatedPointerEvent) => onElementPointerDown(event, element.id));
+    sceneLayer.addChild(sprite);
+    spriteById.set(element.id, sprite);
+  }
+  rebuildColliders();
+  updateSelectionOverlay();
+  renderInspector();
+  renderLayers();
+}
+
+function rebuildColliders(): void {
+  for (const child of colliderLayer.removeChildren()) child.destroy();
+  colliderGraphicById.clear();
+  for (const collider of documentState.colliders) {
+    if (!collider.enabled) continue;
+    const selected = collider.id === selectedColliderId;
+    const graphic = new Graphics()
+      .rect(collider.x, collider.y, collider.width, collider.height)
+      .fill({ color: selected ? 0xff9f2f : 0xff2222, alpha: selected ? 0.12 : 0.035 })
+      .stroke({ color: selected ? 0xffa73d : 0xff3333, width: selected ? 2 : 1 });
+    graphic.eventMode = 'static';
+    graphic.cursor = 'move';
+    graphic.on('pointerdown', (event: FederatedPointerEvent) => onColliderPointerDown(event, collider.id));
+    colliderLayer.addChild(graphic);
+    colliderGraphicById.set(collider.id, graphic);
+  }
+  colliderLayer.visible = showCollidersCheckbox.checked;
+}
+
+function setSelection(elementId: string | null, colliderId: string | null): void {
+  selectedElementId = elementId;
+  selectedColliderId = colliderId;
+  rebuildColliders();
+  updateSelectionOverlay();
+  renderInspector();
+  renderLayers();
+}
+
+function updateSelectionOverlay(): void {
+  selectionFrame.clear();
+  const element = selectedElement();
+  const collider = selectedCollider();
+  if (element) {
+    selectionFrame.rect(element.x, element.y, element.width, element.height).stroke({ color: 0xffdf68, width: 2 });
+    resizeHandle.position.set(element.x + element.width, element.y + element.height);
+    selectionLabel.text = `${Math.round(element.width)}×${Math.round(element.height)} px`;
+    selectionLabel.position.set(element.x, Math.max(0, element.y - 18));
+    resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = true;
+  } else if (collider) {
+    selectionFrame.rect(collider.x, collider.y, collider.width, collider.height).stroke({ color: 0xffa73d, width: 2 });
+    resizeHandle.position.set(collider.x + collider.width, collider.y + collider.height);
+    selectionLabel.text = `Collider ${Math.round(collider.width)}×${Math.round(collider.height)} px`;
+    selectionLabel.position.set(collider.x, Math.max(0, collider.y - 18));
+    resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = true;
+  } else {
+    resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = false;
+  }
+}
+
+function worldPoint(event: FederatedPointerEvent): { x: number; y: number } {
+  return world.toLocal(event.global);
+}
+
+function onElementPointerDown(event: FederatedPointerEvent, id: string): void {
+  if (currentTool === 'erase') {
+    event.stopPropagation();
+    removeElement(id);
+    return;
+  }
+  if (currentTool === 'paint') {
+    event.stopPropagation();
+    paintAt(worldPoint(event));
+    return;
+  }
+  if (currentTool === 'add') {
+    event.stopPropagation();
+    addSelectedAssetAt(worldPoint(event));
+    return;
+  }
+  if (currentTool !== 'select') return;
+  event.stopPropagation();
+  setSelection(id, null);
+  const element = selectedElement();
+  if (!element) return;
+  interaction = {
+    kind: 'element-move', startGlobalX: event.global.x, startGlobalY: event.global.y,
+    startX: element.x, startY: element.y, startWidth: element.width, startHeight: element.height,
+  };
+}
+
+function onColliderPointerDown(event: FederatedPointerEvent, id: string): void {
+  if (currentTool === 'erase') {
+    event.stopPropagation();
+    documentState.colliders = documentState.colliders.filter((collider) => collider.id !== id);
+    setSelection(null, null);
+    commitHistory();
+    return;
+  }
+  if (currentTool !== 'select' && currentTool !== 'collider') return;
+  event.stopPropagation();
+  setSelection(null, id);
+  const collider = selectedCollider();
+  if (!collider) return;
+  interaction = {
+    kind: 'collider-move', startGlobalX: event.global.x, startGlobalY: event.global.y,
+    startX: collider.x, startY: collider.y, startWidth: collider.width, startHeight: collider.height,
+  };
+}
+
+resizeHandle.on('pointerdown', (event: FederatedPointerEvent) => {
+  event.stopPropagation();
+  const element = selectedElement();
+  const collider = selectedCollider();
+  if (element) {
+    interaction = {
+      kind: 'element-resize', startGlobalX: event.global.x, startGlobalY: event.global.y,
+      startX: element.x, startY: element.y, startWidth: element.width, startHeight: element.height,
+    };
+  } else if (collider) {
+    interaction = {
+      kind: 'collider-resize', startGlobalX: event.global.x, startGlobalY: event.global.y,
+      startX: collider.x, startY: collider.y, startWidth: collider.width, startHeight: collider.height,
+    };
+  }
+});
+
+app.stage.on('pointerdown', (event: FederatedPointerEvent) => {
+  host.focus();
+  if (event.button === 1 || currentTool === 'pan') {
+    interaction = {
+      kind: 'pan', startGlobalX: event.global.x, startGlobalY: event.global.y,
+      startX: world.x, startY: world.y, startWidth: 0, startHeight: 0,
+    };
+    return;
+  }
+  const point = worldPoint(event);
+  if (currentTool === 'add') addSelectedAssetAt(point);
+  else if (currentTool === 'paint') paintAt(point);
+  else if (currentTool === 'collider') addColliderAt(point);
+  else if (currentTool === 'select') setSelection(null, null);
+});
+
+app.stage.on('pointermove', (event: FederatedPointerEvent) => {
+  if (!interaction) return;
+  const dx = (event.global.x - interaction.startGlobalX) / world.scale.x;
+  const dy = (event.global.y - interaction.startGlobalY) / world.scale.y;
+  if (interaction.kind === 'pan') {
+    world.position.set(interaction.startX + event.global.x - interaction.startGlobalX, interaction.startY + event.global.y - interaction.startGlobalY);
+    return;
+  }
+  const element = selectedElement();
+  const collider = selectedCollider();
+  if (interaction.kind === 'element-move' && element) {
+    element.x = snap(interaction.startX + dx);
+    element.y = snap(interaction.startY + dy);
+    const sprite = spriteById.get(element.id);
+    if (sprite) applyElementToSprite(element, sprite);
+  } else if (interaction.kind === 'element-resize' && element) {
+    element.width = Math.max(1, snap(interaction.startWidth + dx));
+    element.height = Math.max(1, snap(interaction.startHeight + dy));
+    const sprite = spriteById.get(element.id);
+    if (sprite) applyElementToSprite(element, sprite);
+  } else if (interaction.kind === 'collider-move' && collider) {
+    collider.x = snap(interaction.startX + dx);
+    collider.y = snap(interaction.startY + dy);
+    rebuildColliders();
+  } else if (interaction.kind === 'collider-resize' && collider) {
+    collider.width = Math.max(1, snap(interaction.startWidth + dx));
+    collider.height = Math.max(1, snap(interaction.startHeight + dy));
+    rebuildColliders();
+  }
+  updateSelectionOverlay();
+  renderInspector();
+});
+
+const finishInteraction = (): void => {
+  if (!interaction) return;
+  const shouldCommit = interaction.kind !== 'pan';
+  interaction = null;
+  if (shouldCommit) commitHistory();
+};
+app.stage.on('pointerup', finishInteraction);
+app.stage.on('pointerupoutside', finishInteraction);
+
+function inferredRole(asset: AssetCatalogEntry): SemanticRole {
+  if (asset.category === 'Trees') return 'tree.small';
+  if (asset.category === 'Bushes & Plants') return 'bush';
+  if (asset.category === 'Shadows') return 'shadow';
+  if (asset.category === 'Gates & Doors') return 'gate';
+  if (asset.category === 'Terrain') return 'ground.grass';
+  return 'decoration';
+}
+
+function addSelectedAssetAt(point: { x: number; y: number }): void {
+  if (!selectedAsset) return;
+  const width = Math.max(1, selectedAsset.width || 32);
+  const height = Math.max(1, selectedAsset.height || 32);
+  const role = inferredRole(selectedAsset);
+  const x = currentTool === 'paint' ? snap(point.x, 16) : snap(point.x - width / 2);
+  const y = currentTool === 'paint' ? snap(point.y, 16) : snap(point.y - height / 2);
+  const element: EditorElement = {
+    id: createEditorId(), name: selectedAsset.name, role, assetPath: selectedAsset.path,
+    nativeWidth: selectedAsset.width, nativeHeight: selectedAsset.height,
+    x, y, width: currentTool === 'paint' ? 16 : width, height: currentTool === 'paint' ? 16 : height,
+    zIndex: role.startsWith('ground.') ? 0 : 500, opacity: 1, flipX: false, flipY: false, visible: true,
+  };
+  documentState.elements.push(element);
+  setSelection(element.id, null);
+  commitHistory();
+  void rebuildScene();
+}
+
+function paintAt(point: { x: number; y: number }): void {
+  if (!selectedAsset) return;
+  const x = snap(point.x, 16);
+  const y = snap(point.y, 16);
+  const existing = documentState.elements.find((element) =>
+    element.role.startsWith('ground.') && element.x === x && element.y === y && element.width === 16 && element.height === 16);
+  if (existing) {
+    existing.assetPath = selectedAsset.path;
+    existing.name = selectedAsset.name;
+    existing.nativeWidth = selectedAsset.width;
+    existing.nativeHeight = selectedAsset.height;
+    setSelection(existing.id, null);
+    commitHistory();
+    void rebuildScene();
+  } else {
+    addSelectedAssetAt({ x, y });
+  }
+}
+
+function addColliderAt(point: { x: number; y: number }): void {
+  const owner = selectedElement();
+  const collider: EditorCollider = {
+    id: createEditorId(), name: 'New collider', ownerId: owner?.id ?? null,
+    ownerRole: owner?.role ?? 'freeform', x: snap(point.x, 16), y: snap(point.y, 16), width: 16, height: 16, enabled: true,
+  };
+  documentState.colliders.push(collider);
+  setSelection(null, collider.id);
+  commitHistory();
+}
+
+function removeElement(id: string): void {
+  documentState.elements = documentState.elements.filter((element) => element.id !== id);
+  documentState.colliders = documentState.colliders.filter((collider) => collider.ownerId !== id);
+  setSelection(null, null);
+  commitHistory();
+  void rebuildScene();
+}
+
+function deleteSelection(): void {
+  const element = selectedElement();
+  const collider = selectedCollider();
+  if (element) removeElement(element.id);
+  else if (collider) {
+    documentState.colliders = documentState.colliders.filter((item) => item.id !== collider.id);
+    setSelection(null, null);
+    commitHistory();
+  }
+}
+
+function duplicateSelection(): void {
+  const element = selectedElement();
+  if (!element) return;
+  const copy = { ...element, id: createEditorId(), name: `${element.name} copy`, x: element.x + currentSnap * 4, y: element.y + currentSnap * 4 };
+  documentState.elements.push(copy);
+  setSelection(copy.id, null);
+  commitHistory();
+  void rebuildScene();
+}
+
+function replaceSelectedAsset(): void {
+  const element = selectedElement();
+  if (!element || !selectedAsset) return;
+  element.assetPath = selectedAsset.path;
+  element.nativeWidth = selectedAsset.width;
+  element.nativeHeight = selectedAsset.height;
+  element.name = selectedAsset.name;
+  commitHistory();
+  void rebuildScene();
+}
+
+function fitWorld(): void {
+  const scale = Math.min(host.clientWidth / documentState.sample.width, host.clientHeight / documentState.sample.height) * 0.92;
+  world.scale.set(Math.max(0.1, Math.min(3, scale)));
+  world.position.set(
+    (host.clientWidth - documentState.sample.width * world.scale.x) / 2,
+    (host.clientHeight - documentState.sample.height * world.scale.y) / 2,
+  );
+  updateZoomReadout();
+}
+
+function updateZoomReadout(): void {
+  zoomReadout.textContent = `${Math.round(world.scale.x * 100)}%`;
+}
+
+host.addEventListener('wheel', (event) => {
+  event.preventDefault();
+  const rect = host.getBoundingClientRect();
+  const global = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  const localBefore = world.toLocal(global);
+  const next = Math.max(0.1, Math.min(4, world.scale.x * (event.deltaY < 0 ? 1.12 : 0.89)));
+  world.scale.set(next);
+  const globalAfter = world.toGlobal(localBefore);
+  world.x += global.x - globalAfter.x;
+  world.y += global.y - globalAfter.y;
+  updateZoomReadout();
+}, { passive: false });
+
+function setTool(tool: EditorTool): void {
+  currentTool = tool;
+  document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === tool));
+  host.style.cursor = tool === 'pan' ? 'grab' : tool === 'select' ? 'default' : 'crosshair';
+}
+
+function renderInspector(): void {
+  const element = selectedElement();
+  const collider = selectedCollider();
+  elementInspector.classList.toggle('disabled', !element);
+  colliderInspector.classList.toggle('disabled', !collider);
+  selectionKind.textContent = element ? element.role : collider ? 'Collider' : 'Nothing selected';
+
+  if (element) {
+    required<HTMLInputElement>('prop-name').value = element.name;
+    required<HTMLSelectElement>('prop-role').value = element.role;
+    required<HTMLInputElement>('prop-x').value = String(Math.round(element.x));
+    required<HTMLInputElement>('prop-y').value = String(Math.round(element.y));
+    required<HTMLInputElement>('prop-width').value = String(Math.round(element.width));
+    required<HTMLInputElement>('prop-height').value = String(Math.round(element.height));
+    required<HTMLInputElement>('prop-z').value = String(element.zIndex);
+    required<HTMLInputElement>('prop-opacity').value = String(element.opacity);
+    required<HTMLInputElement>('prop-flip-x').checked = element.flipX;
+    required<HTMLInputElement>('prop-flip-y').checked = element.flipY;
+    required<HTMLInputElement>('prop-visible').checked = element.visible;
+    required<HTMLDivElement>('dimension-readout').textContent = `Native ${element.nativeWidth}×${element.nativeHeight}px · Rendered ${Math.round(element.width)}×${Math.round(element.height)}px · Position ${Math.round(element.x)}, ${Math.round(element.y)}`;
+    required<HTMLDivElement>('asset-path-readout').textContent = element.assetPath;
+  }
+  if (collider) {
+    required<HTMLInputElement>('collider-name').value = collider.name;
+    required<HTMLInputElement>('collider-role').value = collider.ownerRole;
+    required<HTMLInputElement>('collider-x').value = String(Math.round(collider.x));
+    required<HTMLInputElement>('collider-y').value = String(Math.round(collider.y));
+    required<HTMLInputElement>('collider-width').value = String(Math.round(collider.width));
+    required<HTMLInputElement>('collider-height').value = String(Math.round(collider.height));
+    required<HTMLInputElement>('collider-enabled').checked = collider.enabled;
+  }
+}
+
+function renderLayers(): void {
+  layerList.replaceChildren();
+  const groundCount = documentState.elements.filter((element) => element.role.startsWith('ground.')).length;
+  const groundSummary = document.createElement('div');
+  groundSummary.className = 'layer-item';
+  groundSummary.innerHTML = `<span>Ground tiles</span><small>${groundCount}</small>`;
+  layerList.appendChild(groundSummary);
+  const items = documentState.elements
+    .filter((element) => !element.role.startsWith('ground.') || element.id === selectedElementId)
+    .sort((a, b) => b.zIndex - a.zIndex || a.name.localeCompare(b.name));
+  for (const element of items) {
+    const button = document.createElement('button');
+    button.className = `layer-item${element.id === selectedElementId ? ' selected' : ''}`;
+    button.innerHTML = `<span>${escapeHtml(element.name)}</span><small>${element.role} · ${element.zIndex}</small>`;
+    button.addEventListener('click', () => setSelection(element.id, null));
+    layerList.appendChild(button);
+  }
+}
+
+function escapeHtml(value: string): string {
+  const node = document.createElement('span');
+  node.textContent = value;
+  return node.innerHTML;
+}
+
+function bindElementInspector(): void {
+  const roleSelect = required<HTMLSelectElement>('prop-role');
+  for (const role of SEMANTIC_ROLES) roleSelect.add(new Option(role, role));
+
+  const numeric = [
+    ['prop-x', 'x'], ['prop-y', 'y'], ['prop-width', 'width'], ['prop-height', 'height'],
+    ['prop-z', 'zIndex'], ['prop-opacity', 'opacity'],
+  ] as const;
+  for (const [inputId, key] of numeric) {
+    required<HTMLInputElement>(inputId).addEventListener('change', (event) => {
+      const element = selectedElement();
+      if (!element) return;
+      const value = (event.currentTarget as HTMLInputElement).valueAsNumber;
+      if (!Number.isFinite(value)) return;
+      if (key === 'width' || key === 'height') element[key] = Math.max(1, value);
+      else if (key === 'opacity') element.opacity = Math.max(0, Math.min(1, value));
+      else element[key] = value;
+      const sprite = spriteById.get(element.id);
+      if (sprite) applyElementToSprite(element, sprite);
+      updateSelectionOverlay();
+      commitHistory();
+    });
+  }
+  required<HTMLInputElement>('prop-name').addEventListener('change', (event) => {
+    const element = selectedElement(); if (!element) return;
+    element.name = (event.currentTarget as HTMLInputElement).value; commitHistory();
+  });
+  roleSelect.addEventListener('change', () => {
+    const element = selectedElement(); if (!element) return;
+    element.role = roleSelect.value as SemanticRole; commitHistory();
+  });
+  for (const [inputId, key] of [['prop-flip-x', 'flipX'], ['prop-flip-y', 'flipY'], ['prop-visible', 'visible']] as const) {
+    required<HTMLInputElement>(inputId).addEventListener('change', (event) => {
+      const element = selectedElement(); if (!element) return;
+      element[key] = (event.currentTarget as HTMLInputElement).checked;
+      const sprite = spriteById.get(element.id); if (sprite) applyElementToSprite(element, sprite);
+      commitHistory();
+    });
+  }
+
+  const colliderNumeric = [['collider-x', 'x'], ['collider-y', 'y'], ['collider-width', 'width'], ['collider-height', 'height']] as const;
+  for (const [inputId, key] of colliderNumeric) {
+    required<HTMLInputElement>(inputId).addEventListener('change', (event) => {
+      const collider = selectedCollider(); if (!collider) return;
+      const value = (event.currentTarget as HTMLInputElement).valueAsNumber;
+      if (!Number.isFinite(value)) return;
+      collider[key] = key === 'width' || key === 'height' ? Math.max(1, value) : value;
+      rebuildColliders(); updateSelectionOverlay(); commitHistory();
+    });
+  }
+  required<HTMLInputElement>('collider-name').addEventListener('change', (event) => {
+    const collider = selectedCollider(); if (!collider) return;
+    collider.name = (event.currentTarget as HTMLInputElement).value; commitHistory();
+  });
+  required<HTMLInputElement>('collider-role').addEventListener('change', (event) => {
+    const collider = selectedCollider(); if (!collider) return;
+    collider.ownerRole = (event.currentTarget as HTMLInputElement).value as EditorCollider['ownerRole']; commitHistory();
+  });
+  required<HTMLInputElement>('collider-enabled').addEventListener('change', (event) => {
+    const collider = selectedCollider(); if (!collider) return;
+    collider.enabled = (event.currentTarget as HTMLInputElement).checked; rebuildColliders(); commitHistory();
+  });
+}
+
+async function refreshCatalog(): Promise<void> {
+  const request = ++catalogRequest;
+  assetGrid.innerHTML = '<div class="readout">Loading assets…</div>';
+  try {
+    const page = await loadCatalogPage(catalogQuery);
+    if (request !== catalogRequest) return;
+    catalogResultTotal = page.total;
+    assetTotal.textContent = `${page.total.toLocaleString()} assets`;
+    assetPageLabel.textContent = `Page ${Math.floor(page.offset / PAGE_SIZE) + 1} of ${Math.max(1, Math.ceil(page.total / PAGE_SIZE))}`;
+    previousAssetsButton.disabled = page.offset === 0;
+    nextAssetsButton.disabled = page.offset + page.limit >= page.total;
+    assetGrid.replaceChildren();
+    for (const asset of page.assets) {
+      const card = document.createElement('button');
+      card.className = `asset-card${selectedAsset?.id === asset.id ? ' selected' : ''}`;
+      card.title = `${asset.name}\n${asset.collection}\n${asset.width}×${asset.height}px`;
+      const image = document.createElement('img');
+      image.loading = 'lazy';
+      image.src = asset.path;
+      image.alt = asset.name;
+      const label = document.createElement('span');
+      label.textContent = asset.name;
+      const meta = document.createElement('small');
+      meta.textContent = `${asset.width}×${asset.height} · ${asset.source}`;
+      card.append(image, label, meta);
+      card.addEventListener('click', () => selectAsset(asset));
+      card.addEventListener('dblclick', () => selectedElement() ? replaceSelectedAsset() : addAssetAtViewportCenter());
+      assetGrid.appendChild(card);
+    }
+  } catch (error) {
+    assetGrid.innerHTML = `<div class="readout">${escapeHtml(error instanceof Error ? error.message : 'Asset catalog failed')}</div>`;
+  }
+}
+
+function selectAsset(asset: AssetCatalogEntry): void {
+  selectedAsset = asset;
+  selectedAssetView.classList.remove('empty');
+  selectedAssetView.innerHTML = `<img src="${asset.path}" alt=""><div><strong>${escapeHtml(asset.name)}</strong><small>${escapeHtml(asset.collection)} · ${escapeHtml(asset.category)}</small><small>${asset.width}×${asset.height}px · ${asset.source}</small></div>`;
+  replaceAssetButton.disabled = !selectedElement();
+  addAssetButton.disabled = false;
+  void refreshCatalog();
+}
+
+function addAssetAtViewportCenter(): void {
+  const center = world.toLocal({ x: host.clientWidth / 2, y: host.clientHeight / 2 });
+  addSelectedAssetAt(center);
+}
+
+async function initializeCatalog(): Promise<void> {
+  const meta = await loadCatalogMeta();
+  for (const source of meta.sources) assetSource.add(new Option(source, source));
+  for (const category of meta.categories) assetCategory.add(new Option(category, category));
+  const collectionFragment = document.createDocumentFragment();
+  for (const collection of meta.collections) {
+    const option = document.createElement('option');
+    option.value = collection;
+    collectionFragment.appendChild(option);
+  }
+  assetCollections.appendChild(collectionFragment);
+  await refreshCatalog();
+}
+
+function debounceCatalogInput(): void {
+  window.clearTimeout(Number(assetSearch.dataset.timer || 0));
+  const timer = window.setTimeout(() => {
+    catalogQuery.q = assetSearch.value;
+    catalogQuery.collection = assetCollection.value;
+    catalogQuery.offset = 0;
+    void refreshCatalog();
+  }, 250);
+  assetSearch.dataset.timer = String(timer);
+}
+
+async function exportDocument(): Promise<void> {
+  saveStatus.textContent = 'Building export…';
+  overlayLayer.visible = false;
+  const colliderVisible = colliderLayer.visible;
+  colliderLayer.visible = false;
+  const extracted = app.renderer.extract.canvas({
+    target: world,
+    frame: new Rectangle(0, 0, documentState.sample.width, documentState.sample.height),
+    resolution: 1,
+    clearColor: '#080b11',
+  }) as HTMLCanvasElement;
+  overlayLayer.visible = true;
+  colliderLayer.visible = colliderVisible;
+  const pngBlob = await new Promise<Blob>((resolve, reject) => extracted.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Preview PNG failed')), 'image/png'));
+  documentState.updatedAt = new Date().toISOString();
+  const archive = zipSync({
+    'labyrinth-style-v1.json': strToU8(JSON.stringify(documentState, null, 2)),
+    'labyrinth-style-preview.png': new Uint8Array(await pngBlob.arrayBuffer()),
+  }, { level: 6 });
+  const url = URL.createObjectURL(new Blob([archive], { type: 'application/zip' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'labyrinth-style-export.zip';
+  link.click();
+  URL.revokeObjectURL(url);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
+  saveStatus.textContent = 'Exported ZIP and autosaved locally';
+}
+
+function validateDocument(value: unknown): StyleEditorDocumentV1 {
+  const document = value as Partial<StyleEditorDocumentV1>;
+  if (document.version !== 1 || !document.sample || !Array.isArray(document.elements) || !Array.isArray(document.colliders)) {
+    throw new Error('This is not a Labyrinth Style Editor v1 document.');
+  }
+  return document as StyleEditorDocumentV1;
+}
+
+async function importDocument(file: File): Promise<void> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let raw: string;
+  if (file.name.toLowerCase().endsWith('.zip')) {
+    const files = unzipSync(bytes);
+    const json = files['labyrinth-style-v1.json'] ?? Object.entries(files).find(([name]) => name.endsWith('.json'))?.[1];
+    if (!json) throw new Error('ZIP does not contain a style JSON file.');
+    raw = strFromU8(json);
+  } else {
+    raw = new TextDecoder().decode(bytes);
+  }
+  documentState = validateDocument(JSON.parse(raw));
+  selectedElementId = null;
+  selectedColliderId = null;
+  history.splice(0, history.length, JSON.stringify(documentState));
+  historyIndex = 0;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
+  notesField.value = documentState.notes;
+  await rebuildScene();
+  fitWorld();
+  updateHistoryButtons();
+  saveStatus.textContent = `Imported ${file.name}`;
+}
+
+document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((button) => button.addEventListener('click', () => setTool(button.dataset.tool as EditorTool)));
+undoButton.addEventListener('click', () => restoreHistory(historyIndex - 1));
+redoButton.addEventListener('click', () => restoreHistory(historyIndex + 1));
+required<HTMLButtonElement>('duplicate').addEventListener('click', duplicateSelection);
+required<HTMLButtonElement>('delete-selection').addEventListener('click', deleteSelection);
+required<HTMLButtonElement>('reset-document').addEventListener('click', () => {
+  if (!window.confirm('Reset the editor sample and discard the current local layout?')) return;
+  documentState = createSampleDocument();
+  selectedElementId = null; selectedColliderId = null;
+  history.splice(0, history.length, JSON.stringify(documentState)); historyIndex = 0;
+  notesField.value = '';
+  void rebuildScene().then(fitWorld);
+  scheduleAutosave(); updateHistoryButtons();
+});
+required<HTMLButtonElement>('save-document').addEventListener('click', () => void exportDocument().catch((error) => { saveStatus.textContent = error instanceof Error ? error.message : 'Export failed'; }));
+required<HTMLInputElement>('import-document').addEventListener('change', (event) => {
+  const file = (event.currentTarget as HTMLInputElement).files?.[0];
+  if (file) void importDocument(file).catch((error) => { saveStatus.textContent = error instanceof Error ? error.message : 'Import failed'; });
+});
+replaceAssetButton.addEventListener('click', replaceSelectedAsset);
+addAssetButton.addEventListener('click', addAssetAtViewportCenter);
+previousAssetsButton.addEventListener('click', () => { catalogQuery.offset = Math.max(0, catalogQuery.offset - PAGE_SIZE); void refreshCatalog(); });
+nextAssetsButton.addEventListener('click', () => { if (catalogQuery.offset + PAGE_SIZE < catalogResultTotal) catalogQuery.offset += PAGE_SIZE; void refreshCatalog(); });
+assetSearch.addEventListener('input', debounceCatalogInput);
+assetCollection.addEventListener('input', debounceCatalogInput);
+assetSource.addEventListener('change', () => { catalogQuery.source = assetSource.value; catalogQuery.offset = 0; void refreshCatalog(); });
+assetCategory.addEventListener('change', () => { catalogQuery.category = assetCategory.value; catalogQuery.offset = 0; void refreshCatalog(); });
+snapSizeSelect.addEventListener('change', () => { currentSnap = Number(snapSizeSelect.value) || 1; });
+showCollidersCheckbox.addEventListener('change', () => { colliderLayer.visible = showCollidersCheckbox.checked; });
+notesField.addEventListener('input', () => { documentState.notes = notesField.value; scheduleAutosave(); });
+
+window.addEventListener('keydown', (event) => {
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); restoreHistory(historyIndex - 1); return; }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); restoreHistory(historyIndex + 1); return; }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelection(); return; }
+  if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelection(); return; }
+  const directions: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  const direction = directions[event.key];
+  if (!direction) return;
+  const amount = event.shiftKey ? 8 : currentSnap;
+  const element = selectedElement();
+  const collider = selectedCollider();
+  if (element) { element.x += direction[0] * amount; element.y += direction[1] * amount; const sprite = spriteById.get(element.id); if (sprite) applyElementToSprite(element, sprite); }
+  else if (collider) { collider.x += direction[0] * amount; collider.y += direction[1] * amount; rebuildColliders(); }
+  else return;
+  event.preventDefault(); updateSelectionOverlay(); renderInspector(); commitHistory();
+});
+
+window.addEventListener('resize', () => { app.stage.hitArea = app.screen; });
+bindElementInspector();
+notesField.value = documentState.notes;
+setTool('select');
+updateHistoryButtons();
+await rebuildScene();
+fitWorld();
+saveStatus.textContent = loadLocalDocument() ? 'Restored local autosave' : 'New sample ready';
+void initializeCatalog().catch((error) => { assetGrid.innerHTML = `<div class="readout">${escapeHtml(error instanceof Error ? error.message : 'Catalog failed')}</div>`; });

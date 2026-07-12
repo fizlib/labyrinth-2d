@@ -246,6 +246,25 @@ canvas {
 
 /* ── Debug Settings Toggles ────────────────────────────────────────────── */
 
+.debug-editor-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  color: #f2f7e8;
+  background: linear-gradient(180deg, #3d704d, #264c34);
+  border: 1px solid #70a36e;
+  border-radius: 5px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.debug-editor-link:hover {
+  background: linear-gradient(180deg, #4b865d, #315f40);
+}
+
 .debug-toggles {
   display: flex;
   flex-direction: column;

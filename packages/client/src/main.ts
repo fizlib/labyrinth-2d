@@ -4,7 +4,7 @@
 // Step 9: 2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application, AnimatedSprite, Container, Texture, Text, TextStyle, TextureStyle, Graphics } from 'pixi.js';
+import { Application, AnimatedSprite, Container, Text, TextStyle, TextureStyle, Graphics } from 'pixi.js';
 
 TextureStyle.defaultOptions.scaleMode = 'nearest';
 import {
@@ -24,6 +24,7 @@ import {
   FEET_HITBOX_H,
   generateMazeLayout,
   applyInputWithCollision,
+  deriveFacingDirection,
 } from '@labyrinth/shared';
 import type { GameState, TileMapData, FacingDirection, GatePlacement, PressurePlateInfo, GeneratedMazeLayout } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
@@ -39,9 +40,6 @@ import { IntroDialogueHud } from './systems/IntroDialogueHud';
 import { MobileControls, type MobileControlDirection } from './systems/MobileControls';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
-
-const PLAYER_SPRITE_W = 16;
-const PLAYER_SPRITE_H = 32;
 const SPAWN_DIALOGUE_PAGES = [
   'You have been cast into the Maze. Scattered and alone, find your way to the heart of the labyrinth — where other survivors await.',
   'Together, activate the three ancient runes to unlock the portal and escape… before the Maze claims you forever.',
@@ -326,11 +324,7 @@ function getAnimationKey(facing: FacingDirection, isMoving: boolean): string {
 }
 
 function deriveFacingFromKeys(): FacingDirection {
-  if (activeKeys.down) return 'down';
-  if (activeKeys.up) return 'up';
-  if (activeKeys.right) return 'right';
-  if (activeKeys.left) return 'left';
-  return localFacing;
+  return deriveFacingDirection(activeKeys, localFacing);
 }
 
 interface ZIndexedDisplayObject {
@@ -402,6 +396,9 @@ function createDebugUI(): DebugUiDom {
       <h2>Players</h2>
       <ul id="player-list"></ul>
       <h2>Debug Settings</h2>
+      <a class="debug-editor-link" href="/style-editor.html" target="_blank" rel="noopener">
+        <span>🎨</span> Open Style Editor
+      </a>
       <div class="debug-toggles">
         <label class="debug-toggle" id="toggle-master">
           <input type="checkbox" ${flags.masterEnabled ? 'checked' : ''} data-flag="masterEnabled">
@@ -770,6 +767,7 @@ async function main(): Promise<void> {
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
   interface PlayerSpriteData {
+    container: Container;
     sprite: AnimatedSprite;
     currentAnimKey: string;
     spriteIndex: number;
@@ -778,25 +776,31 @@ async function main(): Promise<void> {
   const playerSprites: Map<string, PlayerSpriteData> = new Map();
 
   /** Safely resolve animation set for a player sprite, falling back to set 0. */
-  function getAnimSet(spriteIndex: number): Record<string, Texture[]> {
+  function getAnimSet(spriteIndex: number) {
     return assets.playerAnimationSets[spriteIndex] ?? assets.playerAnimationSets[0];
   }
 
   function createPlayerSprite(playerId: string, spriteIndex: number): PlayerSpriteData {
     const animSet = getAnimSet(spriteIndex);
     const animKey = 'idle-down';
-    const frames = animSet[animKey];
+    const frames = animSet.animations[animKey];
     const sprite = new AnimatedSprite(frames);
     sprite.animationSpeed = 0.15;
     sprite.loop = true;
     sprite.play();
-    sprite.width = PLAYER_SPRITE_W;
-    sprite.height = PLAYER_SPRITE_H;
-
+    sprite.scale.set(animSet.scale);
     sprite.anchor.set(0.5, 1.0); // bottom-center anchor
-    entityLayer.addChild(sprite); // Add directly to the sorted entity layer
 
-    const data: PlayerSpriteData = { sprite, currentAnimKey: animKey, spriteIndex };
+    // Keep the shadow outside the character's scale/mirroring transform so it
+    // has a consistent footprint for every character and always stays beneath.
+    const shadow = new Graphics()
+      .ellipse(0, -2, 7, 3)
+      .fill({ color: 0x16220d, alpha: 0.55 });
+    const container = new Container();
+    container.addChild(shadow, sprite);
+    entityLayer.addChild(container);
+
+    const data: PlayerSpriteData = { container, sprite, currentAnimKey: animKey, spriteIndex };
     playerSprites.set(playerId, data);
     return data;
   }
@@ -810,9 +814,11 @@ async function main(): Promise<void> {
   function setPlayerAnimation(data: PlayerSpriteData, animKey: string): void {
     if (data.currentAnimKey === animKey) return;
     const animSet = getAnimSet(data.spriteIndex);
-    const frames = animSet[animKey];
+    const frames = animSet.animations[animKey];
     if (!frames) return;
     data.sprite.textures = frames;
+    data.sprite.scale.x = animSet.mirroredKeys.has(animKey) ? -animSet.scale : animSet.scale;
+    data.sprite.scale.y = animSet.scale;
     data.sprite.play();
     data.currentAnimKey = animKey;
   }
@@ -820,8 +826,8 @@ async function main(): Promise<void> {
   function removePlayerSprite(playerId: string): void {
     const data = playerSprites.get(playerId);
     if (data) {
-      entityLayer.removeChild(data.sprite);
-      data.sprite.destroy();
+      entityLayer.removeChild(data.container);
+      data.container.destroy({ children: true });
       playerSprites.delete(playerId);
     }
   }
@@ -990,7 +996,7 @@ async function main(): Promise<void> {
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const data = ensurePlayerSprite(player.id, player.spriteIndex);
-        setRoundedPosition(data.sprite, player.x, player.y, 1);
+        setRoundedPosition(data.container, player.x, player.y, 1);
         if (!isLocal) knownRemotePlayers.add(player.id);
       }
 
@@ -1043,7 +1049,7 @@ async function main(): Promise<void> {
           }
         }
 
-        setRoundedPosition(data.sprite, localX, localY, 1);
+        setRoundedPosition(data.container, localX, localY, 1);
         wisdomOrbHud?.setRemaining(localPlayerData.wisdomOrbs);
       }
 
@@ -1208,7 +1214,7 @@ async function main(): Promise<void> {
 
     const localData = playerSprites.get(net.playerId);
     if (localData) {
-      setRoundedPosition(localData.sprite, localX, localY, 1);
+      setRoundedPosition(localData.container, localX, localY, 1);
 
       const localAnimKey = getAnimationKey(localFacing, isMoving);
       setPlayerAnimation(localData, localAnimKey);
@@ -1225,7 +1231,7 @@ async function main(): Promise<void> {
 
       const interp = getInterpolatedPlayer(remoteId, interpolationPair, latestSnapshot);
       if (interp) {
-        setRoundedPosition(data.sprite, interp.x, interp.y, 1);
+        setRoundedPosition(data.container, interp.x, interp.y, 1);
 
         const remoteAnimKey = getAnimationKey(interp.facing, interp.isMoving);
         setPlayerAnimation(data, remoteAnimKey);
@@ -1409,7 +1415,7 @@ async function main(): Promise<void> {
     // Immediately update sprite
     const localData = playerSprites.get(net.playerId!);
     if (localData) {
-      setRoundedPosition(localData.sprite, localX, localY, 1);
+      setRoundedPosition(localData.container, localX, localY, 1);
     }
 
     console.info(`[Debug] Teleported to (${Math.round(clampedX)}, ${Math.round(clampedY)})`);

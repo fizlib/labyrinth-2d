@@ -19,15 +19,6 @@ import {
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
   TILE_WALL_FACE,
-  TILE_WALL_TOP,
-  TILE_WALL_INTERIOR,
-  TILE_WALL_SIDE_LEFT,
-  TILE_WALL_SIDE_RIGHT,
-  TILE_WALL_BOTTOM,
-  TILE_WALL_CORNER_TL,
-  TILE_WALL_CORNER_TR,
-  TILE_WALL_CORNER_BL,
-  TILE_WALL_CORNER_BR,
   TILE_WALL_TOP_EDGE,
   TILE_TREE,
   TILE_RUNESTONE_1,
@@ -39,7 +30,7 @@ import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
 } from '@labyrinth/shared';
-import type { GameAssets, FrontGateTextures } from '../assets/AssetLoader';
+import type { DirtTextures, GameAssets, FrontGateTextures } from '../assets/AssetLoader';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -79,8 +70,10 @@ const FRONT_GATE_TILE_ROWS: (keyof FrontGateTextures)[][] = [
 /** Side length for 2D square chunks (background, shadows). */
 const BG_CHUNK_SIZE = 32;
 
-/** Width in tiles for wall row chunks (1 tile high). */
-const WALL_CHUNK_WIDTH = 32;
+/** Width in tiles for a baked, Y-sorted vegetation row segment. */
+const FOREST_CHUNK_WIDTH = 64;
+const FOREST_CANOPY_OVERFLOW = 116;
+const FOREST_SIDE_OVERFLOW = 52;
 
 // ── Internal chunk metadata ─────────────────────────────────────────────────
 
@@ -105,9 +98,9 @@ function getGrassTexture(x: number, y: number, grassTextures: Texture[]): Textur
   return grassTextures[3];
 }
 
-function getCenterDirtTexture(x: number, y: number, assets: GameAssets): Texture {
+function getCenterDirtTexture(x: number, y: number, textures: DirtTextures): Texture {
   const h = (Math.imul(x, 374761393) + Math.imul(y, 668265263)) >>> 0;
-  return (h & 1) === 0 ? assets.dirtTextures.center : assets.dirtTextures.plainAlt;
+  return (h & 1) === 0 ? textures.center : textures.plainAlt;
 }
 
 function isDirtAt(
@@ -127,7 +120,7 @@ function getDirtTexture(
   dirtMask: Uint8Array,
   mapWidth: number,
   mapHeight: number,
-  assets: GameAssets,
+  textures: DirtTextures,
 ): Texture {
   const north = isDirtAt(x, y - 1, dirtMask, mapWidth, mapHeight);
   const east = isDirtAt(x + 1, y, dirtMask, mapWidth, mapHeight);
@@ -139,55 +132,50 @@ function getDirtTexture(
   const missingSouth = !south;
   const missingWest = !west;
 
-  if (missingNorth && missingEast) return assets.dirtTextures.northEast;
-  if (missingEast && missingSouth) return assets.dirtTextures.southEast;
-  if (missingSouth && missingWest) return assets.dirtTextures.southWest;
-  if (missingNorth && missingWest) return assets.dirtTextures.northWest;
-  if (missingNorth) return assets.dirtTextures.north;
-  if (missingEast) return assets.dirtTextures.east;
-  if (missingSouth) return assets.dirtTextures.south;
-  if (missingWest) return assets.dirtTextures.west;
-  return getCenterDirtTexture(x, y, assets);
+  if (missingNorth && missingEast) return textures.northEast;
+  if (missingEast && missingSouth) return textures.southEast;
+  if (missingSouth && missingWest) return textures.southWest;
+  if (missingNorth && missingWest) return textures.northWest;
+  if (missingNorth) return textures.north;
+  if (missingEast) return textures.east;
+  if (missingSouth) return textures.south;
+  if (missingWest) return textures.west;
+  return getCenterDirtTexture(x, y, textures);
 }
 
-/** Deterministic wall face variant texture based on tile position. */
-function getWallFaceTexture(x: number, y: number, wallFaceTextures: Texture[]): Texture {
-  const h = ((x * 2246822519 + y * 3266489917) >>> 0) % 100;
-  if (h < 70) return wallFaceTextures[0];
-  if (h < 80) return wallFaceTextures[1];
-  if (h < 90) return wallFaceTextures[2];
-  return wallFaceTextures[3];
+function positionHash(x: number, y: number, salt = 0): number {
+  let h = Math.imul(x + salt * 17, 0x45d9f3b) ^ Math.imul(y - salt * 31, 0x119de1f3);
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x45d9f3b);
+  h ^= h >>> 16;
+  return h >>> 0;
 }
 
-/** Returns true if tileId is a wall-row obstacle that should render on the entity layer. */
-function isSolidWallTile(tileId: number, renderSimpleHorizontalGates: boolean): boolean {
-  return (tileId >= TILE_WALL_FACE && tileId <= TILE_WALL_TOP_EDGE) ||
-    tileId === TILE_GATE_VERTICAL ||
-    (renderSimpleHorizontalGates && tileId === TILE_GATE_HORIZONTAL);
+function isForestWallTileId(tileId: number): boolean {
+  return tileId >= TILE_WALL_FACE && tileId <= TILE_WALL_TOP_EDGE;
 }
 
-/** Returns the appropriate texture for a wall tile ID. */
-function getWallTexture(tileId: number, x: number, y: number, assets: GameAssets): Texture | null {
-  switch (tileId) {
-    case TILE_WALL_FACE:      return getWallFaceTexture(x, y, assets.wallFaceVariantTextures);
-    case TILE_WALL_TOP:       return assets.wallTopTexture;
-    case TILE_WALL_INTERIOR:  return assets.wallInteriorTexture;
-    case TILE_WALL_SIDE_LEFT: return assets.wallSideLeftTexture;
-    case TILE_WALL_SIDE_RIGHT:return assets.wallSideRightTexture;
-    case TILE_WALL_BOTTOM:    return assets.wallBottomTexture;
-    case TILE_WALL_CORNER_TL: return assets.wallCornerTLTexture;
-    case TILE_WALL_CORNER_TR: return assets.wallCornerTRTexture;
-    case TILE_WALL_CORNER_BL: return assets.wallCornerBLTexture;
-    case TILE_WALL_CORNER_BR: return assets.wallCornerBRTexture;
-    case TILE_WALL_TOP_EDGE:  return assets.wallTopEdgeTexture;
-    case TILE_GATE_HORIZONTAL:return assets.gateHorizontalTexture;
-    case TILE_GATE_VERTICAL:  return assets.gateVerticalTexture;
-    default: return null;
-  }
+function isForestAt(x: number, y: number, map: TileMapData): boolean {
+  if (x < 0 || x >= map.width || y < 0 || y >= map.height) return false;
+  return isForestWallTileId(map.data[y * map.width + x]);
+}
+
+function isForestBoundaryAt(x: number, y: number, map: TileMapData): boolean {
+  return isForestAt(x, y, map) && (
+    !isForestAt(x, y - 1, map) ||
+    !isForestAt(x + 1, y, map) ||
+    !isForestAt(x, y + 1, map) ||
+    !isForestAt(x - 1, y, map)
+  );
+}
+
+function getForestGroundTexture(x: number, y: number, textures: Texture[]): Texture {
+  return textures[positionHash(x, y, 5) % textures.length];
 }
 
 function usesGroundBackgroundTile(tileId: number): boolean {
-  return tileId === TILE_FLOOR ||
+  return isForestWallTileId(tileId) ||
+    tileId === TILE_FLOOR ||
     tileId === TILE_FLOOR_SHADOW ||
     tileId === TILE_TREE ||
     tileId === TILE_RUNESTONE_1 ||
@@ -211,13 +199,12 @@ function usesGroundShadowOverlay(tileId: number): boolean {
 }
 
 function isSouthGroundShadowCasterTileId(tileId: number): boolean {
-  return (tileId >= TILE_WALL_FACE && tileId <= TILE_TREE) ||
-    tileId === TILE_GATE_HORIZONTAL ||
+  return tileId === TILE_GATE_HORIZONTAL ||
     tileId === TILE_GATE_VERTICAL;
 }
 
 function isEastGroundShadowCasterTileId(tileId: number): boolean {
-  return tileId >= TILE_WALL_FACE && tileId <= TILE_TREE;
+  return tileId === TILE_GATE_HORIZONTAL || tileId === TILE_GATE_VERTICAL;
 }
 
 function createFrontGateSprite(
@@ -287,7 +274,12 @@ function getGroundTexture(
   assets: GameAssets,
 ): Texture {
   if (dirtMask[y * map.width + x] === 1) {
-    return getDirtTexture(x, y, dirtMask, map.width, map.height, assets);
+    return getDirtTexture(x, y, dirtMask, map.width, map.height, assets.forestPathTextures);
+  }
+
+  const tileId = map.data[y * map.width + x];
+  if (isForestWallTileId(tileId)) {
+    return getForestGroundTexture(x, y, assets.forestGroundTextures);
   }
 
   return getGrassTexture(x, y, assets.grassVariantTextures);
@@ -302,7 +294,7 @@ export class TilemapRenderer {
   /** Shadow overlay chunks. Attach after backgroundLayer. */
   readonly shadowLayer: Container;
 
-  // ── Wall row chunks — add individually to entityLayer for Y-sorting ────
+  // ── Forest/gate row chunks — add individually for feet-based Y-sorting ─
   readonly wallRowChunks: Container[] = [];
 
   // ── Extracted entities — add individually to entityLayer ────────────────
@@ -397,6 +389,8 @@ export class TilemapRenderer {
                 overlay.y = localY + shadow.offsetY;
                 overlay.width = ts;
                 overlay.height = ts;
+                overlay.alpha = 0.62;
+                overlay.tint = 0x6f8560;
                 shadowChunk.addChild(overlay);
                 shadowHasContent = true;
                 shadowChunkTopOverflow = Math.min(shadowChunkTopOverflow, overlay.y);
@@ -474,69 +468,167 @@ export class TilemapRenderer {
       }
     }
 
-    // ── Step 2: Build Row Chunks (Walls) ─────────────────────────────
-    
-    // Optimization: Making wall chunks up to 128 tiles wide (2048px) instead of 32 tiles.
-    // This reduces the number of elements in entityLayer from ~1500 to ~430, making
-    // Y-sorting much faster and heavily reducing CPU stuttering on mobile devices.
-    const WALL_CHUNK_WIDTH = 128;
-    const wallChunkCols = Math.ceil(map.width / WALL_CHUNK_WIDTH);
+    // ── Step 2: Build deterministic forest row chunks ─────────────────
+    // Only exposed forest cells receive vegetation. Solid interiors are filled
+    // by the dark ground baked above, while overlapping edge vegetation creates
+    // a natural silhouette without changing the collision map.
+    const forestChunkCols = Math.ceil(map.width / FOREST_CHUNK_WIDTH);
 
     for (let y = 0; y < map.height; y++) {
-      for (let wc = 0; wc < wallChunkCols; wc++) {
-        const startX = wc * WALL_CHUNK_WIDTH;
-        const endX = Math.min(startX + WALL_CHUNK_WIDTH, map.width);
-
+      for (let chunkCol = 0; chunkCol < forestChunkCols; chunkCol++) {
+        const startX = chunkCol * FOREST_CHUNK_WIDTH;
+        const endX = Math.min(startX + FOREST_CHUNK_WIDTH, map.width);
         const rowContainer = new Container();
-        let hasWalls = false;
+        let hasContent = false;
+        let lastPrimaryX = startX - 8;
 
         for (let x = startX; x < endX; x++) {
           const tileId = map.data[y * map.width + x];
 
-          if (isSolidWallTile(tileId, renderSimpleHorizontalGates)) {
-            const tex = getWallTexture(tileId, x, y, assets);
-            if (tex) {
-              const sprite = new Sprite(tex);
-              sprite.x = (x - startX) * ts;
-              sprite.y = 0;
-              sprite.width = ts;
-              sprite.height = ts;
-              rowContainer.addChild(sprite);
-              hasWalls = true;
-            }
+          // Keep simple gates visible when the full front-gate atlas is absent.
+          const gateTexture = tileId === TILE_GATE_VERTICAL
+            ? assets.gateVerticalTexture
+            : tileId === TILE_GATE_HORIZONTAL && renderSimpleHorizontalGates
+              ? assets.gateHorizontalTexture
+              : null;
+          if (gateTexture) {
+            const gateSprite = new Sprite(gateTexture);
+            gateSprite.x = (x - startX) * ts;
+            gateSprite.y = 0;
+            gateSprite.width = ts;
+            gateSprite.height = ts;
+            rowContainer.addChild(gateSprite);
+            hasContent = true;
           }
+
+          // Native Fiorwoods foliage modules fill only the forest interior.
+          // Exposed collision cells are reserved for trunks, saplings, shadows,
+          // and deliberate gaps so the face reads as a wooded barrier.
+          if (isForestWallTileId(tileId) && !isForestBoundaryAt(x, y, map)) {
+            const canopyHash = positionHash(x, y, 37);
+            const canopyTexture = assets.forestCanopyTextures[
+              canopyHash % assets.forestCanopyTextures.length
+            ];
+            const canopyWidth = 29 + (canopyHash % 7);
+
+            const canopy = new Sprite(canopyTexture);
+            canopy.anchor.set(0.5);
+            canopy.x = (x - startX) * ts + ts / 2 + ((canopyHash >>> 8) % 9) - 4;
+            canopy.y = ts / 2 + ((canopyHash >>> 12) % 9) - 4;
+            canopy.width = canopyWidth;
+            canopy.height = Math.round(canopyTexture.height * canopyWidth / canopyTexture.width);
+            rowContainer.addChild(canopy);
+            hasContent = true;
+          }
+
+          if (!isForestBoundaryAt(x, y, map)) continue;
+
+          const northOpen = !isForestAt(x, y - 1, map);
+          const eastOpen = !isForestAt(x + 1, y, map);
+          const southOpen = !isForestAt(x, y + 1, map);
+          const westOpen = !isForestAt(x - 1, y, map);
+          const hash = positionHash(x, y, 11);
+          const minSpacing = southOpen ? 3 : 6;
+          const primaryThreshold = southOpen ? 78 : 18;
+          const usePrimary = x - lastPrimaryX >= minSpacing && hash % 100 < primaryThreshold;
+
+          let footX = (x - startX) * ts + ts / 2 + ((hash >>> 8) % 9) - 4;
+          let footY = ts - 2 + ((hash >>> 12) % 5) - 2;
+          if (westOpen && !eastOpen) footX += 17;
+          if (eastOpen && !westOpen) footX -= 17;
+          if (northOpen && !southOpen) footY += 32;
+          if (southOpen) footY -= 6;
+
+          const faceRoll = (hash >>> 16) % 100;
+          const understoryIndex = southOpen && assets.forestUnderstoryTextures.length > 3
+            ? faceRoll < 72
+              ? (hash >>> 20) % Math.min(3, assets.forestUnderstoryTextures.length)
+              : 3 + ((hash >>> 20) % (assets.forestUnderstoryTextures.length - 3))
+            : hash % assets.forestUnderstoryTextures.length;
+          const texture = usePrimary
+            ? assets.forestTreeTextures[hash % assets.forestTreeTextures.length]
+            : assets.forestUnderstoryTextures[understoryIndex];
+
+          if (!usePrimary && hash % 100 >= (southOpen ? 55 : 68)) continue;
+
+          let targetHeight: number;
+          if (usePrimary) {
+            targetHeight = 84 + (hash % 9);
+            lastPrimaryX = x;
+          } else {
+            targetHeight = understoryIndex < 3
+              ? 45 + ((hash >>> 16) % 15)
+              : 22 + ((hash >>> 16) % 9);
+          }
+          const targetWidth = Math.max(16, Math.round(texture.width * targetHeight / texture.height));
+
+          const contactShadow = new Sprite(assets.forestShadowTexture);
+          contactShadow.anchor.set(0.5);
+          contactShadow.x = footX;
+          contactShadow.y = footY - 3;
+          contactShadow.width = usePrimary ? 50 : 34;
+          contactShadow.height = usePrimary ? 23 : 16;
+          contactShadow.alpha = usePrimary ? 0.62 : 0.42;
+          rowContainer.addChild(contactShadow);
+
+          const vegetation = new Sprite(texture);
+          vegetation.anchor.set(0.5, 1);
+          vegetation.x = footX;
+          vegetation.y = footY;
+          vegetation.width = targetWidth;
+          vegetation.height = targetHeight;
+          rowContainer.addChild(vegetation);
+
+          // Break up exposed big trunks with a low shrub layer on the face.
+          if (usePrimary && southOpen && ((hash >>> 20) % 100) < 24) {
+            const bushStart = Math.min(3, assets.forestUnderstoryTextures.length - 1);
+            const bushCount = Math.max(1, assets.forestUnderstoryTextures.length - bushStart);
+            const bushTexture = assets.forestUnderstoryTextures[
+              bushStart + ((hash >>> 24) % bushCount)
+            ];
+            const bushHeight = 22 + ((hash >>> 18) % 9);
+            const bush = new Sprite(bushTexture);
+            bush.anchor.set(0.5, 1);
+            bush.x = footX + (((hash >>> 22) % 2) === 0 ? -13 : 13);
+            bush.y = footY + 2;
+            bush.width = Math.max(16, Math.round(bushTexture.width * bushHeight / bushTexture.height));
+            bush.height = bushHeight;
+            rowContainer.addChild(bush);
+          }
+          hasContent = true;
         }
 
-        if (hasWalls) {
-          const wallPixelW = (endX - startX) * ts;
-          const wallFrame = new Rectangle(0, 0, wallPixelW, ts);
-
-          // Manually bake texture
-          const tex = renderer.generateTexture({
+        if (hasContent) {
+          const chunkPixelWidth = (endX - startX) * ts;
+          const frame = new Rectangle(
+            -FOREST_SIDE_OVERFLOW,
+            -FOREST_CANOPY_OVERFLOW,
+            chunkPixelWidth + FOREST_SIDE_OVERFLOW * 2,
+            FOREST_CANOPY_OVERFLOW + ts + 48,
+          );
+          const texture = renderer.generateTexture({
             target: rowContainer,
-            frame: wallFrame, // <-- Force exact dimensions
+            frame,
             resolution: 1,
-            antialias: false
+            antialias: false,
           });
-          tex.source.style.scaleMode = 'nearest';
-          tex.source.style.update();
+          texture.source.style.scaleMode = 'nearest';
+          texture.source.style.update();
 
-          const rowSprite = new Sprite(tex);
-          rowSprite.x = startX * ts;
-          rowSprite.y = y * ts;
-          rowSprite.zIndex = (y + 1) * ts; // Precise per-row Y-sort on the Sprite
-
+          const rowSprite = new Sprite(texture);
+          rowSprite.x = startX * ts - FOREST_SIDE_OVERFLOW;
+          rowSprite.y = y * ts - FOREST_CANOPY_OVERFLOW;
+          rowSprite.zIndex = (y + 1) * ts;
           this.wallRowChunks.push(rowSprite);
           this.allChunks.push({
             container: rowSprite,
-            worldLeft: startX * ts,
-            worldTop: y * ts,
-            worldRight: endX * ts,
-            worldBottom: (y + 1) * ts,
+            worldLeft: rowSprite.x,
+            worldTop: rowSprite.y,
+            worldRight: endX * ts + FOREST_SIDE_OVERFLOW,
+            worldBottom: (y + 4) * ts + 16,
             isVisible: true,
           });
-
-          rowContainer.destroy({ children: true }); // Free memory!
+          rowContainer.destroy({ children: true });
         }
       }
     }
@@ -548,13 +640,24 @@ export class TilemapRenderer {
         const tileId = map.data[y * map.width + x];
 
         if (tileId === TILE_TREE) {
-          const treeTex = assets.treeTexture;
+          const treeTex = assets.forestTreeTextures[positionHash(x, y, 23) % assets.forestTreeTextures.length];
+          const treeHeight = 112;
+          const treeWidth = Math.round(treeTex.width * treeHeight / treeTex.height);
+          const treeShadow = new Sprite(assets.forestShadowTexture);
+          treeShadow.anchor.set(0.5);
+          treeShadow.x = x * ts + ts / 2;
+          treeShadow.y = (y + 1) * ts - 4;
+          treeShadow.width = 54;
+          treeShadow.height = 24;
+          treeShadow.alpha = 0.68;
+          this.shadowLayer.addChild(treeShadow);
+
           const treeSprite = new Sprite(treeTex);
           treeSprite.anchor.set(0.5, 1.0);
           treeSprite.x = x * ts + ts / 2;
           treeSprite.y = (y + 1) * ts;
-          treeSprite.width = treeTex.width;
-          treeSprite.height = treeTex.height;
+          treeSprite.width = treeWidth;
+          treeSprite.height = treeHeight;
           treeSprite.zIndex = (y + 1) * ts;
           this.treeSprites.push(treeSprite);
         }

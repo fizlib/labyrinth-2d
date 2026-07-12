@@ -178,8 +178,28 @@ export interface DebugTeleportMessage {
 
 // ── Server → Client Messages ────────────────────────────────────────────────
 
-/** Valid facing directions for player sprites. */
-export type FacingDirection = 'up' | 'down' | 'left' | 'right';
+/** Valid cardinal and diagonal facing directions for player sprites. */
+export type FacingDirection =
+  | 'up'
+  | 'up-left'
+  | 'up-right'
+  | 'down'
+  | 'down-left'
+  | 'down-right'
+  | 'left'
+  | 'right';
+
+/** Resolve simultaneous movement buttons to an eight-way facing direction. */
+export function deriveFacingDirection(
+  input: Pick<PlayerInputMessage, 'up' | 'down' | 'left' | 'right'>,
+  fallback: FacingDirection,
+): FacingDirection {
+  const vertical = input.up === input.down ? null : input.up ? 'up' : 'down';
+  const horizontal = input.left === input.right ? null : input.left ? 'left' : 'right';
+
+  if (vertical && horizontal) return `${vertical}-${horizontal}` as FacingDirection;
+  return vertical ?? horizontal ?? fallback;
+}
 
 export interface PlayerInfo {
   id: string;

@@ -56,6 +56,22 @@ export interface DirtTextures {
   northWest: Texture;
 }
 
+export interface PlayerAnimationSet {
+  animations: Record<string, Texture[]>;
+  /** Animation keys whose source frames should be mirrored horizontally. */
+  mirroredKeys: ReadonlySet<string>;
+  scale: number;
+}
+
+function addDiagonalFallbacks(animations: Record<string, Texture[]>): void {
+  for (const state of ['idle', 'walk']) {
+    animations[`${state}-up-left`] = animations[`${state}-up`];
+    animations[`${state}-up-right`] = animations[`${state}-up`];
+    animations[`${state}-down-left`] = animations[`${state}-down`];
+    animations[`${state}-down-right`] = animations[`${state}-down`];
+  }
+}
+
 function createFallbackDirtTextures(): DirtTextures {
   const dirt = generateDirtTexture();
   return {
@@ -94,14 +110,26 @@ export interface GameAssets {
   grassVariantTextures: Texture[];
   dirtTextures: DirtTextures;
   treeTexture: Texture;
+  /** Dominant canopy trees used to build solid forest-wall clusters. */
+  forestTreeTextures: Texture[];
+  /** Trunk-free canopy crowns tiled across every solid forest cell. */
+  forestCanopyTextures: Texture[];
+  /** Smaller trees and bushes used to break up repeated canopy silhouettes. */
+  forestUnderstoryTextures: Texture[];
+  /** Dark ground rendered beneath every solid forest tile. */
+  forestGroundTextures: Texture[];
+  /** Mossy path tiles using the same transition contract as dirtTextures. */
+  forestPathTextures: DirtTextures;
+  /** Soft oval contact shadow rendered beneath forest vegetation. */
+  forestShadowTexture: Texture;
   /** Shadow overlay for tiles directly below a north wall. */
   shadowTopTexture: Texture;
   /** Shadow overlay for tiles directly right of a west wall. */
   shadowLeftTexture: Texture;
   /** Shadow overlay for inner corner tiles (below wall AND right of wall). */
   shadowCornerTexture: Texture;
-  /** Per-team animation sets. Access via playerAnimationSets[teamId]. */
-  playerAnimationSets: Record<string, Texture[]>[];
+  /** Per-player animation sets. Index 0 is the default Lenne character. */
+  playerAnimationSets: PlayerAnimationSet[];
   /** Runestone textures: 3 pairs of [inactive, active]. Access via runestoneTextures[index][0|1]. */
   runestoneTextures: [Texture, Texture][];
   /** Portal animation frames (row 1 emergence + row 2 idle, flattened). */
@@ -136,10 +164,16 @@ export async function loadAssets(): Promise<GameAssets> {
   let grassVariantTextures: Texture[] = [];
   let dirtTextures = createFallbackDirtTextures();
   let treeTexture: Texture;
+  let forestTreeTextures: Texture[] = [];
+  let forestCanopyTextures: Texture[] = [];
+  let forestUnderstoryTextures: Texture[] = [];
+  let forestGroundTextures: Texture[] = [];
+  let forestPathTextures = createFallbackDirtTextures();
+  let forestShadowTexture: Texture;
   let shadowTopTexture: Texture;
   let shadowLeftTexture: Texture;
   let shadowCornerTexture: Texture;
-  const playerAnimationSets: Record<string, Texture[]>[] = [];
+  const playerAnimationSets: PlayerAnimationSet[] = [];
   let runestoneTextures: [Texture, Texture][] = [];
   let portalFrames: Texture[] = [];
   let portalEmergenceCount = 6;
@@ -269,6 +303,74 @@ export async function loadAssets(): Promise<GameAssets> {
     treeTexture = generateTreeTexture();
   }
 
+  // ── Forest labyrinth reskin ─────────────────────────────────────────────
+  try {
+    const loadForestTexture = async (name: string): Promise<Texture> => {
+      const texture = await Assets.load<Texture>(`assets/forest/${name}`);
+      texture.source.scaleMode = 'nearest';
+      return texture;
+    };
+
+    forestTreeTextures = await Promise.all([
+      loadForestTexture('tree_primary_02.png'),
+      loadForestTexture('tree_primary_03.png'),
+    ]);
+    forestCanopyTextures = await Promise.all([
+      loadForestTexture('fior_canopy_0.png'),
+      loadForestTexture('fior_canopy_1.png'),
+      loadForestTexture('fior_canopy_2.png'),
+      loadForestTexture('fior_canopy_3.png'),
+      loadForestTexture('fior_canopy_4.png'),
+      loadForestTexture('fior_canopy_5.png'),
+      loadForestTexture('fior_canopy_6.png'),
+      loadForestTexture('fior_canopy_7.png'),
+    ]);
+    forestUnderstoryTextures = await Promise.all([
+      loadForestTexture('tree_small_04.png'),
+      loadForestTexture('tree_small_05.png'),
+      loadForestTexture('tree_small_06.png'),
+      loadForestTexture('bush_01.png'),
+      loadForestTexture('bush_02.png'),
+      loadForestTexture('bush_03.png'),
+      loadForestTexture('bush_04.png'),
+    ]);
+    grassVariantTextures = await Promise.all([
+      loadForestTexture('fior_grass_0.png'),
+      loadForestTexture('fior_grass_1.png'),
+      loadForestTexture('fior_grass_2.png'),
+      loadForestTexture('fior_grass_3.png'),
+    ]);
+    forestGroundTextures = await Promise.all([
+      loadForestTexture('fior_ground_0.png'),
+      loadForestTexture('fior_ground_1.png'),
+      loadForestTexture('fior_ground_2.png'),
+      loadForestTexture('fior_ground_3.png'),
+    ]);
+    forestPathTextures = {
+      center: await loadForestTexture('path_center.png'),
+      plainAlt: await loadForestTexture('path_plain_alt.png'),
+      north: await loadForestTexture('path_n.png'),
+      northEast: await loadForestTexture('path_ne.png'),
+      east: await loadForestTexture('path_e.png'),
+      southEast: await loadForestTexture('path_se.png'),
+      south: await loadForestTexture('path_s.png'),
+      southWest: await loadForestTexture('path_sw.png'),
+      west: await loadForestTexture('path_w.png'),
+      northWest: await loadForestTexture('path_nw.png'),
+    };
+    forestShadowTexture = await loadForestTexture('tree_shadow.png');
+    treeTexture = forestTreeTextures[0];
+    console.info('[Assets] Loaded forest trees, understory, terrain, paths, and shadows');
+  } catch {
+    console.warn('[Assets] Forest asset set incomplete — using existing terrain fallbacks');
+    forestTreeTextures = [treeTexture, treeTexture];
+    forestCanopyTextures = [treeTexture, treeTexture];
+    forestUnderstoryTextures = [treeTexture];
+    forestGroundTextures = [floorShadowTexture, floorShadowTexture, floorShadowTexture, floorShadowTexture];
+    forestPathTextures = dirtTextures;
+    forestShadowTexture = generateShadowCornerTexture();
+  }
+
   // ── Shadow overlay assets (16×16 semi-transparent PNGs) ───────────────────
   try {
     shadowTopTexture = await Assets.load<Texture>('assets/shadow_top.png');
@@ -285,9 +387,56 @@ export async function loadAssets(): Promise<GameAssets> {
     shadowCornerTexture = generateShadowCornerTexture();
   }
 
-  // ── Player spritesheets (128×128 — 8 cols × 4 rows, each frame 16×32) ──
-  // One file per team: player_0.png, player_1.png, …
-  // Teams without a dedicated file reuse team 0's animations.
+  // ── Lenne (default character) ───────────────────────────────────────────
+  // The source pack supplies individually cropped frames. Five right-facing
+  // directions cover all eight movement directions by mirroring the left side.
+  try {
+    const loadLenneFrame = async (frame: number): Promise<Texture> => {
+      const texture = await Assets.load<Texture>(`assets/lenne/lenne_${frame}.png`);
+      texture.source.scaleMode = 'nearest';
+      return texture;
+    };
+
+    const idleFrames = await Promise.all([0, 1, 2, 3, 4].map(loadLenneFrame));
+    const walkFrames = await Promise.all(
+      Array.from({ length: 30 }, (_, index) => index + 16).map(loadLenneFrame),
+    );
+    const animations: Record<string, Texture[]> = {
+      'idle-down': [idleFrames[0]],
+      'idle-right': [idleFrames[1]],
+      'idle-up': [idleFrames[2]],
+      'idle-up-right': [idleFrames[3]],
+      'idle-down-right': [idleFrames[4]],
+      'walk-down': walkFrames.slice(0, 6),
+      'walk-right': walkFrames.slice(6, 12),
+      'walk-up': walkFrames.slice(12, 18),
+      'walk-down-right': walkFrames.slice(18, 24),
+      'walk-up-right': walkFrames.slice(24, 30),
+    };
+    const mirroredKeys = new Set<string>();
+    for (const state of ['idle', 'walk']) {
+      for (const [leftDirection, rightDirection] of [
+        ['left', 'right'],
+        ['up-left', 'up-right'],
+        ['down-left', 'down-right'],
+      ]) {
+        const leftKey = `${state}-${leftDirection}`;
+        animations[leftKey] = animations[`${state}-${rightDirection}`];
+        mirroredKeys.add(leftKey);
+      }
+    }
+    // Lenne's source art is roughly 2x the width and height of legacy frames.
+    // Render it at half size while retaining the full-resolution source textures.
+    playerAnimationSets.push({ animations, mirroredKeys, scale: 0.5 });
+    console.info('[Assets] Loaded Lenne standing and eight-way movement animations');
+  } catch {
+    console.warn('[Assets] Lenne frames missing — using fallback character');
+    const { animations } = generatePlayerSpritesheet();
+    addDiagonalFallbacks(animations);
+    playerAnimationSets.push({ animations, mirroredKeys: new Set(), scale: 1 });
+  }
+
+  // ── Legacy player spritesheets (128×128; 16×32 frames) ────────────────
   const PLAYER_FILES = ['assets/player_0.png', 'assets/player_1.png', 'assets/player_2.png'];
   const dirOrder = ['down', 'left', 'right', 'up'] as const;
   const FW = 16;
@@ -324,12 +473,15 @@ export async function loadAssets(): Promise<GameAssets> {
         anims[`idle-${dir}`] = idleFrames;
       }
 
-      playerAnimationSets.push(anims);
+      // Legacy characters have no diagonal art; use their vertical frames.
+      addDiagonalFallbacks(anims);
+      playerAnimationSets.push({ animations: anims, mirroredKeys: new Set(), scale: 1 });
       console.info(`[Assets] Loaded ${PLAYER_FILES[i]}`);
     } catch {
       console.info(`[Assets] ${PLAYER_FILES[i]} not found — using fallback`);
       const { animations } = generatePlayerSpritesheet();
-      playerAnimationSets.push(animations);
+      addDiagonalFallbacks(animations);
+      playerAnimationSets.push({ animations, mirroredKeys: new Set(), scale: 1 });
     }
   }
 
@@ -510,6 +662,12 @@ export async function loadAssets(): Promise<GameAssets> {
     grassVariantTextures,
     dirtTextures,
     treeTexture,
+    forestTreeTextures,
+    forestCanopyTextures,
+    forestUnderstoryTextures,
+    forestGroundTextures,
+    forestPathTextures,
+    forestShadowTexture,
     shadowTopTexture,
     shadowLeftTexture,
     shadowCornerTexture,

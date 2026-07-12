@@ -31,10 +31,10 @@ import {
   computeHubDistanceField,
   computePortalDistanceField,
   getNavigationDirectionForPosition,
+  deriveFacingDirection,
   applyInputWithCollision,
   generateMazeLayout,
   type NavigationDistanceField,
-  type FacingDirection,
   type TileMapData,
   type SpawnPoint,
   type GatePlacement,
@@ -227,8 +227,9 @@ export class Room {
     const spawnY = (spawnTile.y + 0.5) * TILE_SIZE;
 
     // ── Per-player sprite assignment ─────────────────────────────────
-    // Available sprite count (must match client's PLAYER_FILES array length)
-    const SPRITE_COUNT = 3;
+    // Available sprite count (must match the client's player animation sets).
+    // Index 0 is Lenne, making her the default assignment for the first player.
+    const SPRITE_COUNT = 4;
     const usedSprites = new Set(this.state.players.map((p) => p.spriteIndex));
     let spriteIndex = -1;
     // Try to assign a unique sprite first
@@ -491,13 +492,7 @@ export class Room {
       player.isMoving = hasMovement;
 
       if (hasMovement) {
-        // Priority: down > up > right > left (arbitrary but consistent)
-        let newFacing: FacingDirection = player.facing;
-        if (lastInput.left) newFacing = 'left';
-        if (lastInput.right) newFacing = 'right';
-        if (lastInput.up) newFacing = 'up';
-        if (lastInput.down) newFacing = 'down';
-        player.facing = newFacing;
+        player.facing = deriveFacingDirection(lastInput, player.facing);
       }
 
       queue.length = 0;

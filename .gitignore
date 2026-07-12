@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Local Chained Echoes source library (large, licensed asset dump)
+packages/client/public/assets/chained-echoes-assets-sorted/
+
 # Environment
 .env
 .env.local

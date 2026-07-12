@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Labyrinth Style Editor</title>
+    <link rel="stylesheet" href="/src/editor/style-editor.css" />
+  </head>
+  <body>
+    <div id="small-screen-warning">The Style Editor requires a desktop viewport at least 1000px wide.</div>
+    <main id="editor-shell">
+      <header class="editor-header">
+        <div>
+          <h1>Labyrinth Style Editor</h1>
+          <span id="save-status">Loading editor…</span>
+        </div>
+        <div class="header-actions">
+          <a class="button secondary" href="/">Back to game</a>
+          <button id="reset-document" class="button danger">Reset sample</button>
+          <label class="button secondary file-button">Import<input id="import-document" type="file" accept=".json,.zip,application/json,application/zip" /></label>
+          <button id="save-document" class="button primary">Save JSON + Preview</button>
+        </div>
+      </header>
+
+      <aside class="asset-panel panel">
+        <div class="panel-heading"><h2>Asset Library</h2><span id="asset-total">0 assets</span></div>
+        <input id="asset-search" class="field" type="search" placeholder="Search filenames, e.g. tree02" />
+        <div class="filter-grid">
+          <select id="asset-source" class="field"><option value="">All sources</option></select>
+          <select id="asset-category" class="field"><option value="">All categories</option></select>
+        </div>
+        <input id="asset-collection" class="field" list="asset-collections" placeholder="Collection/theme (e.g. Fiorwoods)" />
+        <datalist id="asset-collections"></datalist>
+        <div id="selected-asset" class="selected-asset empty">Select an asset to preview it.</div>
+        <div class="asset-actions">
+          <button id="replace-asset" class="button primary" disabled>Replace selected</button>
+          <button id="add-asset" class="button secondary" disabled>Add at center</button>
+        </div>
+        <div id="asset-grid" class="asset-grid" aria-live="polite"></div>
+        <div class="pager">
+          <button id="asset-prev" class="button secondary">Previous</button>
+          <span id="asset-page">Page 1</span>
+          <button id="asset-next" class="button secondary">Next</button>
+        </div>
+      </aside>
+
+      <section class="workspace-panel">
+        <div id="editor-toolbar" class="toolbar">
+          <div class="tool-group" aria-label="Tools">
+            <button class="tool active" data-tool="select">Select</button>
+            <button class="tool" data-tool="add">Add</button>
+            <button class="tool" data-tool="paint">Paint</button>
+            <button class="tool" data-tool="erase">Erase</button>
+            <button class="tool" data-tool="collider">Collider</button>
+            <button class="tool" data-tool="pan">Pan</button>
+          </div>
+          <div class="tool-group">
+            <button id="undo" class="tool">Undo</button>
+            <button id="redo" class="tool">Redo</button>
+            <button id="duplicate" class="tool">Duplicate</button>
+            <button id="delete-selection" class="tool danger-text">Delete</button>
+          </div>
+          <label>Snap <select id="snap-size" class="compact-field"><option value="1">1 px</option><option value="8">8 px</option><option value="16">16 px</option></select></label>
+          <label><input id="show-colliders" type="checkbox" checked /> Colliders</label>
+          <span id="zoom-readout">100%</span>
+        </div>
+        <div id="canvas-host" tabindex="0" aria-label="Editable labyrinth sample canvas"></div>
+        <div class="workspace-help">Wheel: zoom · Pan tool/middle drag: pan · Arrows: nudge · Shift+arrows: 8px · Delete: remove · Ctrl+Z/Y: undo/redo</div>
+      </section>
+
+      <aside class="inspector-panel panel">
+        <div class="panel-heading"><h2>Inspector</h2><span id="selection-kind">Nothing selected</span></div>
+        <div id="element-inspector" class="inspector-section disabled">
+          <label>Name<input id="prop-name" class="field" /></label>
+          <label>Semantic role<select id="prop-role" class="field"></select></label>
+          <div class="number-grid">
+            <label>X<input id="prop-x" type="number" class="field" /></label>
+            <label>Y<input id="prop-y" type="number" class="field" /></label>
+            <label>Width<input id="prop-width" type="number" min="1" class="field" /></label>
+            <label>Height<input id="prop-height" type="number" min="1" class="field" /></label>
+            <label>Layer<input id="prop-z" type="number" class="field" /></label>
+            <label>Opacity<input id="prop-opacity" type="number" min="0" max="1" step="0.05" class="field" /></label>
+          </div>
+          <div class="check-row"><label><input id="prop-flip-x" type="checkbox" /> Flip X</label><label><input id="prop-flip-y" type="checkbox" /> Flip Y</label><label><input id="prop-visible" type="checkbox" /> Visible</label></div>
+          <div id="dimension-readout" class="readout"></div>
+          <div id="asset-path-readout" class="readout path"></div>
+        </div>
+
+        <div id="collider-inspector" class="inspector-section disabled">
+          <label>Name<input id="collider-name" class="field" /></label>
+          <label>Bound role<input id="collider-role" class="field" /></label>
+          <div class="number-grid">
+            <label>X<input id="collider-x" type="number" class="field" /></label>
+            <label>Y<input id="collider-y" type="number" class="field" /></label>
+            <label>Width<input id="collider-width" type="number" min="1" class="field" /></label>
+            <label>Height<input id="collider-height" type="number" min="1" class="field" /></label>
+          </div>
+          <label><input id="collider-enabled" type="checkbox" /> Enabled</label>
+        </div>
+
+        <label class="notes-label">Style notes<textarea id="style-notes" class="field" rows="4" placeholder="Describe repetition, spacing, intended density, or exceptions…"></textarea></label>
+        <div class="layers-heading"><h2>Layers</h2><span>ground grouped</span></div>
+        <div id="layer-list" class="layer-list"></div>
+      </aside>
+    </main>
+    <script type="module" src="/src/editor/main.ts"></script>
+  </body>
+</html>
