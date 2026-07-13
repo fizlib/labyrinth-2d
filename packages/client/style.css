@@ -79,6 +79,12 @@ canvas {
   display: none;
 }
 
+#debug-ui .debug-content {
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 #debug-ui .debug-header {
   display: flex;
   justify-content: space-between;
@@ -209,16 +215,31 @@ canvas {
 }
 
 #player-list li {
-  padding: 5px 8px;
   margin-bottom: 3px;
+}
+
+.debug-player-row {
+  width: 100%;
+  padding: 6px 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid #2a2a4a;
   border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
   font-size: 0.72rem;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.debug-player-row:hover,
+.debug-player-row.selected {
+  background: rgba(106, 90, 205, 0.14);
+  border-color: #6a5acd;
 }
 
 .player-name {
@@ -242,6 +263,125 @@ canvas {
   font-size: 0.65rem;
   font-weight: bold;
   margin-left: auto;
+}
+
+.dead-badge {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(231, 76, 60, 0.16);
+  color: #ff7675;
+  font-size: 0.6rem;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.debug-player-actions {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #514b79;
+  border-radius: 6px;
+  background: rgba(25, 23, 46, 0.98);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+}
+
+.debug-player-actions[hidden] {
+  display: none;
+}
+
+.debug-player-actions-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.debug-player-actions-header strong,
+.debug-player-actions-header span {
+  display: block;
+}
+
+.debug-player-actions-header strong {
+  color: #f0e68c;
+  font-size: 0.78rem;
+}
+
+.debug-player-actions-header span {
+  margin-top: 2px;
+  color: #7f8fa6;
+  font-size: 0.62rem;
+}
+
+#debug-player-actions-close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #3b3858;
+  border-radius: 4px;
+  background: transparent;
+  color: #9aa3b5;
+  cursor: pointer;
+  font: inherit;
+}
+
+.debug-player-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.debug-player-action-grid > button,
+.debug-player-skin-control select {
+  min-height: 30px;
+  border: 1px solid #3b3858;
+  border-radius: 4px;
+  background: #18172a;
+  color: #dfe6e9;
+  font-family: inherit;
+  font-size: 0.65rem;
+}
+
+.debug-player-action-grid > button {
+  padding: 5px 7px;
+  cursor: pointer;
+}
+
+.debug-player-action-grid > button:hover:not(:disabled),
+.debug-player-skin-control select:hover {
+  border-color: #6a5acd;
+  background: #22203b;
+}
+
+.debug-player-action-grid > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.debug-player-action-grid > button.danger {
+  grid-column: 1 / -1;
+  border-color: rgba(231, 76, 60, 0.55);
+  color: #ff8b87;
+}
+
+.debug-player-action-grid > button.danger.revive {
+  border-color: rgba(46, 204, 113, 0.55);
+  color: #65e59a;
+}
+
+.debug-player-skin-control {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  color: #7f8fa6;
+  font-size: 0.62rem;
+}
+
+.debug-player-skin-control select {
+  width: 100%;
+  padding: 4px 6px;
+  cursor: pointer;
 }
 
 /* ── Debug Settings Toggles ────────────────────────────────────────────── */

@@ -17,6 +17,8 @@ import {
   type ActivateRunestoneMessage,
   type UseWisdomOrbMessage,
   type DebugTeleportMessage,
+  type DebugPlayerAction,
+  type DebugPlayerActionMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -272,6 +274,21 @@ export class NetworkManager {
       type: MessageType.DebugTeleport,
       x,
       y,
+    };
+    this.send(msg);
+  }
+
+  /** Send an action from the debug player menu. */
+  sendDebugPlayerAction(
+    targetPlayerId: string,
+    action: DebugPlayerAction,
+    options: Pick<DebugPlayerActionMessage, 'spriteIndex' | 'dead'> = {},
+  ): void {
+    const msg: DebugPlayerActionMessage = {
+      type: MessageType.DebugPlayerAction,
+      targetPlayerId,
+      action,
+      ...options,
     };
     this.send(msg);
   }

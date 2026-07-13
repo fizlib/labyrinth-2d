@@ -120,6 +120,12 @@ export const DEFAULT_ROOM_ID = 'default';
 /** Number of wisdom orbs each player starts with. */
 export const INITIAL_WISDOM_ORBS = 3;
 
+/** Playable character names in server sprite-index order. */
+export const PLAYER_CHARACTER_NAMES = ['Lenne', 'Glenn', 'Amalia', 'Robb', 'Sienna'] as const;
+
+/** Number of playable character animation sets. */
+export const PLAYER_CHARACTER_COUNT = PLAYER_CHARACTER_NAMES.length;
+
 // ── Network Message Types ───────────────────────────────────────────────────
 
 /**
@@ -133,6 +139,7 @@ export enum MessageType {
   ActivateRunestone = 'ACTIVATE_RUNESTONE',
   UseWisdomOrb = 'USE_WISDOM_ORB',
   DebugTeleport = 'DEBUG_TELEPORT',
+  DebugPlayerAction = 'DEBUG_PLAYER_ACTION',
 
   // ── Server → Client ──
   RoomJoined = 'ROOM_JOINED',
@@ -180,6 +187,18 @@ export interface DebugTeleportMessage {
   y: number;
 }
 
+export type DebugPlayerAction = 'teleport-to' | 'teleport-here' | 'set-skin' | 'set-dead';
+
+export interface DebugPlayerActionMessage {
+  type: MessageType.DebugPlayerAction;
+  action: DebugPlayerAction;
+  targetPlayerId: string;
+  /** Required for set-skin; ignored by other actions. */
+  spriteIndex?: number;
+  /** Required for set-dead; false revives the player. */
+  dead?: boolean;
+}
+
 // ── Server → Client Messages ────────────────────────────────────────────────
 
 /** Valid cardinal and diagonal facing directions for player sprites. */
@@ -215,6 +234,8 @@ export interface PlayerInfo {
   y: number;
   facing: FacingDirection;
   isMoving: boolean;
+  /** Debug death state; currently rendered as the character's lying pose. */
+  isDead: boolean;
   lastProcessedInput: number;
   wisdomOrbs: number;
 }
@@ -309,7 +330,8 @@ export type ClientToServerMessage =
   | PlayerInputMessage
   | ActivateRunestoneMessage
   | UseWisdomOrbMessage
-  | DebugTeleportMessage;
+  | DebugTeleportMessage
+  | DebugPlayerActionMessage;
 
 export type ServerToClientMessage =
   | RoomJoinedMessage

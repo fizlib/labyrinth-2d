@@ -160,6 +160,16 @@ uWS
             break;
           }
 
+          case MessageType.DebugPlayerAction: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) {
+                room.handleDebugPlayerAction(data.id, msg);
+              }
+            }
+            break;
+          }
+
           default:
             console.warn(`[WS] Unknown message type from ${data.id}`);
         }

@@ -22,6 +22,7 @@ import {
   CELL_SIZE,
   SPAWN_DISTANCE,
   INITIAL_WISDOM_ORBS,
+  PLAYER_CHARACTER_COUNT,
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
   TILE_RUNESTONE_3,
@@ -46,6 +47,7 @@ import {
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
   type DebugTeleportMessage,
+  type DebugPlayerActionMessage,
   type RoomJoinedMessage,
   type TickUpdateMessage,
   type PlayerLeftMessage,
@@ -229,11 +231,10 @@ export class Room {
     // ── Per-player sprite assignment ─────────────────────────────────
     // Available sprite count (must match the client's player animation sets).
     // Index 0 is Lenne, making her the default assignment for the first player.
-    const SPRITE_COUNT = 5;
     const usedSprites = new Set(this.state.players.map((p) => p.spriteIndex));
     let spriteIndex = -1;
     // Try to assign a unique sprite first
-    for (let s = 0; s < SPRITE_COUNT; s++) {
+    for (let s = 0; s < PLAYER_CHARACTER_COUNT; s++) {
       if (!usedSprites.has(s)) {
         spriteIndex = s;
         break;
@@ -241,7 +242,7 @@ export class Room {
     }
     // If all sprites are taken, assign randomly
     if (spriteIndex === -1) {
-      spriteIndex = Math.floor(Math.random() * SPRITE_COUNT);
+      spriteIndex = Math.floor(Math.random() * PLAYER_CHARACTER_COUNT);
     }
 
     const playerInfo: PlayerInfo = {
@@ -253,6 +254,7 @@ export class Room {
       y: spawnY,
       facing: 'down',
       isMoving: false,
+      isDead: false,
       lastProcessedInput: 0,
       wisdomOrbs: INITIAL_WISDOM_ORBS,
     };
@@ -318,9 +320,65 @@ export class Room {
   handleDebugTeleport(playerId: string, msg: DebugTeleportMessage): void {
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player) return;
+    this.clearQueuedInputs(player);
     player.x = msg.x;
     player.y = msg.y;
     console.info(`[Room:${this.id}] Debug teleport ${playerId} → (${Math.round(msg.x)}, ${Math.round(msg.y)})`);
+  }
+
+  /** Debug: apply a player-menu action using authoritative room state. */
+  handleDebugPlayerAction(requesterId: string, msg: DebugPlayerActionMessage): void {
+    const requester = this.state.players.find((player) => player.id === requesterId);
+    const target = this.state.players.find((player) => player.id === msg.targetPlayerId);
+    if (!requester || !target) return;
+
+    switch (msg.action) {
+      case 'teleport-to':
+        this.teleportPlayer(requester, target.x, target.y);
+        console.info(`[Room:${this.id}] Debug teleported ${requesterId} to ${target.id}`);
+        break;
+
+      case 'teleport-here':
+        this.teleportPlayer(target, requester.x, requester.y);
+        console.info(`[Room:${this.id}] Debug teleported ${target.id} to ${requesterId}`);
+        break;
+
+      case 'set-skin':
+        if (
+          typeof msg.spriteIndex !== 'number' ||
+          !Number.isInteger(msg.spriteIndex) ||
+          msg.spriteIndex < 0 ||
+          msg.spriteIndex >= PLAYER_CHARACTER_COUNT
+        ) {
+          return;
+        }
+        target.spriteIndex = msg.spriteIndex;
+        console.info(`[Room:${this.id}] Debug changed ${target.id} skin to ${msg.spriteIndex}`);
+        break;
+
+      case 'set-dead':
+        if (typeof msg.dead !== 'boolean') return;
+        target.isDead = msg.dead;
+        console.info(`[Room:${this.id}] Debug marked ${target.id} ${msg.dead ? 'dead' : 'alive'}`);
+        break;
+    }
+  }
+
+  private teleportPlayer(player: PlayerInfo, x: number, y: number): void {
+    this.clearQueuedInputs(player);
+    player.x = x;
+    player.y = y;
+  }
+
+  private clearQueuedInputs(player: PlayerInfo): void {
+    const queue = this.inputQueues.get(player.id);
+    if (queue) {
+      for (const input of queue) {
+        player.lastProcessedInput = Math.max(player.lastProcessedInput, input.sequenceNumber);
+      }
+      queue.length = 0;
+    }
+    player.isMoving = false;
   }
 
   /** Handle a runestone activation request. Validates proximity server-side. */

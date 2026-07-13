@@ -22,6 +22,7 @@ import {
   CELL_STEP_Y,
   GRID_CELLS,
   SPAWN_DISTANCE,
+  PLAYER_CHARACTER_NAMES,
   FEET_HITBOX_W,
   FEET_HITBOX_H,
   generateMazeLayout,
@@ -132,8 +133,9 @@ let localY = 0;
 let localPlayerInitialized = false;
 let localFacing: FacingDirection = 'down';
 
-/** When true, server reconciliation is skipped so debug teleport position sticks. */
+/** Briefly suppress reconciliation while a click-teleport reaches the server. */
 let debugTeleportActive = false;
+let debugTeleportResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 let currentMap: TileMapData | null = null;
 const snapshotBuffer = new SnapshotBuffer();
@@ -282,6 +284,7 @@ interface InterpolatedPlayer {
   y: number;
   facing: FacingDirection;
   isMoving: boolean;
+  isDead: boolean;
 }
 
 interface SnapshotPair {
@@ -306,16 +309,17 @@ function getInterpolatedPlayer(
         y: lerp(pastPlayer.y, futurePlayer.y, pair.t),
         facing: futurePlayer.facing,
         isMoving: futurePlayer.isMoving,
+        isDead: futurePlayer.isDead,
       };
     }
 
-    if (futurePlayer) return { x: futurePlayer.x, y: futurePlayer.y, facing: futurePlayer.facing, isMoving: futurePlayer.isMoving };
-    if (pastPlayer) return { x: pastPlayer.x, y: pastPlayer.y, facing: pastPlayer.facing, isMoving: pastPlayer.isMoving };
+    if (futurePlayer) return { x: futurePlayer.x, y: futurePlayer.y, facing: futurePlayer.facing, isMoving: futurePlayer.isMoving, isDead: futurePlayer.isDead };
+    if (pastPlayer) return { x: pastPlayer.x, y: pastPlayer.y, facing: pastPlayer.facing, isMoving: pastPlayer.isMoving, isDead: pastPlayer.isDead };
   }
 
   if (latest) {
     const player = latest.state.players.find((p) => p.id === playerId);
-    if (player) return { x: player.x, y: player.y, facing: player.facing, isMoving: player.isMoving };
+    if (player) return { x: player.x, y: player.y, facing: player.facing, isMoving: player.isMoving, isDead: player.isDead };
   }
 
   return null;
@@ -323,7 +327,8 @@ function getInterpolatedPlayer(
 
 // ── Animation Helpers ───────────────────────────────────────────────────────
 
-function getAnimationKey(facing: FacingDirection, isMoving: boolean): string {
+function getAnimationKey(facing: FacingDirection, isMoving: boolean, isDead = false): string {
+  if (isDead) return 'lying';
   return isMoving ? `walk-${facing}` : `idle-${facing}`;
 }
 
@@ -361,11 +366,30 @@ interface DebugUiDom {
   pending: HTMLSpanElement;
   snapshot: HTMLSpanElement;
   playerList: HTMLUListElement;
+  playerActions: HTMLDivElement;
+  playerActionName: HTMLElement;
+  playerActionMeta: HTMLSpanElement;
+  playerSkinSelect: HTMLSelectElement;
+  teleportToButton: HTMLButtonElement;
+  teleportHereButton: HTMLButtonElement;
+  toggleDeadButton: HTMLButtonElement;
 }
 
 const DEBUG_UI_UPDATE_INTERVAL_MS = 150;
 let lastDebugUiUpdateAt = -Infinity;
 let lastDebugPlayerListMarkup = '';
+let selectedDebugPlayerId: string | null = null;
+
+function escapeHtml(value: string): string {
+  const replacements: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  };
+  return value.replace(/[&<>"']/g, (character) => replacements[character]);
+}
 
 function createDebugUI(): DebugUiDom {
   const debugDiv = document.createElement('div');
@@ -399,6 +423,26 @@ function createDebugUI(): DebugUiDom {
       </div>
       <h2>Players</h2>
       <ul id="player-list"></ul>
+      <div class="debug-player-actions" id="debug-player-actions" hidden>
+        <div class="debug-player-actions-header">
+          <div>
+            <strong id="debug-player-action-name">Player</strong>
+            <span id="debug-player-action-meta"></span>
+          </div>
+          <button type="button" id="debug-player-actions-close" title="Close player menu" aria-label="Close player menu">×</button>
+        </div>
+        <div class="debug-player-action-grid">
+          <button type="button" id="debug-teleport-to" data-player-action="teleport-to">Teleport to them</button>
+          <button type="button" id="debug-teleport-here" data-player-action="teleport-here">Teleport them to me</button>
+          <label class="debug-player-skin-control">
+            <span>Character skin</span>
+            <select id="debug-player-skin-select">
+              ${PLAYER_CHARACTER_NAMES.map((name, index) => `<option value="${index}">${name}</option>`).join('')}
+            </select>
+          </label>
+          <button type="button" id="debug-toggle-dead" class="danger" data-player-action="toggle-dead">Make dead</button>
+        </div>
+      </div>
       <h2>Debug Settings</h2>
       <a class="debug-editor-link" href="/style-editor.html" target="_blank" rel="noopener">
         <span>🎨</span> Open Style Editor
@@ -434,13 +478,34 @@ function createDebugUI(): DebugUiDom {
   const pending = debugDiv.querySelector<HTMLSpanElement>('#pending-count');
   const snapshot = debugDiv.querySelector<HTMLSpanElement>('#snapshot-count');
   const playerList = debugDiv.querySelector<HTMLUListElement>('#player-list');
+  const playerActions = debugDiv.querySelector<HTMLDivElement>('#debug-player-actions');
+  const playerActionName = debugDiv.querySelector<HTMLElement>('#debug-player-action-name');
+  const playerActionMeta = debugDiv.querySelector<HTMLSpanElement>('#debug-player-action-meta');
+  const playerSkinSelect = debugDiv.querySelector<HTMLSelectElement>('#debug-player-skin-select');
+  const teleportToButton = debugDiv.querySelector<HTMLButtonElement>('#debug-teleport-to');
+  const teleportHereButton = debugDiv.querySelector<HTMLButtonElement>('#debug-teleport-here');
+  const toggleDeadButton = debugDiv.querySelector<HTMLButtonElement>('#debug-toggle-dead');
 
-  if (!status || !tick || !pending || !snapshot || !playerList) {
+  if (
+    !status ||
+    !tick ||
+    !pending ||
+    !snapshot ||
+    !playerList ||
+    !playerActions ||
+    !playerActionName ||
+    !playerActionMeta ||
+    !playerSkinSelect ||
+    !teleportToButton ||
+    !teleportHereButton ||
+    !toggleDeadButton
+  ) {
     throw new Error('Failed to initialize debug UI');
   }
 
   lastDebugUiUpdateAt = -Infinity;
   lastDebugPlayerListMarkup = '';
+  selectedDebugPlayerId = null;
 
   return {
     root: debugDiv,
@@ -449,6 +514,13 @@ function createDebugUI(): DebugUiDom {
     pending,
     snapshot,
     playerList,
+    playerActions,
+    playerActionName,
+    playerActionMeta,
+    playerSkinSelect,
+    teleportToButton,
+    teleportHereButton,
+    toggleDeadButton,
   };
 }
 
@@ -476,6 +548,85 @@ function setupDebugToggles(debugUi: DebugUiDom): void {
   }
 }
 
+function renderDebugPlayerActions(
+  debugUi: DebugUiDom,
+  state: GameState,
+  localPlayerId: string | null,
+): void {
+  const player = state.players.find((candidate) => candidate.id === selectedDebugPlayerId);
+  if (!player) {
+    selectedDebugPlayerId = null;
+    debugUi.playerActions.hidden = true;
+    return;
+  }
+
+  const skinName = PLAYER_CHARACTER_NAMES[player.spriteIndex] ?? `Skin ${player.spriteIndex}`;
+  const isLocalPlayer = player.id === localPlayerId;
+  debugUi.playerActions.hidden = false;
+  debugUi.playerActionName.textContent = player.displayName;
+  debugUi.playerActionMeta.textContent = `${skinName} · ${player.isDead ? 'dead' : 'alive'}`;
+  debugUi.playerSkinSelect.value = String(player.spriteIndex);
+  debugUi.teleportToButton.disabled = isLocalPlayer;
+  debugUi.teleportHereButton.disabled = isLocalPlayer;
+  debugUi.toggleDeadButton.textContent = player.isDead ? 'Revive player' : 'Make dead';
+  debugUi.toggleDeadButton.classList.toggle('revive', player.isDead);
+}
+
+function setupDebugPlayerActions(
+  debugUi: DebugUiDom,
+  net: NetworkManager,
+  getState: () => GameState | null,
+  getLocalPlayerId: () => string | null,
+): void {
+  const refresh = (): void => {
+    const state = getState();
+    if (state) updateDebugUI(debugUi, state, getLocalPlayerId(), true);
+  };
+
+  debugUi.playerList.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return;
+    const playerButton = event.target.closest<HTMLButtonElement>('[data-debug-player-id]');
+    if (!playerButton) return;
+    selectedDebugPlayerId = playerButton.dataset.debugPlayerId ?? null;
+    refresh();
+  });
+
+  debugUi.root.querySelector<HTMLButtonElement>('#debug-player-actions-close')?.addEventListener('click', () => {
+    selectedDebugPlayerId = null;
+    refresh();
+  });
+
+  debugUi.playerActions.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element) || !selectedDebugPlayerId) return;
+    const actionButton = event.target.closest<HTMLButtonElement>('[data-player-action]');
+    if (!actionButton || actionButton.disabled) return;
+
+    switch (actionButton.dataset.playerAction) {
+      case 'teleport-to':
+        net.sendDebugPlayerAction(selectedDebugPlayerId, 'teleport-to');
+        break;
+      case 'teleport-here':
+        net.sendDebugPlayerAction(selectedDebugPlayerId, 'teleport-here');
+        break;
+      case 'toggle-dead': {
+        const player = getState()?.players.find((candidate) => candidate.id === selectedDebugPlayerId);
+        if (player) {
+          net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-dead', { dead: !player.isDead });
+        }
+        break;
+      }
+    }
+  });
+
+  debugUi.playerSkinSelect.addEventListener('change', () => {
+    if (!selectedDebugPlayerId) return;
+    const spriteIndex = Number.parseInt(debugUi.playerSkinSelect.value, 10);
+    if (Number.isInteger(spriteIndex)) {
+      net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-skin', { spriteIndex });
+    }
+  });
+}
+
 function updateDebugUI(debugUi: DebugUiDom, state: GameState, playerId: string | null, force = false): void {
   const now = performance.now();
   if (!force && now - lastDebugUiUpdateAt < DEBUG_UI_UPDATE_INTERVAL_MS) return;
@@ -492,7 +643,10 @@ function updateDebugUI(debugUi: DebugUiDom, state: GameState, playerId: string |
   const playerListMarkup = state.players
       .map((p) => {
         const isYou = p.id === playerId ? ' <span class="you-badge">← you</span>' : '';
-        return `<li><span class="player-name">${p.displayName}</span> <span class="player-pos">(${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${isYou}</li>`;
+        const isSelected = p.id === selectedDebugPlayerId ? ' selected' : '';
+        const deadBadge = p.isDead ? '<span class="dead-badge">dead</span>' : '';
+        const skinName = PLAYER_CHARACTER_NAMES[p.spriteIndex] ?? `Skin ${p.spriteIndex}`;
+        return `<li><button type="button" class="debug-player-row${isSelected}" data-debug-player-id="${escapeHtml(p.id)}"><span class="player-name">${escapeHtml(p.displayName)}</span><span class="player-pos">${escapeHtml(skinName)} · (${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${deadBadge}${isYou}</button></li>`;
       })
       .join('');
 
@@ -500,6 +654,7 @@ function updateDebugUI(debugUi: DebugUiDom, state: GameState, playerId: string |
     debugUi.playerList.innerHTML = playerListMarkup;
     lastDebugPlayerListMarkup = playerListMarkup;
   }
+  renderDebugPlayerActions(debugUi, state, playerId);
 }
 
 // ── Gate State Helpers ──────────────────────────────────────────────────────
@@ -777,6 +932,7 @@ async function main(): Promise<void> {
 
   interface PlayerSpriteData {
     container: Container;
+    shadow: Graphics;
     sprite: AnimatedSprite;
     currentAnimKey: string;
     spriteIndex: number;
@@ -809,7 +965,7 @@ async function main(): Promise<void> {
     container.addChild(shadow, sprite);
     entityLayer.addChild(container);
 
-    const data: PlayerSpriteData = { container, sprite, currentAnimKey: animKey, spriteIndex };
+    const data: PlayerSpriteData = { container, shadow, sprite, currentAnimKey: animKey, spriteIndex };
     playerSprites.set(playerId, data);
     return data;
   }
@@ -817,10 +973,16 @@ async function main(): Promise<void> {
   function ensurePlayerSprite(playerId: string, spriteIndex: number): PlayerSpriteData {
     let data = playerSprites.get(playerId);
     if (!data) data = createPlayerSprite(playerId, spriteIndex);
+    else if (data.spriteIndex !== spriteIndex) {
+      data.spriteIndex = spriteIndex;
+      data.currentAnimKey = '';
+      setPlayerAnimation(data, 'idle-down');
+    }
     return data;
   }
 
   function setPlayerAnimation(data: PlayerSpriteData, animKey: string): void {
+    data.shadow.visible = animKey !== 'lying';
     if (data.currentAnimKey === animKey) return;
     const animSet = getAnimSet(data.spriteIndex);
     const frames = animSet.animations[animKey];
@@ -1012,6 +1174,7 @@ async function main(): Promise<void> {
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const data = ensurePlayerSprite(player.id, player.spriteIndex);
+        setPlayerAnimation(data, getAnimationKey(player.facing, player.isMoving, player.isDead));
         setRoundedPosition(data.container, player.x, player.y, 1);
         if (!isLocal) knownRemotePlayers.add(player.id);
       }
@@ -1033,8 +1196,6 @@ async function main(): Promise<void> {
       if (localPlayerData) {
         const data = ensurePlayerSprite(localPlayerData.id, localPlayerData.spriteIndex);
 
-        // Skip entire server reconciliation while a debug teleport is active —
-        // the server doesn't know about the teleport so its position is stale.
         if (!debugTeleportActive) {
           // Compute reconciled position from server state + pending input replay
           let reconciledX = localPlayerData.x;
@@ -1142,6 +1303,10 @@ async function main(): Promise<void> {
     },
   });
 
+  if (debugUi) {
+    setupDebugPlayerActions(debugUi, net, () => latestServerState, () => net.playerId);
+  }
+
   // ── Interaction Helpers + Mobile Controls ────────────────────────────
 
   const triggerUseWisdomOrb = (source: 'Click' | 'KeyQ' | 'MobileQ'): void => {
@@ -1205,6 +1370,8 @@ async function main(): Promise<void> {
     const now = performance.now();
 
     // ── 1. Local player prediction ────────────────────────────────
+    const localPlayerState = latestServerState?.players.find((player) => player.id === net.playerId);
+    const isLocalDead = localPlayerState?.isDead ?? false;
     const isMoving = activeKeys.up || activeKeys.down || activeKeys.left || activeKeys.right;
     if (isMoving) {
       localFacing = deriveFacingFromKeys();
@@ -1232,7 +1399,7 @@ async function main(): Promise<void> {
     if (localData) {
       setRoundedPosition(localData.container, localX, localY, 1);
 
-      const localAnimKey = getAnimationKey(localFacing, isMoving);
+      const localAnimKey = getAnimationKey(localFacing, isMoving, isLocalDead);
       setPlayerAnimation(localData, localAnimKey);
     }
 
@@ -1249,7 +1416,7 @@ async function main(): Promise<void> {
       if (interp) {
         setRoundedPosition(data.container, interp.x, interp.y, 1);
 
-        const remoteAnimKey = getAnimationKey(interp.facing, interp.isMoving);
+        const remoteAnimKey = getAnimationKey(interp.facing, interp.isMoving, interp.isDead);
         setPlayerAnimation(data, remoteAnimKey);
       }
     }
@@ -1423,7 +1590,12 @@ async function main(): Promise<void> {
 
     localX = clampedX;
     localY = clampedY;
-    debugTeleportActive = true; // prevent server reconciliation from snapping back
+    debugTeleportActive = true;
+    if (debugTeleportResetTimer !== null) clearTimeout(debugTeleportResetTimer);
+    debugTeleportResetTimer = setTimeout(() => {
+      debugTeleportActive = false;
+      debugTeleportResetTimer = null;
+    }, 250);
 
     // Notify server of the new position so proximity checks work
     net.sendDebugTeleport(clampedX, clampedY);
