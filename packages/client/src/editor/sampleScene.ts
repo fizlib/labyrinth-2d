@@ -3,10 +3,18 @@ import {
   CELL_STEP_X,
   CELL_STEP_Y,
   GRID_CELLS,
+  SPAWN_DISTANCE,
+  TILE_RUNESTONE_1,
+  TILE_RUNESTONE_2,
+  TILE_RUNESTONE_3,
+  TILE_TREE,
   WALL_HEIGHT,
   WALL_WIDTH,
-  generateMaze,
+  generateMazeLayout,
+  getHubTileBounds,
   isSolidTileId,
+  type GeneratedMazeLayout,
+  type GatePlacement,
   type TileMapData,
 } from '@labyrinth/shared';
 import {
@@ -23,7 +31,7 @@ const MAZE_SEED = 44;
 const CROP_CELL_X = 2;
 const CROP_CELL_Y = 5;
 const CROP_CELLS_WIDE = 7;
-const CROP_CELLS_HIGH = 5;
+const CROP_CELLS_HIGH = 6;
 const CROP_TILE_X = CROP_CELL_X * CELL_STEP_X;
 const CROP_TILE_Y = CROP_CELL_Y * CELL_STEP_Y;
 const SAMPLE_TILES_WIDE = WALL_WIDTH + CROP_CELLS_WIDE * CELL_STEP_X;
@@ -31,6 +39,12 @@ const SAMPLE_TILES_HIGH = WALL_HEIGHT + CROP_CELLS_HIGH * CELL_STEP_Y;
 const SAMPLE_WIDTH = SAMPLE_TILES_WIDE * TILE;
 const SAMPLE_HEIGHT = SAMPLE_TILES_HIGH * TILE;
 const FIORWOODS_ROOT = '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods';
+const FOREST_ROOT = '/assets/forest';
+const GATE_SHEET = '/assets/gates.png';
+const PLATE_SHEET = '/assets/plate_spritesheet.png';
+const RUNESTONE_SHEET = '/assets/runestones.png';
+const HUB_TREE = `${FOREST_ROOT}/tree_primary_02.png`;
+const HUB_TREE_SHADOW = `${FOREST_ROOT}/tree_shadow.png`;
 const GRASS_IDS = [102, 105, 108, 154] as const;
 let sequence = 0;
 
@@ -50,10 +64,12 @@ function fiorwoodsAsset(assetId: number): string {
   return `${FIORWOODS_ROOT}/Sprite_Fiorwoods_${assetId}.png`;
 }
 
-function element(
+function assetElement(
   name: string,
   role: SemanticRole,
-  assetId: number,
+  assetPath: string,
+  nativeWidth: number,
+  nativeHeight: number,
   x: number,
   y: number,
   width: number,
@@ -61,14 +77,16 @@ function element(
   zIndex: number,
   flipX = false,
   flipY = false,
+  sourceRect?: EditorElement['sourceRect'],
 ): EditorElement {
   return {
     id: id('element'),
     name,
     role,
-    assetPath: fiorwoodsAsset(assetId),
-    nativeWidth: 32,
-    nativeHeight: 32,
+    assetPath,
+    sourceRect,
+    nativeWidth,
+    nativeHeight,
     x,
     y,
     width,
@@ -81,18 +99,77 @@ function element(
   };
 }
 
-function collider(name: string, x: number, y: number, width: number, height: number): EditorCollider {
+function element(
+  name: string,
+  role: SemanticRole,
+  assetId: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  zIndex: number,
+  flipX = false,
+  flipY = false,
+): EditorElement {
+  return assetElement(
+    name,
+    role,
+    fiorwoodsAsset(assetId),
+    32,
+    32,
+    x,
+    y,
+    width,
+    height,
+    zIndex,
+    flipX,
+    flipY,
+  );
+}
+
+function collider(
+  name: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  ownerRole: EditorCollider['ownerRole'] = 'wall.solid',
+  ownerId: string | null = null,
+): EditorCollider {
   return {
     id: id('collider'),
     name,
-    ownerId: null,
-    ownerRole: 'wall.solid',
+    ownerId,
+    ownerRole,
     x,
     y,
     width,
     height,
     enabled: true,
   };
+}
+
+function isDirtAt(layout: GeneratedMazeLayout, x: number, y: number): boolean {
+  return x >= 0 && x < layout.map.width && y >= 0 && y < layout.map.height &&
+    layout.dirtMask[y * layout.map.width + x] === 1;
+}
+
+function gateApproachAsset(layout: GeneratedMazeLayout, x: number, y: number): string {
+  const north = isDirtAt(layout, x, y - 1);
+  const east = isDirtAt(layout, x + 1, y);
+  const south = isDirtAt(layout, x, y + 1);
+  const west = isDirtAt(layout, x - 1, y);
+
+  if (!north && !east) return `${FOREST_ROOT}/path_ne.png`;
+  if (!east && !south) return `${FOREST_ROOT}/path_se.png`;
+  if (!south && !west) return `${FOREST_ROOT}/path_sw.png`;
+  if (!north && !west) return `${FOREST_ROOT}/path_nw.png`;
+  if (!north) return `${FOREST_ROOT}/path_n.png`;
+  if (!east) return `${FOREST_ROOT}/path_e.png`;
+  if (!south) return `${FOREST_ROOT}/path_s.png`;
+  if (!west) return `${FOREST_ROOT}/path_w.png`;
+  const hash = (Math.imul(x, 374761393) + Math.imul(y, 668265263)) >>> 0;
+  return `${FOREST_ROOT}/${(hash & 1) === 0 ? 'path_center.png' : 'path_plain_alt.png'}`;
 }
 
 function grassAssetId(x: number, y: number): number {
@@ -192,13 +269,32 @@ function placementCellReference(map: TileMapData, placement: ForestStylePlacemen
   return `cell ${cellX},${cellY} ${connections || '-'} (${topologyLabel(connections)})`;
 }
 
-function addGroundElements(map: TileMapData, elements: EditorElement[]): void {
+function addGroundElements(layout: GeneratedMazeLayout, elements: EditorElement[]): void {
+  const map = layout.map;
+  const hub = getHubTileBounds(map.width, map.height);
   for (let sampleY = 0; sampleY < SAMPLE_TILES_HIGH; sampleY++) {
     const mapY = CROP_TILE_Y + sampleY;
     for (let sampleX = 0; sampleX < SAMPLE_TILES_WIDE; sampleX++) {
       const mapX = CROP_TILE_X + sampleX;
       const tileId = map.data[mapY * map.width + mapX];
       const forest = isForestWallTileId(tileId);
+      const gateApproach = layout.dirtMask[mapY * map.width + mapX] === 1;
+      const centralHub = mapX >= hub.left && mapX <= hub.right && mapY >= hub.top && mapY <= hub.bottom;
+      if (gateApproach) {
+        elements.push(assetElement(
+          `Gate obstacle approach path · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
+          'ground.path',
+          gateApproachAsset(layout, mapX, mapY),
+          TILE,
+          TILE,
+          sampleX * TILE,
+          sampleY * TILE,
+          TILE,
+          TILE,
+          0,
+        ));
+        continue;
+      }
       const assetId = forest ? getForestGroundAssetId(mapX, mapY, map) : grassAssetId(mapX, mapY);
       const underlayAssetId = forest ? getForestGroundUnderlayAssetId(mapX, mapY, map) : null;
       if (underlayAssetId !== null) {
@@ -214,7 +310,7 @@ function addGroundElements(map: TileMapData, elements: EditorElement[]): void {
         ));
       }
       elements.push(element(
-        `${forest ? 'Forest underlay' : 'Grass'} · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
+        `${centralHub ? 'Central hub · ' : ''}${forest ? 'Forest underlay' : 'Grass'} · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
         forest ? 'ground.forest' : 'ground.grass',
         assetId,
         sampleX * TILE,
@@ -222,6 +318,167 @@ function addGroundElements(map: TileMapData, elements: EditorElement[]): void {
         TILE,
         TILE,
         0,
+      ));
+    }
+  }
+}
+
+function gateIsInSample(gate: GatePlacement): boolean {
+  return gate.orientation === 'horizontal' &&
+    gate.tileX + CELL_SIZE > CROP_TILE_X && gate.tileX < CROP_TILE_X + SAMPLE_TILES_WIDE &&
+    gate.tileY >= CROP_TILE_Y && gate.tileY < CROP_TILE_Y + SAMPLE_TILES_HIGH;
+}
+
+function addGateObstacleElements(
+  layout: GeneratedMazeLayout,
+  elements: EditorElement[],
+  colliders: EditorCollider[],
+): void {
+  const gateSourceRows = [0, 1, 1, 2] as const;
+
+  for (let gateIndex = 0; gateIndex < layout.gates.length; gateIndex++) {
+    const gate = layout.gates[gateIndex];
+    if (!gateIsInSample(gate)) continue;
+
+    const localGateX = (gate.tileX - CROP_TILE_X) * TILE;
+    const localGateY = (gate.tileY - 3 - CROP_TILE_Y) * TILE;
+    const zIndex = 1000 + (gate.tileY + 1) * 1000 + 500;
+    for (let row = 0; row < 4; row++) {
+      for (let column = 0; column < CELL_SIZE; column++) {
+        const sourceColumn = column === 0 ? 0 : column === CELL_SIZE - 1 ? 2 : 1;
+        const section = row === 0 ? 'top' : row === 3 ? 'bottom' : `middle row ${row}`;
+        elements.push(assetElement(
+          `Gate obstacle · gate ${gateIndex} team ${gate.teamIndex + 1} · ${section} tile ${column + 1} of ${CELL_SIZE}`,
+          'gate',
+          GATE_SHEET,
+          TILE,
+          TILE,
+          localGateX + column * TILE,
+          localGateY + row * TILE,
+          TILE,
+          TILE,
+          zIndex,
+          false,
+          false,
+          { x: sourceColumn * TILE, y: gateSourceRows[row] * TILE, width: TILE, height: TILE },
+        ));
+      }
+    }
+
+    colliders.push(collider(
+      `Gate obstacle · gate ${gateIndex} closed barrier`,
+      localGateX,
+      (gate.tileY - CROP_TILE_Y) * TILE,
+      CELL_SIZE * TILE,
+      TILE,
+      'gate',
+    ));
+  }
+
+  for (const plate of layout.pressurePlates) {
+    const gate = layout.gates[plate.gateIndex];
+    if (!gate || !gateIsInSample(gate)) continue;
+    if (plate.tileX < CROP_TILE_X || plate.tileX >= CROP_TILE_X + SAMPLE_TILES_WIDE ||
+        plate.tileY < CROP_TILE_Y || plate.tileY >= CROP_TILE_Y + SAMPLE_TILES_HIGH) continue;
+
+    const hubSide = plate.side === 'hub';
+    const matchingSide = layout.pressurePlates.filter((candidate) =>
+      candidate.gateIndex === plate.gateIndex && candidate.side === plate.side);
+    const sideIndex = matchingSide.findIndex((candidate) => candidate.id === plate.id);
+    const width = hubSide ? 24 : TILE;
+    elements.push(assetElement(
+      `Gate obstacle · gate ${plate.gateIndex} · ${plate.side}-side button ${sideIndex + 1}`,
+      'pressure-plate',
+      PLATE_SHEET,
+      width,
+      TILE,
+      (plate.tileX - CROP_TILE_X) * TILE - (hubSide ? 4 : 0),
+      (plate.tileY - CROP_TILE_Y) * TILE,
+      width,
+      TILE,
+      1000 + plate.tileY * 1000 + 200,
+      false,
+      false,
+      { x: 0, y: hubSide ? TILE : 0, width, height: TILE },
+    ));
+  }
+}
+
+function addCentralHubElements(
+  map: TileMapData,
+  elements: EditorElement[],
+  colliders: EditorCollider[],
+): void {
+  for (let mapY = CROP_TILE_Y; mapY < CROP_TILE_Y + SAMPLE_TILES_HIGH; mapY++) {
+    for (let mapX = CROP_TILE_X; mapX < CROP_TILE_X + SAMPLE_TILES_WIDE; mapX++) {
+      const tileId = map.data[mapY * map.width + mapX];
+      const localTileX = (mapX - CROP_TILE_X) * TILE;
+      const localTileY = (mapY - CROP_TILE_Y) * TILE;
+
+      if (tileId === TILE_TREE) {
+        elements.push(assetElement(
+          `Central hub · tree contact shadow · map tile ${mapX},${mapY}`,
+          'shadow',
+          HUB_TREE_SHADOW,
+          50,
+          50,
+          localTileX + TILE / 2 - 27,
+          localTileY + TILE - 4 - 12,
+          54,
+          24,
+          100,
+        ));
+        const tree = assetElement(
+          `Central hub · sacred tree · map tile ${mapX},${mapY}`,
+          'tree.large',
+          HUB_TREE,
+          164,
+          214,
+          localTileX + TILE / 2 - 43,
+          localTileY + TILE - 112,
+          86,
+          112,
+          1000 + (mapY + 1) * 1000 + 800,
+        );
+        elements.push(tree);
+        colliders.push(collider(
+          `Central hub · sacred tree solid tile ${mapX},${mapY}`,
+          localTileX,
+          localTileY,
+          TILE,
+          TILE,
+          'tree.large',
+          tree.id,
+        ));
+        continue;
+      }
+
+      if (tileId !== TILE_RUNESTONE_1 && tileId !== TILE_RUNESTONE_2 && tileId !== TILE_RUNESTONE_3) continue;
+      const runestoneIndex = tileId - TILE_RUNESTONE_1;
+      const runestone = assetElement(
+        `Central hub · runestone ${runestoneIndex + 1} · map tile ${mapX},${mapY}`,
+        'runestone',
+        RUNESTONE_SHEET,
+        TILE,
+        TILE * 2,
+        localTileX,
+        localTileY - TILE,
+        TILE,
+        TILE * 2,
+        1000 + (mapY + 1) * 1000 + 700,
+        false,
+        false,
+        { x: runestoneIndex * TILE * 2, y: 0, width: TILE, height: TILE * 2 },
+      );
+      elements.push(runestone);
+      colliders.push(collider(
+        `Central hub · runestone ${runestoneIndex + 1} solid tile ${mapX},${mapY}`,
+        localTileX,
+        localTileY,
+        TILE,
+        TILE,
+        'runestone',
+        runestone.id,
       ));
     }
   }
@@ -289,7 +546,8 @@ function addWallColliders(map: TileMapData, colliders: EditorCollider[]): void {
 
 export function createSampleDocument(): StyleEditorDocumentV1 {
   sequence = 0;
-  const map = generateMaze(MAZE_SEED);
+  const layout = generateMazeLayout(MAZE_SEED, SPAWN_DISTANCE);
+  const map = layout.map;
   const elements: EditorElement[] = [];
   const colliders: EditorCollider[] = [];
   const topology: NonNullable<StyleEditorDocumentV1['reference']>['topology'] = [];
@@ -310,9 +568,11 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
     }
   }
 
-  addGroundElements(map, elements);
+  addGroundElements(layout, elements);
   addWallElements(map, elements);
   addWallColliders(map, colliders);
+  addGateObstacleElements(layout, elements, colliders);
+  addCentralHubElements(map, elements, colliders);
 
   const topologyGrid = Array.from({ length: CROP_CELLS_HIGH }, (_, row) =>
     topology
@@ -327,15 +587,16 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
     createdAt: now,
     updatedAt: now,
     sample: {
-      name: 'Generated Fiorwoods Topology Atlas · seed 44 · cells 2,5–8,9',
+      name: 'Generated Fiorwoods Topology Atlas · seed 44 · cells 2,5–8,10',
       width: SAMPLE_WIDTH,
       height: SAMPLE_HEIGHT,
       tileSize: TILE,
     },
     notes: [
-      'Exact crop of generated maze seed 44: map cells (2,5) through (8,9), using the same wall-placement builder as the game.',
+      'Exact crop of generated maze seed 44: map cells (2,5) through (8,10), using the same wall-placement builder and generated obstacle layout as the game.',
       'Connection letters are N/E/S/W openings. This fixture includes both straights, all four turns, every T-junction orientation, a four-way cross, and every dead-end orientation.',
-      'The central hub section includes both thick side walls and their corrected north-west and north-east corner transitions.',
+      'The central hub section includes its editable ground tiles, thick side walls, corrected north-west and north-east corner transitions, sacred tree, tree shadow, and three runestones.',
+      'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',
       'Each wall sprite name records its authored role, source cell topology, and original map tile. Preserve those names when editing so a later export identifies the rendering rule and location unambiguously.',

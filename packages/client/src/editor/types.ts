@@ -51,6 +51,13 @@ export interface EditorElement {
   name: string;
   role: SemanticRole;
   assetPath: string;
+  /** Optional frame within a spritesheet. Omit to use the complete asset. */
+  sourceRect?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
   nativeWidth: number;
   nativeHeight: number;
   x: number;

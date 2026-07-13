@@ -22,7 +22,7 @@ import {
   type StyleEditorDocumentV1,
 } from './types';
 
-const STORAGE_KEY = 'labyrinth-style-editor-v1-topology-atlas-r13';
+const STORAGE_KEY = 'labyrinth-style-editor-v1-topology-atlas-r14';
 const STORAGE_ARCHIVE_PREFIX = 'zip-base64:';
 const PAGE_SIZE = 200;
 const HISTORY_LIMIT = 20;
@@ -116,6 +116,7 @@ let saveTimer: number | null = null;
 let shiftHeld = false;
 const spriteById = new Map<string, Sprite>();
 const colliderGraphicById = new Map<string, Graphics>();
+let framedTextures: Texture[] = [];
 
 const history: string[] = [JSON.stringify(documentState)];
 let historyIndex = 0;
@@ -281,10 +282,22 @@ async function rebuildScene(): Promise<void> {
   if (generation !== renderGeneration) return;
 
   for (const child of sceneLayer.removeChildren()) child.destroy();
+  for (const texture of framedTextures) texture.destroy(false);
+  framedTextures = [];
   spriteById.clear();
   const sorted = [...documentState.elements].sort((a, b) => a.zIndex - b.zIndex || a.id.localeCompare(b.id));
   for (const element of sorted) {
-    const sprite = new Sprite(textures.get(element.assetPath) ?? Texture.WHITE);
+    const baseTexture = textures.get(element.assetPath) ?? Texture.WHITE;
+    let spriteTexture = baseTexture;
+    if (element.sourceRect && baseTexture !== Texture.WHITE) {
+      const frame = element.sourceRect;
+      spriteTexture = new Texture({
+        source: baseTexture.source,
+        frame: new Rectangle(frame.x, frame.y, frame.width, frame.height),
+      });
+      framedTextures.push(spriteTexture);
+    }
+    const sprite = new Sprite(spriteTexture);
     sprite.label = element.name;
     sprite.eventMode = 'static';
     sprite.cursor = 'pointer';
@@ -650,6 +663,7 @@ function paintAt(point: { x: number; y: number }): void {
     element.role.startsWith('ground.') && element.x === x && element.y === y && element.width === 16 && element.height === 16);
   if (existing) {
     existing.assetPath = selectedAsset.path;
+    delete existing.sourceRect;
     existing.name = selectedAsset.name;
     existing.nativeWidth = selectedAsset.width;
     existing.nativeHeight = selectedAsset.height;
@@ -782,6 +796,7 @@ function replaceSelectedAsset(): void {
   const element = selectedElement();
   if (!element || !selectedAsset) return;
   element.assetPath = selectedAsset.path;
+  delete element.sourceRect;
   element.nativeWidth = selectedAsset.width;
   element.nativeHeight = selectedAsset.height;
   element.name = selectedAsset.name;
@@ -878,7 +893,7 @@ function renderLayers(): void {
   }
 
   const query = layerSearch.value.trim().toLowerCase();
-  const candidates = documentState.elements.filter((element) => !element.role.startsWith('ground.'));
+  const candidates = documentState.elements;
   const matching = query
     ? candidates.filter((element) =>
         `${element.name} ${element.role} ${element.assetPath}`.toLowerCase().includes(query))
@@ -893,11 +908,11 @@ function renderLayers(): void {
   if (query) {
     resultSummary.textContent = matching.length > limit
       ? `${matching.length} matches · showing first ${limit}`
-      : `${matching.length} matching wall sprites`;
+      : `${matching.length} matching atlas elements`;
   } else {
     resultSummary.textContent = items.length > 0
-      ? 'Selected wall sprites'
-      : 'Click a wall sprite or filter by cell, topology, role, or asset ID.';
+      ? 'Selected atlas elements'
+      : 'Click an element or filter by hub, gate, button, cell, topology, role, or asset ID.';
   }
   layerList.appendChild(resultSummary);
 
