@@ -166,6 +166,7 @@ function topologyLabel(connections: string): string {
 }
 
 function placementRole(placement: ForestStylePlacementSpec): SemanticRole {
+  if (placement.name.startsWith('Inner north-west corner ground')) return 'ground.grass';
   if (placement.name.startsWith('South-west corner ground')) return 'ground.grass';
   if (placement.name.startsWith('South-west corner wall')) return 'wall.south.face';
   if (placement.name.startsWith('South-west corner vertical')) return 'wall.vertical.face';

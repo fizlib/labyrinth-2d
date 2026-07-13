@@ -144,6 +144,54 @@ function isTopRightForestCorner(x: number, y: number, map: TileMapData): boolean
     isForestAt(x, y + 1, map);
 }
 
+function isInnerNorthEastForestCorner(x: number, y: number, map: TileMapData): boolean {
+  return isForestAt(x, y, map) &&
+    isForestAt(x - 1, y, map) &&
+    isForestAt(x, y - 1, map) &&
+    !isForestAt(x - 1, y - 1, map);
+}
+
+function isInnerNorthWestForestCorner(x: number, y: number, map: TileMapData): boolean {
+  return isForestAt(x, y, map) &&
+    isForestAt(x + 1, y, map) &&
+    isForestAt(x, y - 1, map) &&
+    !isForestAt(x + 1, y - 1, map);
+}
+
+function isPairedInnerNorthConnection(cornerX: number, cornerY: number, map: TileMapData): boolean {
+  return isInnerNorthWestForestCorner(cornerX, cornerY, map) &&
+    isInnerNorthEastForestCorner(cornerX - (WALL_WIDTH - 1), cornerY, map);
+}
+
+function isDuplicateInnerNorthEastContinuation(x: number, y: number, map: TileMapData): boolean {
+  for (let distanceToCorner = 1; distanceToCorner < WALL_HEIGHT; distanceToCorner++) {
+    if (isInnerNorthEastForestCorner(x, y - distanceToCorner, map)) return true;
+  }
+  return false;
+}
+
+function isDuplicateInnerNorthWestContinuation(x: number, y: number, map: TileMapData): boolean {
+  for (let distanceToCorner = 0; distanceToCorner < WALL_HEIGHT; distanceToCorner++) {
+    if (isInnerNorthWestForestCorner(x, y - distanceToCorner, map)) return true;
+  }
+  return false;
+}
+
+function isDuplicatePairedNorthEdge(
+  x: number,
+  y: number,
+  part: 'top' | 'bottom',
+  map: TileMapData,
+): boolean {
+  if (isInnerNorthWestForestCorner(x - 1, y, map)) return true;
+  for (let cornerX = x - 1; cornerX <= x + WALL_WIDTH - 2; cornerX++) {
+    if (!isPairedInnerNorthConnection(cornerX, y, map)) continue;
+    const startX = cornerX - WALL_WIDTH + (part === 'top' ? 2 : 3);
+    if (x >= startX && x <= cornerX + 1) return true;
+  }
+  return false;
+}
+
 function isBottomRightForestCorner(x: number, y: number, map: TileMapData): boolean {
   return x + 1 < map.width &&
     y + 1 < map.height &&
@@ -450,12 +498,17 @@ export function buildForestStylePlacementRows(
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
       if (!shouldRenderWestEdge(x, y, map)) continue;
+      if (isDuplicateInnerNorthWestContinuation(x, y, map)) continue;
+      const innerNorthWestConnection = isInnerNorthWestForestCorner(x, y + 1, map);
       if (!isBottomRightCornerWestFill(x, y, map)) {
         addWorldPlacement('West wall fill', 550, x * ts - 10 * ts / AUTHORED_TILE_SIZE,
           y * ts, ts, ts, 201, true, true, 'west');
       }
       if (!isBottomRightCornerWestHedge(x, y, map)) {
-        addWorldPlacement('West wall hedge', 32, x * ts + 6 * ts / AUTHORED_TILE_SIZE,
+        addWorldPlacement(
+          innerNorthWestConnection ? 'West wall inner north-west connection hedge' : 'West wall hedge',
+          innerNorthWestConnection ? 587 : 32,
+          x * ts + 6 * ts / AUTHORED_TILE_SIZE,
           y * ts, ts, ts, 200, false, false, 'west');
       }
     }
@@ -467,6 +520,10 @@ export function buildForestStylePlacementRows(
     for (let y = 0; y < map.height; y++) {
       if (!shouldRenderEastEdge(x, y, map) || isInsideTopLeftCornerModule(x, y, map)) {
         runRow = 0;
+        continue;
+      }
+      if (isDuplicateInnerNorthEastContinuation(x, y, map)) {
+        runRow++;
         continue;
       }
       const odd = runRow % 2 === 1;
@@ -494,12 +551,15 @@ export function buildForestStylePlacementRows(
       const cornerShift = bottomLeftCornerMode === 'shifted'
         ? ts / AUTHORED_TILE_SIZE
         : 0;
+      const innerNorthEastConnection = isInnerNorthEastForestCorner(x, y + 1, map);
       addWorldPlacement(
-        `East wall ${odd ? 'odd' : 'even'} left`,
-        odd ? 599 : 549,
-        x * ts - (odd ? 3 : 4) * ts / AUTHORED_TILE_SIZE - cornerShift,
+        innerNorthEastConnection
+          ? 'East wall inner north-east connection left'
+          : `East wall ${odd ? 'odd' : 'even'} left`,
+        innerNorthEastConnection ? 592 : odd ? 599 : 549,
+        x * ts - (innerNorthEastConnection || odd ? 3 : 4) * ts / AUTHORED_TILE_SIZE - cornerShift,
         y * ts,
-        (odd ? 14 : 16) * ts / AUTHORED_TILE_SIZE,
+        (innerNorthEastConnection ? 16 : odd ? 14 : 16) * ts / AUTHORED_TILE_SIZE,
         ts,
         201,
         false,
@@ -603,23 +663,99 @@ export function buildForestStylePlacementRows(
         continue;
       }
       const odd = runColumn % 2 === 1;
+      if (!isDuplicatePairedNorthEdge(x, y, 'top', map)) {
+        addWorldPlacement(
+          `North wall ${odd ? 'odd' : 'even'} top`,
+          odd ? 539 : 493,
+          (x - 1) * ts + ts / AUTHORED_TILE_SIZE,
+          (y - 1) * ts + 2 * ts / AUTHORED_TILE_SIZE,
+          ts,
+          (odd ? 15 : 14) * ts / AUTHORED_TILE_SIZE,
+          211,
+          false,
+          false,
+          'south',
+        );
+      }
+      if (!isDuplicatePairedNorthEdge(x, y, 'bottom', map)) {
+        addWorldPlacement(
+          `North wall ${odd ? 'odd' : 'even'} bottom`,
+          odd ? 589 : 590,
+          (x - 1) * ts + ts / AUTHORED_TILE_SIZE,
+          y * ts,
+          ts,
+          ts,
+          210,
+          false,
+          false,
+          'south',
+        );
+      }
+      runColumn++;
+    }
+  }
+
+  // Concave north-west ground connection authored in style export (18).
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      if (!isInnerNorthWestForestCorner(x, y, map)) continue;
+      const cornerX = x * ts;
+      const cornerY = y * ts;
+      const unit = ts / AUTHORED_TILE_SIZE;
       addWorldPlacement(
-        `North wall ${odd ? 'odd' : 'even'} top`,
-        odd ? 539 : 493,
-        (x - 1) * ts + ts / AUTHORED_TILE_SIZE,
-        (y - 1) * ts + 2 * ts / AUTHORED_TILE_SIZE,
+        'Inner north-west corner ground left',
+        636,
+        cornerX - 14 * unit,
+        cornerY,
         ts,
-        (odd ? 15 : 14) * ts / AUTHORED_TILE_SIZE,
+        ts,
+        1,
+        false,
+        false,
+        'terrain',
+      );
+      addWorldPlacement(
+        'Inner north-west corner ground right',
+        637,
+        cornerX + 2 * unit,
+        cornerY,
+        ts,
+        ts,
+        1,
+        false,
+        false,
+        'terrain',
+      );
+    }
+  }
+
+  // Concave north-east connection authored in style export (17). The normal
+  // north and east strips remain in place; these pieces bridge their gap and
+  // cap the lower end of the vertical hedge.
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      if (!isInnerNorthEastForestCorner(x, y, map)) continue;
+      const cornerX = x * ts;
+      const cornerY = y * ts;
+      const unit = ts / AUTHORED_TILE_SIZE;
+
+      addWorldPlacement(
+        'North wall inner north-east extension top',
+        493,
+        cornerX - ts + unit,
+        cornerY - ts + 2 * unit,
+        ts,
+        14 * unit,
         211,
         false,
         false,
         'south',
       );
       addWorldPlacement(
-        `North wall ${odd ? 'odd' : 'even'} bottom`,
-        odd ? 589 : 590,
-        (x - 1) * ts + ts / AUTHORED_TILE_SIZE,
-        y * ts,
+        'North wall inner north-east extension bottom',
+        590,
+        cornerX - ts + unit,
+        cornerY,
         ts,
         ts,
         210,
@@ -627,7 +763,30 @@ export function buildForestStylePlacementRows(
         false,
         'south',
       );
-      runColumn++;
+      addWorldPlacement(
+        'North wall inner north-east overlap bottom',
+        590,
+        cornerX - 4 * unit,
+        cornerY,
+        ts,
+        ts,
+        210,
+        false,
+        false,
+        'south',
+      );
+      addWorldPlacement(
+        'South face inner north-east corner cap',
+        643,
+        cornerX + 12 * unit,
+        cornerY,
+        ts,
+        ts,
+        5103,
+        false,
+        false,
+        'south',
+      );
     }
   }
 

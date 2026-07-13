@@ -22,7 +22,7 @@ import {
   type StyleEditorDocumentV1,
 } from './types';
 
-const STORAGE_KEY = 'labyrinth-style-editor-v1-topology-atlas-r10';
+const STORAGE_KEY = 'labyrinth-style-editor-v1-topology-atlas-r13';
 const STORAGE_ARCHIVE_PREFIX = 'zip-base64:';
 const PAGE_SIZE = 200;
 const HISTORY_LIMIT = 20;
