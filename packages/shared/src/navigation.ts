@@ -1,6 +1,7 @@
 import {
   CELL_SIZE,
-  CELL_STEP,
+  CELL_STEP_X,
+  CELL_STEP_Y,
   GRID_CELLS,
   getHubTileBounds,
   isGateTileId,
@@ -307,13 +308,14 @@ function computeCellDistances(map: TileMapData, seedCells: CellCoord[]): Int16Ar
 
 function collectHubSeedCells(map: TileMapData): CellCoord[] {
   const hubBounds = getHubTileBounds(map.width, map.height);
-  const wallSize = getOuterWallSize(map);
+  const wallWidth = getOuterWallWidth(map);
+  const wallHeight = getOuterWallHeight(map);
   const seedCells: CellCoord[] = [];
 
   for (let cy = 0; cy < GRID_CELLS; cy++) {
     for (let cx = 0; cx < GRID_CELLS; cx++) {
-      const tx = wallSize + cx * CELL_STEP;
-      const ty = wallSize + cy * CELL_STEP;
+      const tx = wallWidth + cx * CELL_STEP_X;
+      const ty = wallHeight + cy * CELL_STEP_Y;
       const cellRight = tx + CELL_SIZE - 1;
       const cellBottom = ty + CELL_SIZE - 1;
       const overlapsHub = tx <= hubBounds.right &&
@@ -341,17 +343,16 @@ function cellsFromKeySet(keys: Set<string>): CellCoord[] {
 }
 
 function classifyRegion(tileX: number, tileY: number, map: TileMapData): Region | null {
-  const wallSize = getOuterWallSize(map);
-  const localX = tileX - wallSize;
-  const localY = tileY - wallSize;
+  const localX = tileX - getOuterWallWidth(map);
+  const localY = tileY - getOuterWallHeight(map);
   if (localX < 0 || localY < 0) return null;
 
-  const cx = Math.floor(localX / CELL_STEP);
-  const cy = Math.floor(localY / CELL_STEP);
+  const cx = Math.floor(localX / CELL_STEP_X);
+  const cy = Math.floor(localY / CELL_STEP_Y);
   if (cx < 0 || cx >= GRID_CELLS || cy < 0 || cy >= GRID_CELLS) return null;
 
-  const offsetX = localX % CELL_STEP;
-  const offsetY = localY % CELL_STEP;
+  const offsetX = localX % CELL_STEP_X;
+  const offsetY = localY % CELL_STEP_Y;
 
   if (offsetX < CELL_SIZE && offsetY < CELL_SIZE) {
     return { type: 'cell', cx, cy };
@@ -369,13 +370,12 @@ function classifyRegion(tileX: number, tileY: number, map: TileMapData): Region 
 }
 
 function getContainingCell(tileX: number, tileY: number, map: TileMapData): CellCoord | null {
-  const wallSize = getOuterWallSize(map);
-  const localX = tileX - wallSize;
-  const localY = tileY - wallSize;
+  const localX = tileX - getOuterWallWidth(map);
+  const localY = tileY - getOuterWallHeight(map);
   if (localX < 0 || localY < 0) return null;
 
-  const cx = Math.floor(localX / CELL_STEP);
-  const cy = Math.floor(localY / CELL_STEP);
+  const cx = Math.floor(localX / CELL_STEP_X);
+  const cy = Math.floor(localY / CELL_STEP_Y);
   if (cx < 0 || cx >= GRID_CELLS || cy < 0 || cy >= GRID_CELLS) return null;
 
   return { cx, cy };
@@ -388,23 +388,24 @@ function areCellsConnected(
   cx2: number,
   cy2: number,
 ): boolean {
-  const wallSize = getOuterWallSize(map);
-  const tx1 = wallSize + cx1 * CELL_STEP;
-  const ty1 = wallSize + cy1 * CELL_STEP;
-  const tx2 = wallSize + cx2 * CELL_STEP;
-  const ty2 = wallSize + cy2 * CELL_STEP;
+  const wallWidth = getOuterWallWidth(map);
+  const wallHeight = getOuterWallHeight(map);
+  const tx1 = wallWidth + cx1 * CELL_STEP_X;
+  const ty1 = wallHeight + cy1 * CELL_STEP_Y;
+  const tx2 = wallWidth + cx2 * CELL_STEP_X;
+  const ty2 = wallHeight + cy2 * CELL_STEP_Y;
 
   if (cy1 === cy2) {
     const wallX = Math.min(tx1, tx2) + CELL_SIZE;
     for (let wy = 0; wy < CELL_SIZE; wy++) {
-      for (let wx = 0; wx < CELL_STEP - CELL_SIZE; wx++) {
+      for (let wx = 0; wx < CELL_STEP_X - CELL_SIZE; wx++) {
         const tile = map.data[(ty1 + wy) * map.width + (wallX + wx)];
         if (!isSolidTileId(tile)) return true;
       }
     }
   } else {
     const wallY = Math.min(ty1, ty2) + CELL_SIZE;
-    for (let wy = 0; wy < CELL_STEP - CELL_SIZE; wy++) {
+    for (let wy = 0; wy < CELL_STEP_Y - CELL_SIZE; wy++) {
       for (let wx = 0; wx < CELL_SIZE; wx++) {
         const tile = map.data[(wallY + wy) * map.width + (tx1 + wx)];
         if (!isSolidTileId(tile)) return true;
@@ -476,6 +477,10 @@ function pickBestDirection(
   return bestDirection;
 }
 
-function getOuterWallSize(map: TileMapData): number {
-  return map.width - GRID_CELLS * CELL_STEP;
+function getOuterWallWidth(map: TileMapData): number {
+  return map.width - GRID_CELLS * CELL_STEP_X;
+}
+
+function getOuterWallHeight(map: TileMapData): number {
+  return map.height - GRID_CELLS * CELL_STEP_Y;
 }

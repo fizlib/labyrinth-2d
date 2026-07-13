@@ -139,10 +139,15 @@ export const TILE_PRESSURE_PLATE = 19;
 // ── Constants ───────────────────────────────────────────────────────────────
 
 export const CELL_SIZE = 6;
-export const WALL_SIZE = 10;
-export const CELL_STEP = CELL_SIZE + WALL_SIZE;
+/** Width of solid wall bands separating cells horizontally. */
+export const WALL_WIDTH = 11;
+/** Height of solid wall bands separating cells vertically. */
+export const WALL_HEIGHT = 10;
+export const CELL_STEP_X = CELL_SIZE + WALL_WIDTH;
+export const CELL_STEP_Y = CELL_SIZE + WALL_HEIGHT;
 export const GRID_CELLS = 15;
-export const MAP_SIZE = WALL_SIZE + GRID_CELLS * CELL_STEP; // = 250
+export const MAP_WIDTH = WALL_WIDTH + GRID_CELLS * CELL_STEP_X; // = 266
+export const MAP_HEIGHT = WALL_HEIGHT + GRID_CELLS * CELL_STEP_Y; // = 250
 const TILE_PX = 16;
 
 /** Size of the central hub room in tiles. Matches CELL_SIZE to prevent cutting wall corners, resulting in a clean cross-shaped hub area. */
@@ -155,7 +160,7 @@ export interface HubTileBounds {
   bottom: number;
 }
 
-export function getHubTileBounds(width: number = MAP_SIZE, height: number = MAP_SIZE): HubTileBounds {
+export function getHubTileBounds(width: number = MAP_WIDTH, height: number = MAP_HEIGHT): HubTileBounds {
   const left = Math.floor((width - HUB_SIZE) / 2);
   const top = Math.floor((height - HUB_SIZE) / 2);
   return {
@@ -222,8 +227,8 @@ function shuffle<T>(arr: T[], rand: () => number): T[] {
 
 function cellToTile(cx: number, cy: number): { tx: number; ty: number } {
   return {
-    tx: WALL_SIZE + cx * CELL_STEP,
-    ty: WALL_SIZE + cy * CELL_STEP,
+    tx: WALL_WIDTH + cx * CELL_STEP_X,
+    ty: WALL_HEIGHT + cy * CELL_STEP_Y,
   };
 }
 
@@ -231,7 +236,7 @@ function carveCell(data: number[], cx: number, cy: number): void {
   const { tx, ty } = cellToTile(cx, cy);
   for (let dy = 0; dy < CELL_SIZE; dy++) {
     for (let dx = 0; dx < CELL_SIZE; dx++) {
-      data[(ty + dy) * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+      data[(ty + dy) * MAP_WIDTH + (tx + dx)] = TILE_FLOOR;
     }
   }
 }
@@ -244,16 +249,16 @@ function carvePassage(data: number[], cx1: number, cy1: number, cx2: number, cy2
     const wallX = Math.min(tx1, tx2) + CELL_SIZE;
     const topY = ty1;
     for (let wy = 0; wy < CELL_SIZE; wy++) {
-      for (let wx = 0; wx < WALL_SIZE; wx++) {
-        data[(topY + wy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
+      for (let wx = 0; wx < WALL_WIDTH; wx++) {
+        data[(topY + wy) * MAP_WIDTH + (wallX + wx)] = TILE_FLOOR;
       }
     }
   } else {
     const wallY = Math.min(ty1, ty2) + CELL_SIZE;
     const leftX = tx1;
-    for (let wy = 0; wy < WALL_SIZE; wy++) {
+    for (let wy = 0; wy < WALL_HEIGHT; wy++) {
       for (let wx = 0; wx < CELL_SIZE; wx++) {
-        data[(wallY + wy) * MAP_SIZE + (leftX + wx)] = TILE_FLOOR;
+        data[(wallY + wy) * MAP_WIDTH + (leftX + wx)] = TILE_FLOOR;
       }
     }
   }
@@ -280,16 +285,16 @@ function generateMazeData(seed: number): number[] {
   const rand = mulberry32(seed);
 
   // Start with all walls (temporarily 1)
-  const data = new Array(MAP_SIZE * MAP_SIZE).fill(1);
+  const data = new Array(MAP_WIDTH * MAP_HEIGHT).fill(1);
 
   // ── Central Hub ─────────────────────────────────────────────────────────
   const hubSize = HUB_SIZE;
-  const hubTileX = Math.floor((MAP_SIZE - hubSize) / 2);
-  const hubTileY = Math.floor((MAP_SIZE - hubSize) / 2);
+  const hubTileX = Math.floor((MAP_WIDTH - hubSize) / 2);
+  const hubTileY = Math.floor((MAP_HEIGHT - hubSize) / 2);
 
   for (let dy = 0; dy < hubSize; dy++) {
     for (let dx = 0; dx < hubSize; dx++) {
-      data[(hubTileY + dy) * MAP_SIZE + (hubTileX + dx)] = TILE_FLOOR;
+      data[(hubTileY + dy) * MAP_WIDTH + (hubTileX + dx)] = TILE_FLOOR;
     }
   }
 
@@ -364,16 +369,16 @@ function generateMazeData(seed: number): number[] {
     if (aboveCy >= 0) {
       const { tx, ty } = cellToTile(entranceCx, aboveCy);
       const wallY = ty + CELL_SIZE;
-      for (let wy = 0; wy < WALL_SIZE; wy++) {
+      for (let wy = 0; wy < WALL_HEIGHT; wy++) {
         for (let dx = 0; dx < CELL_SIZE; dx++) {
-          data[(wallY + wy) * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+          data[(wallY + wy) * MAP_WIDTH + (tx + dx)] = TILE_FLOOR;
         }
       }
       const hubEdge = hubTileY;
-      for (let row = wallY + WALL_SIZE; row < hubEdge + CELL_SIZE; row++) {
+      for (let row = wallY + WALL_HEIGHT; row < hubEdge + CELL_SIZE; row++) {
         for (let dx = 0; dx < CELL_SIZE; dx++) {
-          if (row >= 0 && row < MAP_SIZE) {
-            data[row * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+          if (row >= 0 && row < MAP_HEIGHT) {
+            data[row * MAP_WIDTH + (tx + dx)] = TILE_FLOOR;
           }
         }
       }
@@ -387,16 +392,16 @@ function generateMazeData(seed: number): number[] {
     if (leftCx >= 0) {
       const { tx, ty } = cellToTile(leftCx, entranceCy);
       const wallX = tx + CELL_SIZE;
-      for (let wx = 0; wx < WALL_SIZE; wx++) {
+      for (let wx = 0; wx < WALL_WIDTH; wx++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
-          data[(ty + dy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
+          data[(ty + dy) * MAP_WIDTH + (wallX + wx)] = TILE_FLOOR;
         }
       }
       const hubEdge = hubTileX;
-      for (let col = wallX + WALL_SIZE; col < hubEdge + CELL_SIZE; col++) {
+      for (let col = wallX + WALL_WIDTH; col < hubEdge + CELL_SIZE; col++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
-          if (col >= 0 && col < MAP_SIZE) {
-            data[(ty + dy) * MAP_SIZE + col] = TILE_FLOOR;
+          if (col >= 0 && col < MAP_WIDTH) {
+            data[(ty + dy) * MAP_WIDTH + col] = TILE_FLOOR;
           }
         }
       }
@@ -409,17 +414,17 @@ function generateMazeData(seed: number): number[] {
     const rightCx = hubRightCx + 1;
     if (rightCx < GRID_CELLS) {
       const { tx: cellTx, ty: cellTy } = cellToTile(rightCx, entranceCy);
-      const wallX = cellTx - WALL_SIZE;
-      for (let wx = 0; wx < WALL_SIZE; wx++) {
+      const wallX = cellTx - WALL_WIDTH;
+      for (let wx = 0; wx < WALL_WIDTH; wx++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
-          data[(cellTy + dy) * MAP_SIZE + (wallX + wx)] = TILE_FLOOR;
+          data[(cellTy + dy) * MAP_WIDTH + (wallX + wx)] = TILE_FLOOR;
         }
       }
       const hubRight = hubTileX + hubSize;
       for (let col = hubRight - CELL_SIZE; col < wallX; col++) {
         for (let dy = 0; dy < CELL_SIZE; dy++) {
-          if (col >= 0 && col < MAP_SIZE) {
-            data[(cellTy + dy) * MAP_SIZE + col] = TILE_FLOOR;
+          if (col >= 0 && col < MAP_WIDTH) {
+            data[(cellTy + dy) * MAP_WIDTH + col] = TILE_FLOOR;
           }
         }
       }
@@ -432,17 +437,17 @@ function generateMazeData(seed: number): number[] {
     const belowCy = hubBottomCy + 1;
     if (belowCy < GRID_CELLS) {
       const { tx, ty } = cellToTile(entranceCx, belowCy);
-      const wallY = ty - WALL_SIZE;
-      for (let wy = 0; wy < WALL_SIZE; wy++) {
+      const wallY = ty - WALL_HEIGHT;
+      for (let wy = 0; wy < WALL_HEIGHT; wy++) {
         for (let dx = 0; dx < CELL_SIZE; dx++) {
-          data[(wallY + wy) * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+          data[(wallY + wy) * MAP_WIDTH + (tx + dx)] = TILE_FLOOR;
         }
       }
       const hubBottom = hubTileY + hubSize;
       for (let row = hubBottom - CELL_SIZE; row < wallY; row++) {
         for (let dx = 0; dx < CELL_SIZE; dx++) {
-          if (row >= 0 && row < MAP_SIZE) {
-            data[row * MAP_SIZE + (tx + dx)] = TILE_FLOOR;
+          if (row >= 0 && row < MAP_HEIGHT) {
+            data[row * MAP_WIDTH + (tx + dx)] = TILE_FLOOR;
           }
         }
       }
@@ -461,10 +466,10 @@ function generateMazeData(seed: number): number[] {
   const snapshot = data.slice();
 
   // Step 2: Carve South-facing walls (2-tiles high vertical face + 1-tile top border)
-  for (let y = MAP_SIZE - 2; y >= 2; y--) {
-    for (let x = 0; x < MAP_SIZE; x++) {
-      const thisIdx = y * MAP_SIZE + x;
-      const belowIdx = (y + 1) * MAP_SIZE + x;
+  for (let y = MAP_HEIGHT - 2; y >= 2; y--) {
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      const thisIdx = y * MAP_WIDTH + x;
+      const belowIdx = (y + 1) * MAP_WIDTH + x;
 
       // If this tile is solid rock, but the tile directly south is walkable floor
       if (snapshot[thisIdx] === TILE_WALL_INTERIOR && snapshot[belowIdx] === TILE_FLOOR) {
@@ -472,12 +477,12 @@ function generateMazeData(seed: number): number[] {
         data[thisIdx] = TILE_WALL_FACE; // Base of the wall face
 
         // Extend the face upwards for a chunky 2-tile high appearance
-        const midIdx = (y - 1) * MAP_SIZE + x;
+        const midIdx = (y - 1) * MAP_WIDTH + x;
         if (snapshot[midIdx] === TILE_WALL_INTERIOR) {
           data[midIdx] = TILE_WALL_FACE;
 
           // Cap the wall face with a bright top border
-          const topIdx = (y - 2) * MAP_SIZE + x;
+          const topIdx = (y - 2) * MAP_WIDTH + x;
           if (snapshot[topIdx] === TILE_WALL_INTERIOR) {
             data[topIdx] = TILE_WALL_TOP;
           }
@@ -500,15 +505,15 @@ function generateMazeData(seed: number): number[] {
     id === TILE_WALL_FACE ||
     id === TILE_WALL_TOP;
 
-  for (let y = 1; y < MAP_SIZE - 1; y++) {
-    for (let x = 1; x < MAP_SIZE - 1; x++) {
-      const idx = y * MAP_SIZE + x;
+  for (let y = 1; y < MAP_HEIGHT - 1; y++) {
+    for (let x = 1; x < MAP_WIDTH - 1; x++) {
+      const idx = y * MAP_WIDTH + x;
       if (snap2[idx] !== TILE_WALL_INTERIOR) continue;
 
       const left = snap2[idx - 1];
       const right = snap2[idx + 1];
-      const top = snap2[idx - MAP_SIZE];
-      const bottom = snap2[idx + MAP_SIZE];
+      const top = snap2[idx - MAP_WIDTH];
+      const bottom = snap2[idx + MAP_WIDTH];
 
       const eL = isOpen(left);
       const eR = isOpen(right);
@@ -546,12 +551,12 @@ function generateMazeData(seed: number): number[] {
     const hubCy = hubTileY + Math.floor(hubSize / 2);
 
     // Tree at the exact center
-    data[hubCy * MAP_SIZE + hubCx] = TILE_TREE;
+    data[hubCy * MAP_WIDTH + hubCx] = TILE_TREE;
 
     // 3 runestones in a semi-circle in front of (below) the tree
-    data[(hubCy + 3) * MAP_SIZE + (hubCx - 6)] = TILE_RUNESTONE_1; // obelisk — left
-    data[(hubCy + 4) * MAP_SIZE + hubCx]       = TILE_RUNESTONE_2; // shrine  — center
-    data[(hubCy + 3) * MAP_SIZE + (hubCx + 6)] = TILE_RUNESTONE_3; // jagged  — right
+    data[(hubCy + 3) * MAP_WIDTH + (hubCx - 6)] = TILE_RUNESTONE_1; // obelisk — left
+    data[(hubCy + 4) * MAP_WIDTH + hubCx]       = TILE_RUNESTONE_2; // shrine  — center
+    data[(hubCy + 3) * MAP_WIDTH + (hubCx + 6)] = TILE_RUNESTONE_3; // jagged  — right
   }
 
   return data;
@@ -572,8 +577,8 @@ function isWalkableTileId(tile: number): boolean {
 
 function spawnPointToCell(spawnPoint: SpawnPoint): CellCoord {
   return {
-    cx: Math.round((spawnPoint.x - Math.floor(CELL_SIZE / 2) - WALL_SIZE) / CELL_STEP),
-    cy: Math.round((spawnPoint.y - Math.floor(CELL_SIZE / 2) - WALL_SIZE) / CELL_STEP),
+    cx: Math.round((spawnPoint.x - Math.floor(CELL_SIZE / 2) - WALL_WIDTH) / CELL_STEP_X),
+    cy: Math.round((spawnPoint.y - Math.floor(CELL_SIZE / 2) - WALL_HEIGHT) / CELL_STEP_Y),
   };
 }
 
@@ -595,9 +600,9 @@ function findSafeSpawnPoint(data: number[], requested: SpawnPoint): SpawnPoint {
   candidates.sort((a, b) => a.distance - b.distance || a.y - b.y || a.x - b.x);
 
   for (const candidate of candidates) {
-    const feetTile = data[candidate.y * MAP_SIZE + candidate.x];
+    const feetTile = data[candidate.y * MAP_WIDTH + candidate.x];
     const bodyTile = candidate.y > 0
-      ? data[(candidate.y - 1) * MAP_SIZE + candidate.x]
+      ? data[(candidate.y - 1) * MAP_WIDTH + candidate.x]
       : TILE_WALL_INTERIOR;
     if (isWalkableTileId(feetTile) && isWalkableTileId(bodyTile)) {
       return { x: candidate.x, y: candidate.y };
@@ -608,9 +613,9 @@ function findSafeSpawnPoint(data: number[], requested: SpawnPoint): SpawnPoint {
   // tile rather than ever returning a solid-wall coordinate.
   let closest: SpawnPoint | null = null;
   let closestDistance = Number.POSITIVE_INFINITY;
-  for (let y = 0; y < MAP_SIZE; y++) {
-    for (let x = 0; x < MAP_SIZE; x++) {
-      if (!isWalkableTileId(data[y * MAP_SIZE + x])) continue;
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      if (!isWalkableTileId(data[y * MAP_WIDTH + x])) continue;
       const distance = Math.abs(x - requested.x) + Math.abs(y - requested.y);
       if (distance >= closestDistance) continue;
       closest = { x, y };
@@ -708,13 +713,13 @@ function createGatePlacement(teamIndex: number, cellX: number, cellY: number, or
 function stampGate(data: number[], gate: GatePlacement): void {
   if (gate.orientation === 'horizontal') {
     for (let dx = 0; dx < CELL_SIZE; dx++) {
-      data[gate.tileY * MAP_SIZE + (gate.tileX + dx)] = TILE_GATE_HORIZONTAL;
+      data[gate.tileY * MAP_WIDTH + (gate.tileX + dx)] = TILE_GATE_HORIZONTAL;
     }
     return;
   }
 
   for (let dy = 0; dy < CELL_SIZE; dy++) {
-    data[(gate.tileY + dy) * MAP_SIZE + gate.tileX] = TILE_GATE_VERTICAL;
+    data[(gate.tileY + dy) * MAP_WIDTH + gate.tileX] = TILE_GATE_VERTICAL;
   }
 }
 
@@ -727,12 +732,12 @@ function stampDirtRect(
 ): void {
   const clampedStartX = Math.max(0, startX);
   const clampedStartY = Math.max(0, startY);
-  const clampedEndX = Math.min(MAP_SIZE, startX + width);
-  const clampedEndY = Math.min(MAP_SIZE, startY + height);
+  const clampedEndX = Math.min(MAP_WIDTH, startX + width);
+  const clampedEndY = Math.min(MAP_HEIGHT, startY + height);
 
   for (let y = clampedStartY; y < clampedEndY; y++) {
     for (let x = clampedStartX; x < clampedEndX; x++) {
-      dirtMask[y * MAP_SIZE + x] = 1;
+      dirtMask[y * MAP_WIDTH + x] = 1;
     }
   }
 }
@@ -748,7 +753,7 @@ function stampGateDirtBand(dirtMask: Uint8Array, gate: GatePlacement): void {
 }
 
 function computeGatePlacements(data: number[], spawnPoints: SpawnPoint[]): GatePlacement[] {
-  const hubBounds = getHubTileBounds(MAP_SIZE, MAP_SIZE);
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
   const usedCells = new Set<string>();
   const gates: GatePlacement[] = [];
@@ -789,7 +794,7 @@ function computePressurePlates(gates: GatePlacement[]): PressurePlateInfo[] {
     // Only horizontal gates (in vertical N-S corridors) get pressure plates
     if (gate.orientation !== 'horizontal') continue;
 
-    const { tx, ty } = cellToTile(gate.cellX, gate.cellY);
+    const { tx } = cellToTile(gate.cellX, gate.cellY);
     const gateRow = gate.tileY; // The row where the gate barrier sits
 
     // Spawn side: 2 plates, 3 rows away from gate toward spawn
@@ -830,7 +835,8 @@ function computePressurePlates(gates: GatePlacement[]): PressurePlateInfo[] {
 
 // ── Exports ─────────────────────────────────────────────────────────────────
 
-export const MAZE_SIZE = MAP_SIZE;
+export const MAZE_WIDTH = MAP_WIDTH;
+export const MAZE_HEIGHT = MAP_HEIGHT;
 
 export function generateMazeLayout(
   seed: number,
@@ -841,7 +847,7 @@ export function generateMazeLayout(
   const spawnPoints = computeSpawnPoints(baseData, spawnDistance, numTeams);
   const gates = computeGatePlacements(baseData, spawnPoints);
   const gatedData = baseData.slice();
-  const dirtMask = new Uint8Array(MAP_SIZE * MAP_SIZE);
+  const dirtMask = new Uint8Array(MAP_WIDTH * MAP_HEIGHT);
 
   for (const gate of gates) {
     stampGate(gatedData, gate);
@@ -852,8 +858,8 @@ export function generateMazeLayout(
 
   // Stamp pressure plate tiles into map data
   for (const plate of pressurePlates) {
-    if (plate.tileX >= 0 && plate.tileX < MAP_SIZE && plate.tileY >= 0 && plate.tileY < MAP_SIZE) {
-      gatedData[plate.tileY * MAP_SIZE + plate.tileX] = TILE_PRESSURE_PLATE;
+    if (plate.tileX >= 0 && plate.tileX < MAP_WIDTH && plate.tileY >= 0 && plate.tileY < MAP_HEIGHT) {
+      gatedData[plate.tileY * MAP_WIDTH + plate.tileX] = TILE_PRESSURE_PLATE;
     }
   }
 
@@ -862,8 +868,8 @@ export function generateMazeLayout(
 
   return {
     map: {
-      width: MAP_SIZE,
-      height: MAP_SIZE,
+      width: MAP_WIDTH,
+      height: MAP_HEIGHT,
       tileSize: TILE_PX,
       data: gatedData,
     },
@@ -897,8 +903,8 @@ function areCellsConnected(
     const wallX = Math.min(tx1, cellToTile(cx2, cy2).tx) + CELL_SIZE;
     const topY = ty1;
     for (let wy = 0; wy < CELL_SIZE; wy++) {
-      for (let wx = 0; wx < WALL_SIZE; wx++) {
-        const tile = data[(topY + wy) * MAP_SIZE + (wallX + wx)];
+      for (let wx = 0; wx < WALL_WIDTH; wx++) {
+        const tile = data[(topY + wy) * MAP_WIDTH + (wallX + wx)];
         if (isWalkableTileId(tile)) return true;
       }
     }
@@ -906,9 +912,9 @@ function areCellsConnected(
     // Vertical neighbors — check the horizontal wall strip between them
     const wallY = Math.min(ty1, cellToTile(cx2, cy2).ty) + CELL_SIZE;
     const leftX = tx1;
-    for (let wy = 0; wy < WALL_SIZE; wy++) {
+    for (let wy = 0; wy < WALL_HEIGHT; wy++) {
       for (let wx = 0; wx < CELL_SIZE; wx++) {
-        const tile = data[(wallY + wy) * MAP_SIZE + (leftX + wx)];
+        const tile = data[(wallY + wy) * MAP_WIDTH + (leftX + wx)];
         if (isWalkableTileId(tile)) return true;
       }
     }
@@ -939,8 +945,8 @@ export function computeSpawnPoints(
   numTeams: number = 3,
 ): SpawnPoint[] {
   // ── 1. Identify hub cells ───────────────────────────────────────────
-  const hubTileX = Math.floor((MAP_SIZE - HUB_SIZE) / 2);
-  const hubTileY = Math.floor((MAP_SIZE - HUB_SIZE) / 2);
+  const hubTileX = Math.floor((MAP_WIDTH - HUB_SIZE) / 2);
+  const hubTileY = Math.floor((MAP_HEIGHT - HUB_SIZE) / 2);
   const hubCells = getHubCells(hubTileX, hubTileY, HUB_SIZE);
 
   // ── 2. BFS on cell graph ────────────────────────────────────────────
@@ -971,8 +977,8 @@ export function computeSpawnPoints(
   }
 
   // ── 3. Collect candidates at target distance (with fallback) ────────
-  const hubCenterX = MAP_SIZE / 2;
-  const hubCenterY = MAP_SIZE / 2;
+  const hubCenterX = MAP_WIDTH / 2;
+  const hubCenterY = MAP_HEIGHT / 2;
 
   let candidates: Array<{ cx: number; cy: number; angle: number }> = [];
 
@@ -1083,8 +1089,8 @@ export function computePortalPosition(
   spawnDistance: number,
 ): SpawnPoint | null {
   // ── 1. Identify hub cells ───────────────────────────────────────────
-  const hubTileX = Math.floor((MAP_SIZE - HUB_SIZE) / 2);
-  const hubTileY = Math.floor((MAP_SIZE - HUB_SIZE) / 2);
+  const hubTileX = Math.floor((MAP_WIDTH - HUB_SIZE) / 2);
+  const hubTileY = Math.floor((MAP_HEIGHT - HUB_SIZE) / 2);
   const hubCells = getHubCells(hubTileX, hubTileY, HUB_SIZE);
 
   // ── 2. BFS on cell graph ────────────────────────────────────────────
@@ -1118,8 +1124,8 @@ export function computePortalPosition(
   const targetMinDist = spawnDistance + 1;
   const targetMaxDist = Math.min(spawnDistance + 3, GRID_CELLS - 1);
 
-  const hubCenterX = MAP_SIZE / 2;
-  const hubCenterY = MAP_SIZE / 2;
+  const hubCenterX = MAP_WIDTH / 2;
+  const hubCenterY = MAP_HEIGHT / 2;
 
   interface Candidate { cx: number; cy: number; dist: number; angle: number }
   let candidates: Candidate[] = [];

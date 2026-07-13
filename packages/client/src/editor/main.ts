@@ -22,8 +22,10 @@ import {
   type StyleEditorDocumentV1,
 } from './types';
 
-const STORAGE_KEY = 'labyrinth-style-editor-v1-cell-sample';
+const STORAGE_KEY = 'labyrinth-style-editor-v1-topology-atlas-r10';
+const STORAGE_ARCHIVE_PREFIX = 'zip-base64:';
 const PAGE_SIZE = 200;
+const HISTORY_LIMIT = 20;
 let fallbackIdSequence = 0;
 
 function createEditorId(): string {
@@ -67,6 +69,7 @@ const elementInspector = required<HTMLDivElement>('element-inspector');
 const colliderInspector = required<HTMLDivElement>('collider-inspector');
 const selectionKind = required<HTMLSpanElement>('selection-kind');
 const layerList = required<HTMLDivElement>('layer-list');
+const layerSearch = required<HTMLInputElement>('layer-search');
 const zoomReadout = required<HTMLSpanElement>('zoom-readout');
 const snapSizeSelect = required<HTMLSelectElement>('snap-size');
 const showCollidersCheckbox = required<HTMLInputElement>('show-colliders');
@@ -101,7 +104,8 @@ resizeHandle.eventMode = 'static';
 resizeHandle.cursor = 'nwse-resize';
 overlayLayer.addChild(selectionFrame, selectionLabel, resizeHandle);
 
-let documentState = loadLocalDocument() ?? createSampleDocument();
+const restoredLocalDocument = loadLocalDocument();
+let documentState = restoredLocalDocument ?? createSampleDocument();
 const selectedElementIds = new Set<string>();
 const selectedColliderIds = new Set<string>();
 let selectedAsset: AssetCatalogEntry | null = null;
@@ -143,10 +147,37 @@ function loadLocalDocument(): StyleEditorDocumentV1 | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as StyleEditorDocumentV1;
+    let json = raw;
+    if (raw.startsWith(STORAGE_ARCHIVE_PREFIX)) {
+      const binary = atob(raw.slice(STORAGE_ARCHIVE_PREFIX.length));
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const files = unzipSync(bytes);
+      const documentBytes = files['document.json'];
+      if (!documentBytes) return null;
+      json = strFromU8(documentBytes);
+    }
+    const parsed = JSON.parse(json) as StyleEditorDocumentV1;
     return parsed.version === 1 ? parsed : null;
   } catch {
     return null;
+  }
+}
+
+function saveLocalDocument(): boolean {
+  try {
+    const archive = zipSync({
+      'document.json': strToU8(JSON.stringify(documentState)),
+    }, { level: 1 });
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < archive.length; offset += chunkSize) {
+      binary += String.fromCharCode(...archive.subarray(offset, offset + chunkSize));
+    }
+    localStorage.setItem(STORAGE_KEY, `${STORAGE_ARCHIVE_PREFIX}${btoa(binary)}`);
+    return true;
+  } catch (error) {
+    console.error('[StyleEditor] Local autosave failed', error);
+    return false;
   }
 }
 
@@ -181,8 +212,9 @@ function scheduleAutosave(): void {
   if (saveTimer !== null) window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
     documentState.updatedAt = new Date().toISOString();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
-    saveStatus.textContent = 'Autosaved locally';
+    saveStatus.textContent = saveLocalDocument()
+      ? 'Autosaved locally'
+      : 'Autosave unavailable — use Save JSON + Preview';
     saveTimer = null;
   }, 350);
 }
@@ -193,7 +225,9 @@ function commitHistory(): void {
   if (history[historyIndex] === snapshot) return;
   history.splice(historyIndex + 1);
   history.push(snapshot);
-  if (history.length > 80) history.shift();
+  // The topology atlas is much larger than the former one-cell sample, so a
+  // bounded history avoids retaining hundreds of megabytes after long edits.
+  if (history.length > HISTORY_LIMIT) history.shift();
   historyIndex = history.length - 1;
   scheduleAutosave();
   updateHistoryButtons();
@@ -831,14 +865,42 @@ function renderInspector(): void {
 
 function renderLayers(): void {
   layerList.replaceChildren();
-  const groundCount = documentState.elements.filter((element) => element.role.startsWith('ground.')).length;
-  const groundSummary = document.createElement('div');
-  groundSummary.className = 'layer-item';
-  groundSummary.innerHTML = `<span>Ground tiles</span><small>${groundCount}</small>`;
-  layerList.appendChild(groundSummary);
-  const items = documentState.elements
-    .filter((element) => !element.role.startsWith('ground.') || selectedElementIds.has(element.id))
-    .sort((a, b) => b.zIndex - a.zIndex || a.name.localeCompare(b.name));
+  const roleCounts = new Map<string, number>();
+  for (const element of documentState.elements) {
+    const group = element.role.startsWith('ground.') ? 'Ground tiles' : element.role;
+    roleCounts.set(group, (roleCounts.get(group) ?? 0) + 1);
+  }
+  for (const [role, count] of roleCounts) {
+    const summary = document.createElement('div');
+    summary.className = 'layer-item';
+    summary.innerHTML = `<span>${escapeHtml(role)}</span><small>${count}</small>`;
+    layerList.appendChild(summary);
+  }
+
+  const query = layerSearch.value.trim().toLowerCase();
+  const candidates = documentState.elements.filter((element) => !element.role.startsWith('ground.'));
+  const matching = query
+    ? candidates.filter((element) =>
+        `${element.name} ${element.role} ${element.assetPath}`.toLowerCase().includes(query))
+    : candidates.filter((element) => selectedElementIds.has(element.id));
+  const limit = 250;
+  const items = matching
+    .sort((a, b) => b.zIndex - a.zIndex || a.name.localeCompare(b.name))
+    .slice(0, limit);
+
+  const resultSummary = document.createElement('div');
+  resultSummary.className = 'readout';
+  if (query) {
+    resultSummary.textContent = matching.length > limit
+      ? `${matching.length} matches · showing first ${limit}`
+      : `${matching.length} matching wall sprites`;
+  } else {
+    resultSummary.textContent = items.length > 0
+      ? 'Selected wall sprites'
+      : 'Click a wall sprite or filter by cell, topology, role, or asset ID.';
+  }
+  layerList.appendChild(resultSummary);
+
   for (const element of items) {
     const button = document.createElement('button');
     button.className = `layer-item${selectedElementIds.has(element.id) ? ' selected' : ''}`;
@@ -1022,8 +1084,9 @@ async function exportDocument(): Promise<void> {
   link.download = 'labyrinth-style-export.zip';
   link.click();
   URL.revokeObjectURL(url);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
-  saveStatus.textContent = 'Exported ZIP and autosaved locally';
+  saveStatus.textContent = saveLocalDocument()
+    ? 'Exported ZIP and autosaved locally'
+    : 'Exported ZIP; local autosave unavailable';
 }
 
 function validateDocument(value: unknown): StyleEditorDocumentV1 {
@@ -1050,12 +1113,14 @@ async function importDocument(file: File): Promise<void> {
   selectedColliderIds.clear();
   history.splice(0, history.length, JSON.stringify(documentState));
   historyIndex = 0;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
+  const savedLocally = saveLocalDocument();
   notesField.value = documentState.notes;
   await rebuildScene();
   fitWorld();
   updateHistoryButtons();
-  saveStatus.textContent = `Imported ${file.name}`;
+  saveStatus.textContent = savedLocally
+    ? `Imported ${file.name}`
+    : `Imported ${file.name}; local autosave unavailable`;
 }
 
 document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((button) => button.addEventListener('click', () => setTool(button.dataset.tool as EditorTool)));
@@ -1068,7 +1133,7 @@ required<HTMLButtonElement>('reset-document').addEventListener('click', () => {
   documentState = createSampleDocument();
   selectedElementIds.clear(); selectedColliderIds.clear();
   history.splice(0, history.length, JSON.stringify(documentState)); historyIndex = 0;
-  notesField.value = '';
+  notesField.value = documentState.notes;
   void rebuildScene().then(fitWorld);
   scheduleAutosave(); updateHistoryButtons();
 });
@@ -1088,6 +1153,7 @@ assetCategory.addEventListener('change', () => { catalogQuery.category = assetCa
 snapSizeSelect.addEventListener('change', () => { currentSnap = Number(snapSizeSelect.value) || 1; });
 showCollidersCheckbox.addEventListener('change', () => { colliderLayer.visible = showCollidersCheckbox.checked; });
 notesField.addEventListener('input', () => { documentState.notes = notesField.value; scheduleAutosave(); });
+layerSearch.addEventListener('input', renderLayers);
 
 window.addEventListener('keydown', (event) => {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
@@ -1140,5 +1206,5 @@ setTool('select');
 updateHistoryButtons();
 await rebuildScene();
 fitWorld();
-saveStatus.textContent = loadLocalDocument() ? 'Restored local autosave' : 'New sample ready';
+saveStatus.textContent = restoredLocalDocument ? 'Restored local autosave' : 'New sample ready';
 void initializeCatalog().catch((error) => { assetGrid.innerHTML = `<div class="readout">${escapeHtml(error instanceof Error ? error.message : 'Catalog failed')}</div>`; });

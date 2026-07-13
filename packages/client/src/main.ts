@@ -14,10 +14,12 @@ import {
   TILE_SIZE,
   TILE_FLOOR,
   TILE_GATE_HORIZONTAL,
-  MAZE_SIZE,
+  MAZE_HEIGHT,
+  MAZE_WIDTH,
   MAX_TEAMS,
   CELL_SIZE,
-  CELL_STEP,
+  CELL_STEP_X,
+  CELL_STEP_Y,
   GRID_CELLS,
   SPAWN_DISTANCE,
   FEET_HITBOX_W,
@@ -244,14 +246,16 @@ function updateCamera(
  */
 function createCellBoundaryOverlay(): Graphics {
   const overlay = new Graphics();
-  const cellStepPx = CELL_STEP * TILE_SIZE;
-  const gridOffsetPx = (MAZE_SIZE - GRID_CELLS * CELL_STEP) * TILE_SIZE;
+  const cellStepXPx = CELL_STEP_X * TILE_SIZE;
+  const cellStepYPx = CELL_STEP_Y * TILE_SIZE;
+  const gridOffsetXPx = (MAZE_WIDTH - GRID_CELLS * CELL_STEP_X) * TILE_SIZE;
+  const gridOffsetYPx = (MAZE_HEIGHT - GRID_CELLS * CELL_STEP_Y) * TILE_SIZE;
   const cellSizePx = CELL_SIZE * TILE_SIZE;
 
   for (let cy = 0; cy < GRID_CELLS; cy++) {
     for (let cx = 0; cx < GRID_CELLS; cx++) {
-      const x = gridOffsetPx + cx * cellStepPx;
-      const y = gridOffsetPx + cy * cellStepPx;
+      const x = gridOffsetXPx + cx * cellStepXPx;
+      const y = gridOffsetYPx + cy * cellStepYPx;
       const fillColor = (cx + cy) % 2 === 0 ? 0x38bdf8 : 0x818cf8;
 
       overlay
@@ -749,8 +753,8 @@ async function main(): Promise<void> {
   const forestWallLayer = new Container();
   worldContainer.addChild(forestWallLayer);
 
-  let mapPixelW = MAZE_SIZE * TILE_SIZE;
-  let mapPixelH = MAZE_SIZE * TILE_SIZE;
+  let mapPixelW = MAZE_WIDTH * TILE_SIZE;
+  let mapPixelH = MAZE_HEIGHT * TILE_SIZE;
 
   const MIN_ZOOM = 0.1;
   const MAX_ZOOM = 2.0;
@@ -871,6 +875,7 @@ async function main(): Promise<void> {
       worldContainer.removeChild(forestWallLayer);
       worldContainer.addChild(tilemapRenderer.backgroundLayer);
       worldContainer.addChild(tilemapRenderer.shadowLayer);
+      worldContainer.addChild(tilemapRenderer.groundDetailLayer);
       worldContainer.addChild(entityLayer);
       worldContainer.addChild(forestWallLayer);
       worldContainer.addChild(cellBoundaryOverlay);
@@ -1484,7 +1489,7 @@ async function main(): Promise<void> {
   console.info('─────────────────────────────────────────────────');
   console.info('  🏰 Labyrinth 2D Client');
   console.info('  Step 9: 2.5D Perspective (Stardew style walls)');
-  console.info(`  Map: ${MAZE_SIZE}×${MAZE_SIZE} tiles (${mapPixelW}×${mapPixelH} px)`);
+  console.info(`  Map: ${MAZE_WIDTH}×${MAZE_HEIGHT} tiles (${mapPixelW}×${mapPixelH} px)`);
   console.info(`  Display name: ${displayName}`);
   console.info('─────────────────────────────────────────────────');
 }

@@ -87,6 +87,24 @@ export interface StyleEditorDocumentV1 {
     tileSize: number;
   };
   notes: string;
+  reference?: {
+    kind: 'generated-maze-crop';
+    mazeSeed: number;
+    cropCellX: number;
+    cropCellY: number;
+    cropCellsWide: number;
+    cropCellsHigh: number;
+    cropTileX: number;
+    cropTileY: number;
+    topology: Array<{
+      cellX: number;
+      cellY: number;
+      sampleColumn: number;
+      sampleRow: number;
+      connections: string;
+      label: string;
+    }>;
+  };
   elements: EditorElement[];
   colliders: EditorCollider[];
 }
