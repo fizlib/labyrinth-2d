@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:full-assets": "tsc && vite build --mode full-assets",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },

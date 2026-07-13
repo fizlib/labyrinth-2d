@@ -492,100 +492,75 @@ export async function loadAssets(): Promise<GameAssets> {
     shadowCornerTexture = generateShadowCornerTexture();
   }
 
-  // ── Lenne (default character) ───────────────────────────────────────────
+  // ── Player characters ───────────────────────────────────────────────────
+  // Keep this order in sync with the server's sprite assignment. Lenne must
+  // remain index 0 so the first player always receives the default character.
+  const PLAYER_CHARACTERS = [
+    { id: 'lenne', displayName: 'Lenne', lyingFrame: 51 },
+    { id: 'glenn', displayName: 'Glenn', lyingFrame: 55 },
+    { id: 'amalia', displayName: 'Amalia', lyingFrame: 48 },
+    { id: 'robb', displayName: 'Robb', lyingFrame: 55 },
+    { id: 'sienna', displayName: 'Sienna', lyingFrame: 50 },
+  ] as const;
+
   // The source pack supplies individually cropped frames. Five right-facing
   // directions cover all eight movement directions by mirroring the left side.
-  try {
-    const loadLenneFrame = async (frame: number): Promise<Texture> => {
-      const texture = await Assets.load<Texture>(`assets/lenne/lenne_${frame}.png`);
-      texture.source.scaleMode = 'nearest';
-      return texture;
-    };
-
-    const idleFrames = await Promise.all([0, 1, 2, 3, 4].map(loadLenneFrame));
-    const walkFrames = await Promise.all(
-      Array.from({ length: 30 }, (_, index) => index + 16).map(loadLenneFrame),
-    );
-    const animations: Record<string, Texture[]> = {
-      'idle-down': [idleFrames[0]],
-      'idle-right': [idleFrames[1]],
-      'idle-up': [idleFrames[2]],
-      'idle-up-right': [idleFrames[3]],
-      'idle-down-right': [idleFrames[4]],
-      'walk-down': walkFrames.slice(0, 6),
-      'walk-right': walkFrames.slice(6, 12),
-      'walk-up': walkFrames.slice(12, 18),
-      'walk-down-right': walkFrames.slice(18, 24),
-      'walk-up-right': walkFrames.slice(24, 30),
-    };
-    const mirroredKeys = new Set<string>();
-    for (const state of ['idle', 'walk']) {
-      for (const [leftDirection, rightDirection] of [
-        ['left', 'right'],
-        ['up-left', 'up-right'],
-        ['down-left', 'down-right'],
-      ]) {
-        const leftKey = `${state}-${leftDirection}`;
-        animations[leftKey] = animations[`${state}-${rightDirection}`];
-        mirroredKeys.add(leftKey);
-      }
-    }
-    // Lenne's source art is roughly 2x the width and height of legacy frames.
-    // Render it at half size while retaining the full-resolution source textures.
-    playerAnimationSets.push({ animations, mirroredKeys, scale: 0.5 });
-    console.info('[Assets] Loaded Lenne standing and eight-way movement animations');
-  } catch {
-    console.warn('[Assets] Lenne frames missing — using fallback character');
-    const { animations } = generatePlayerSpritesheet();
-    addDiagonalFallbacks(animations);
-    playerAnimationSets.push({ animations, mirroredKeys: new Set(), scale: 1 });
-  }
-
-  // ── Legacy player spritesheets (128×128; 16×32 frames) ────────────────
-  const PLAYER_FILES = ['assets/player_0.png', 'assets/player_1.png', 'assets/player_2.png'];
-  const dirOrder = ['down', 'left', 'right', 'up'] as const;
-  const FW = 16;
-  const FH = 32;
-  const WALK_COLS = 6;
-  const IDLE_START = 6;
-  const IDLE_COLS = 2;
-
-  for (let i = 0; i < PLAYER_FILES.length; i++) {
+  for (const character of PLAYER_CHARACTERS) {
     try {
-      const sheet = await Assets.load<Texture>(PLAYER_FILES[i]);
-      sheet.source.scaleMode = 'nearest';
+      const loadCharacterFrame = async (frame: number): Promise<Texture> => {
+        const texture = await Assets.load<Texture>(
+          `assets/${character.id}/${character.id}_${frame}.png`,
+        );
+        texture.source.scaleMode = 'nearest';
+        return texture;
+      };
 
-      const anims: Record<string, Texture[]> = {};
-      for (let row = 0; row < 4; row++) {
-        const dir = dirOrder[row];
-
-        const walkFrames: Texture[] = [];
-        for (let col = 0; col < WALK_COLS; col++) {
-          walkFrames.push(new Texture({
-            source: sheet.source,
-            frame: new Rectangle(col * FW, row * FH, FW, FH),
-          }));
+      const [idleFrames, walkFrames, lyingFrame] = await Promise.all([
+        Promise.all([0, 1, 2, 3, 4].map(loadCharacterFrame)),
+        Promise.all(
+          Array.from({ length: 30 }, (_, index) => index + 16).map(loadCharacterFrame),
+        ),
+        loadCharacterFrame(character.lyingFrame),
+      ]);
+      const animations: Record<string, Texture[]> = {
+        'idle-down': [idleFrames[0]],
+        'idle-right': [idleFrames[1]],
+        'idle-up': [idleFrames[2]],
+        'idle-up-right': [idleFrames[3]],
+        'idle-down-right': [idleFrames[4]],
+        'walk-down': walkFrames.slice(0, 6),
+        'walk-right': walkFrames.slice(6, 12),
+        'walk-up': walkFrames.slice(12, 18),
+        'walk-down-right': walkFrames.slice(18, 24),
+        'walk-up-right': walkFrames.slice(24, 30),
+        lying: [lyingFrame],
+      };
+      const mirroredKeys = new Set<string>();
+      for (const state of ['idle', 'walk']) {
+        for (const [leftDirection, rightDirection] of [
+          ['left', 'right'],
+          ['up-left', 'up-right'],
+          ['down-left', 'down-right'],
+        ]) {
+          const leftKey = `${state}-${leftDirection}`;
+          animations[leftKey] = animations[`${state}-${rightDirection}`];
+          mirroredKeys.add(leftKey);
         }
-        anims[`walk-${dir}`] = walkFrames;
-
-        const idleFrames: Texture[] = [];
-        for (let col = IDLE_START; col < IDLE_START + IDLE_COLS; col++) {
-          idleFrames.push(new Texture({
-            source: sheet.source,
-            frame: new Rectangle(col * FW, row * FH, FW, FH),
-          }));
-        }
-        anims[`idle-${dir}`] = idleFrames;
       }
 
-      // Legacy characters have no diagonal art; use their vertical frames.
-      addDiagonalFallbacks(anims);
-      playerAnimationSets.push({ animations: anims, mirroredKeys: new Set(), scale: 1 });
-      console.info(`[Assets] Loaded ${PLAYER_FILES[i]}`);
+      // The remade source art is roughly 2x the width and height of the game's
+      // legacy frames. Retain its source resolution and render it at half size.
+      playerAnimationSets.push({ animations, mirroredKeys, scale: 0.5 });
+      console.info(
+        `[Assets] Loaded ${character.displayName} standing, lying, and eight-way movement animations`,
+      );
     } catch {
-      console.info(`[Assets] ${PLAYER_FILES[i]} not found — using fallback`);
+      console.warn(
+        `[Assets] ${character.displayName} frames missing — using fallback character`,
+      );
       const { animations } = generatePlayerSpritesheet();
       addDiagonalFallbacks(animations);
+      animations.lying = [animations['idle-down'][0]];
       playerAnimationSets.push({ animations, mirroredKeys: new Set(), scale: 1 });
     }
   }
@@ -786,4 +761,3 @@ export async function loadAssets(): Promise<GameAssets> {
     hubPressurePlateFrames,
   };
 }
-

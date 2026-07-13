@@ -68,24 +68,39 @@ async function readPngSize(filePath: string): Promise<{ width: number; height: n
   return { width: 0, height: 0 };
 }
 
-function styleAssetCatalogPlugin(publicDir: string): Plugin {
+function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boolean): Plugin {
   let cached: CatalogAsset[] | null = null;
   let pendingScan: Promise<CatalogAsset[]> | null = null;
+
+  const styleLibraryRoot = path.join(publicDir, 'assets', 'chained-echoes-assets-sorted');
+  const runtimeStyleRoot = path.join(styleLibraryRoot, 'Assets', 'Maps', 'Fiorwoods');
+
+  const isWithin = (parent: string, candidate: string): boolean => {
+    const relative = path.relative(parent, candidate);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  };
+
+  const shouldIncludePublicPath = (candidate: string): boolean => {
+    if (includeFullStyleLibrary || !isWithin(styleLibraryRoot, candidate)) return true;
+    // Retain the directory chain leading to Fiorwoods as well as its contents.
+    return isWithin(candidate, runtimeStyleRoot) || isWithin(runtimeStyleRoot, candidate);
+  };
 
   const scan = async (): Promise<CatalogAsset[]> => {
     if (cached) return cached;
     if (pendingScan) return pendingScan;
 
     pendingScan = (async () => {
-      const root = path.join(publicDir, 'assets', 'chained-echoes-assets-sorted');
+      const root = styleLibraryRoot;
       const candidates: Array<{ name: string; filePath: string; relativePath: string }> = [];
-      const rootEntries = await fs.promises.readdir(root, { withFileTypes: true });
-      // The package also contains thousands of loose root-level duplicates.
-      // Only descend into its curated directory trees so source/category
-      // filters reflect the sorted hierarchy.
-      const directories = rootEntries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => path.join(root, entry.name));
+      const directories = includeFullStyleLibrary
+        ? (await fs.promises.readdir(root, { withFileTypes: true }))
+          // The package also contains thousands of loose root-level duplicates.
+          // Only descend into its curated directory trees so source/category
+          // filters reflect the sorted hierarchy.
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => path.join(root, entry.name))
+        : [runtimeStyleRoot];
 
       while (directories.length > 0) {
         const directory = directories.pop()!;
@@ -218,6 +233,7 @@ function styleAssetCatalogPlugin(publicDir: string): Plugin {
       await fs.promises.mkdir(targetDir, { recursive: true });
       for (const entry of await fs.promises.readdir(sourceDir, { withFileTypes: true })) {
         const source = path.join(sourceDir, entry.name);
+        if (!shouldIncludePublicPath(source)) continue;
         if (entry.isDirectory()) directories.push(source);
         else if (entry.isFile()) files.push({ source, target: path.join(targetDir, entry.name) });
       }
@@ -317,50 +333,57 @@ function styleAssetCatalogPlugin(publicDir: string): Plugin {
   };
 }
 
-export default defineConfig({
-  // Vite eagerly indexes every file under public/ on the first request. The
-  // editor library contains 64k PNGs, so assets are served/mirrored on demand
-  // by the catalog plugin instead.
-  publicDir: false,
-  plugins: [styleAssetCatalogPlugin(path.resolve(__dirname, 'public'))],
-  // ── Resolve ───────────────────────────────────────────────────────────────
-  resolve: {
-    alias: {
-      // Allow clean imports like `@/systems/input`
-      '@': path.resolve(__dirname, 'src'),
-      // Resolve shared package to TypeScript source so Vite can bundle it
-      // directly without needing a pre-build step for the shared package.
-      '@labyrinth/shared': path.resolve(__dirname, '../shared/src/index.ts'),
-    },
-  },
+export default defineConfig(({ command, mode }) => {
+  // Development keeps the complete searchable library. Normal production
+  // builds include only the Fiorwoods assets used at runtime; opt into the
+  // complete editor library with `npm run build:full-assets`.
+  const includeFullStyleLibrary = command === 'serve' || mode === 'full-assets';
 
-  // ── JSON & Asset Handling ─────────────────────────────────────────────────
-  // Treat Tiled tilemap files (.tmj) as importable JSON assets.
-  // Usage: `import mapData from '../tilemaps/level1.tmj'`
-  // Vite will inline them into the JS bundle (sync, no fetch required).
-  assetsInclude: ['**/*.tmj'],
-
-  // ── Dev Server ────────────────────────────────────────────────────────────
-  server: {
-    port: 5173,
-    host: true, // Listen on all interfaces (including LAN/IPv4)
-    watch: {
-      // These files are an immutable source library, not authored modules.
-      // Watching 64k PNGs stalls Vite's request loop on Windows.
-      ignored: ['**/public/assets/**', '**/public/tilesets/**'],
-    },
-  },
-
-  // ── Build ─────────────────────────────────────────────────────────────────
-  build: {
-    target: 'es2022',
-    outDir: 'dist',
-    sourcemap: true,
-    rollupOptions: {
-      input: {
-        game: path.resolve(__dirname, 'index.html'),
-        styleEditor: path.resolve(__dirname, 'style-editor.html'),
+  return {
+    // Vite eagerly indexes every file under public/ on the first request. The
+    // editor library contains over 135k PNGs, so assets are served/mirrored on
+    // demand by the catalog plugin instead.
+    publicDir: false,
+    plugins: [styleAssetCatalogPlugin(path.resolve(__dirname, 'public'), includeFullStyleLibrary)],
+    // ── Resolve ───────────────────────────────────────────────────────────────
+    resolve: {
+      alias: {
+        // Allow clean imports like `@/systems/input`
+        '@': path.resolve(__dirname, 'src'),
+        // Resolve shared package to TypeScript source so Vite can bundle it
+        // directly without needing a pre-build step for the shared package.
+        '@labyrinth/shared': path.resolve(__dirname, '../shared/src/index.ts'),
       },
     },
-  },
+
+    // ── JSON & Asset Handling ─────────────────────────────────────────────────
+    // Treat Tiled tilemap files (.tmj) as importable JSON assets.
+    // Usage: `import mapData from '../tilemaps/level1.tmj'`
+    // Vite will inline them into the JS bundle (sync, no fetch required).
+    assetsInclude: ['**/*.tmj'],
+
+    // ── Dev Server ────────────────────────────────────────────────────────────
+    server: {
+      port: 5173,
+      host: true, // Listen on all interfaces (including LAN/IPv4)
+      watch: {
+        // These files are an immutable source library, not authored modules.
+        // Watching the full PNG library stalls Vite's request loop on Windows.
+        ignored: ['**/public/assets/**', '**/public/tilesets/**'],
+      },
+    },
+
+    // ── Build ─────────────────────────────────────────────────────────────────
+    build: {
+      target: 'es2022',
+      outDir: 'dist',
+      sourcemap: true,
+      rollupOptions: {
+        input: {
+          game: path.resolve(__dirname, 'index.html'),
+          styleEditor: path.resolve(__dirname, 'style-editor.html'),
+        },
+      },
+    },
+  };
 });

@@ -229,7 +229,7 @@ export class Room {
     // ── Per-player sprite assignment ─────────────────────────────────
     // Available sprite count (must match the client's player animation sets).
     // Index 0 is Lenne, making her the default assignment for the first player.
-    const SPRITE_COUNT = 4;
+    const SPRITE_COUNT = 5;
     const usedSprites = new Set(this.state.players.map((p) => p.spriteIndex));
     let spriteIndex = -1;
     // Try to assign a unique sprite first
