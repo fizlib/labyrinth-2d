@@ -117,8 +117,8 @@ export const SERVER_TICK_S = 1 / SERVER_TICK_RATE;
 /** Default room ID used when no lobby system is in place yet. */
 export const DEFAULT_ROOM_ID = 'default';
 
-/** Number of wisdom orbs each player starts with. */
-export const INITIAL_WISDOM_ORBS = 3;
+/** Number of wisdom orbs each survivor starts with. Wardens always start with 0. */
+export const INITIAL_WISDOM_ORBS = 1;
 
 /** Playable character names in server sprite-index order. */
 export const PLAYER_CHARACTER_NAMES = ['Lenne', 'Glenn', 'Amalia', 'Robb', 'Sienna'] as const;
@@ -148,6 +148,7 @@ export enum MessageType {
   RunestoneActivated = 'RUNESTONE_ACTIVATED',
   AllRunestonesActivated = 'ALL_RUNESTONES_ACTIVATED',
   WisdomOrbUsed = 'WISDOM_ORB_USED',
+  PlayerRoleChanged = 'PLAYER_ROLE_CHANGED',
   GateStateChanged = 'GATE_STATE_CHANGED',
   Error = 'ERROR',
 }
@@ -187,7 +188,12 @@ export interface DebugTeleportMessage {
   y: number;
 }
 
-export type DebugPlayerAction = 'teleport-to' | 'teleport-here' | 'set-skin' | 'set-dead';
+export type DebugPlayerAction =
+  | 'teleport-to'
+  | 'teleport-here'
+  | 'set-skin'
+  | 'set-dead'
+  | 'set-role';
 
 export interface DebugPlayerActionMessage {
   type: MessageType.DebugPlayerAction;
@@ -197,6 +203,8 @@ export interface DebugPlayerActionMessage {
   spriteIndex?: number;
   /** Required for set-dead; false revives the player. */
   dead?: boolean;
+  /** Required for set-role; ignored by other actions. */
+  role?: PlayerRole;
 }
 
 // ── Server → Client Messages ────────────────────────────────────────────────
@@ -224,6 +232,9 @@ export function deriveFacingDirection(
   return vertical ?? horizontal ?? fallback;
 }
 
+/** Hidden role assigned to a player for the lifetime of their occupied room seat. */
+export type PlayerRole = 'survivor' | 'warden';
+
 export interface PlayerInfo {
   id: string;
   displayName: string;
@@ -237,7 +248,6 @@ export interface PlayerInfo {
   /** Debug death state; currently rendered as the character's lying pose. */
   isDead: boolean;
   lastProcessedInput: number;
-  wisdomOrbs: number;
 }
 
 export interface RoomJoinedMessage {
@@ -245,6 +255,10 @@ export interface RoomJoinedMessage {
   roomId: string;
   playerId: string;
   mapSeed: number;
+  /** Private role for the recipient of this message. */
+  role: PlayerRole;
+  /** Private starting orb count for the recipient of this message. */
+  wisdomOrbs: number;
   gameState: GameState;
 }
 
@@ -276,6 +290,13 @@ export interface WisdomOrbUsedMessage {
   type: MessageType.WisdomOrbUsed;
   direction: HubDirection;
   remainingWisdomOrbs: number;
+}
+
+/** Private notification sent only to a player whose role changed through debug tools. */
+export interface PlayerRoleChangedMessage {
+  type: MessageType.PlayerRoleChanged;
+  role: PlayerRole;
+  wisdomOrbs: number;
 }
 
 export interface ErrorMessage {
@@ -340,5 +361,6 @@ export type ServerToClientMessage =
   | RunestoneActivatedMessage
   | AllRunestonesActivatedMessage
   | WisdomOrbUsedMessage
+  | PlayerRoleChangedMessage
   | GateStateChangedMessage
   | ErrorMessage;

@@ -36,6 +36,7 @@ export class MobileControls {
   private readonly wisdomButton: HTMLButtonElement;
   private readonly mediaQuery: MediaQueryList;
   private readonly disposers: Array<() => void> = [];
+  private wisdomAvailable = true;
 
   constructor(private readonly options: MobileControlsOptions) {
     this.mediaQuery = window.matchMedia(MOBILE_CONTROLS_QUERY);
@@ -93,6 +94,17 @@ export class MobileControls {
     this.addDisposable(document, 'visibilitychange', this.handleVisibilityChange);
     this.addMediaQueryListener();
     this.updateVisibility();
+  }
+
+  /** Hide the wisdom action entirely for roles that do not own an orb. */
+  setWisdomAvailable(available: boolean): void {
+    this.wisdomAvailable = available;
+    this.wisdomButton.hidden = !available;
+    this.wisdomButton.disabled = !available;
+    if (!available) {
+      this.wisdomPointers.clear();
+      this.syncActionButtonState(this.wisdomButton, this.wisdomPointers);
+    }
   }
 
   destroy(): void {

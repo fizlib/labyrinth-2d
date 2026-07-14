@@ -12,6 +12,7 @@ import {
   DEFAULT_ROOM_ID,
   type GameState,
   type HubDirection,
+  type PlayerRole,
   type JoinRoomMessage,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
@@ -24,12 +25,20 @@ import {
 
 /** Callback signatures for network events. */
 export interface NetworkCallbacks {
-  onRoomJoined: (roomId: string, playerId: string, mapSeed: number, gameState: GameState) => void;
+  onRoomJoined: (
+    roomId: string,
+    playerId: string,
+    mapSeed: number,
+    role: PlayerRole,
+    wisdomOrbs: number,
+    gameState: GameState,
+  ) => void;
   onTickUpdate: (gameState: GameState) => void;
   onPlayerLeft: (playerId: string) => void;
   onRunestoneActivated: (runestoneIndex: number) => void;
   onAllRunestonesActivated: (portalX: number, portalY: number) => void;
   onWisdomOrbUsed: (direction: HubDirection, remainingWisdomOrbs: number) => void;
+  onPlayerRoleChanged: (role: PlayerRole, wisdomOrbs: number) => void;
   onGateStateChanged: (gateIndex: number, open: boolean) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
@@ -181,7 +190,14 @@ export class NetworkManager {
       case MessageType.RoomJoined:
         this._playerId = msg.playerId;
         this._gameState = msg.gameState;
-        this.callbacks.onRoomJoined(msg.roomId, msg.playerId, msg.mapSeed, msg.gameState);
+        this.callbacks.onRoomJoined(
+          msg.roomId,
+          msg.playerId,
+          msg.mapSeed,
+          msg.role,
+          msg.wisdomOrbs,
+          msg.gameState,
+        );
         break;
 
       case MessageType.TickUpdate:
@@ -202,13 +218,11 @@ export class NetworkManager {
         break;
 
       case MessageType.WisdomOrbUsed:
-        if (this._gameState && this._playerId) {
-          const localPlayer = this._gameState.players.find((player) => player.id === this._playerId);
-          if (localPlayer) {
-            localPlayer.wisdomOrbs = msg.remainingWisdomOrbs;
-          }
-        }
         this.callbacks.onWisdomOrbUsed(msg.direction, msg.remainingWisdomOrbs);
+        break;
+
+      case MessageType.PlayerRoleChanged:
+        this.callbacks.onPlayerRoleChanged(msg.role, msg.wisdomOrbs);
         break;
 
       case MessageType.Error:
@@ -282,7 +296,7 @@ export class NetworkManager {
   sendDebugPlayerAction(
     targetPlayerId: string,
     action: DebugPlayerAction,
-    options: Pick<DebugPlayerActionMessage, 'spriteIndex' | 'dead'> = {},
+    options: Pick<DebugPlayerActionMessage, 'spriteIndex' | 'dead' | 'role'> = {},
   ): void {
     const msg: DebugPlayerActionMessage = {
       type: MessageType.DebugPlayerAction,

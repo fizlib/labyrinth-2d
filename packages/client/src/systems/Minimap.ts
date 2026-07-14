@@ -10,7 +10,7 @@
 //   - Optimization: CPU canvas only redraws when transitioning between tiles.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Container, Sprite, Texture, Graphics } from 'pixi.js';
+import { Container, Sprite, Texture, Graphics, Rectangle } from 'pixi.js';
 import type { TileMapData } from '@labyrinth/shared';
 import {
   TILE_FLOOR,
@@ -38,6 +38,10 @@ const MINIMAP_PADDING = 5;
 /** Distance from the screen edge */
 const MINIMAP_MARGIN = 8;
 
+/** Outer screen margin and frame padding for the fitted whole-maze view. */
+const EXPANDED_MARGIN = 16;
+const EXPANDED_PADDING = 5;
+
 /** Circular reveal radius in tiles around the player */
 const REVEAL_RADIUS = 7;
 
@@ -52,18 +56,34 @@ const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot ce
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface MinimapOptions {
+  isWarden?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
 export class Minimap {
   // ── PixiJS display objects ──────────────────────────────────────────────
   private container: Container;
+  private compactContainer: Container;
   private mapContainer: Container;
   private sprite: Sprite;
   private texture: Texture;
+  private expandedOverlay: Container | null = null;
+  private expandedTexture: Texture | null = null;
+  private expandedPlayerMarker: Graphics | null = null;
+  private expandedMapScale = 1;
 
   // ── Offscreen canvas for per-pixel rendering ───────────────────────────
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private imageData: ImageData;
   private pixels: Uint8ClampedArray;
+
+  /** Separate full-resolution buffer for the fixed whole-maze warden view. */
+  private expandedCanvas: HTMLCanvasElement | null = null;
+  private expandedCtx: CanvasRenderingContext2D | null = null;
+  private expandedImageData: ImageData | null = null;
+  private expandedPixels: Uint8ClampedArray | null = null;
 
   // ── Map / fog state ────────────────────────────────────────────────────
   private mapData: TileMapData;
@@ -79,6 +99,11 @@ export class Minimap {
   private portalTileY = -1;
   private portalActive = false;
 
+  private readonly isWarden: boolean;
+  private readonly onExpandedChange?: (expanded: boolean) => void;
+  private expanded = false;
+  private suppressCanvasClick = false;
+
   // ──────────────────────────────────────────────────────────────────────
 
   constructor(
@@ -86,10 +111,14 @@ export class Minimap {
     dirtMask: Uint8Array,
     internalWidth: number,
     internalHeight: number,
+    options: MinimapOptions = {},
   ) {
     this.mapData = mapData;
     this.dirtMask = dirtMask;
+    this.isWarden = options.isWarden ?? false;
+    this.onExpandedChange = options.onExpandedChange;
     this.fog = new Uint8Array(mapData.width * mapData.height); // all 0 (hidden)
+    if (this.isWarden) this.fog.fill(1);
 
     // ── Offscreen canvas (kept small & strictly for the viewable area) ─
     this.canvas = document.createElement('canvas');
@@ -117,11 +146,22 @@ export class Minimap {
 
     // ── Build HUD UI ───────────────────────────────────────────────────
     this.container = new Container();
+    this.compactContainer = new Container();
+    this.container.addChild(this.compactContainer);
 
     // Slight transparency so it doesn't block gameplay too aggressively
-    this.container.alpha = 0.85;
+    this.compactContainer.alpha = 0.85;
 
     const totalSize = MINIMAP_SIZE + MINIMAP_PADDING * 2;
+
+    if (this.isWarden) {
+      const glow = new Graphics();
+      glow.roundRect(-4, -4, totalSize + 8, totalSize + 8, 8);
+      glow.stroke({ color: 0xff2020, alpha: 0.22, width: 7, alignment: 0 });
+      glow.roundRect(-2, -2, totalSize + 4, totalSize + 4, 6);
+      glow.stroke({ color: 0xff3b30, alpha: 0.65, width: 3, alignment: 0 });
+      this.compactContainer.addChild(glow);
+    }
 
     // Wooden background & frame
     const bg = new Graphics();
@@ -150,18 +190,18 @@ export class Minimap {
     bg.rect(MINIMAP_PADDING, MINIMAP_PADDING, MINIMAP_SIZE, MINIMAP_SIZE);
     bg.fill({ color: 0x1d2119 });
 
-    this.container.addChild(bg);
+    this.compactContainer.addChild(bg);
 
     // ── Map Mask & Scrolling Container ─────────────────────────────────
     const mask = new Graphics();
     mask.rect(MINIMAP_PADDING, MINIMAP_PADDING, MINIMAP_SIZE, MINIMAP_SIZE);
     mask.fill({ color: 0xffffff });
-    this.container.addChild(mask);
+    this.compactContainer.addChild(mask);
 
     this.mapContainer = new Container();
     this.mapContainer.mask = mask;
     this.mapContainer.addChild(this.sprite);
-    this.container.addChild(this.mapContainer);
+    this.compactContainer.addChild(this.mapContainer);
 
     // ── Player Icon (Overlayed, fixed in the center) ───────────────────
     const playerMarker = new Graphics();
@@ -170,11 +210,25 @@ export class Minimap {
     playerMarker.stroke({ color: 0x884400, width: 1 }); // Deep outline
     playerMarker.x = MINIMAP_PADDING + MINIMAP_SIZE / 2;
     playerMarker.y = MINIMAP_PADDING + MINIMAP_SIZE / 2;
-    this.container.addChild(playerMarker);
+    this.compactContainer.addChild(playerMarker);
 
     // Position entire widget at bottom-right
-    this.container.x = internalWidth - totalSize - MINIMAP_MARGIN;
-    this.container.y = internalHeight - totalSize - MINIMAP_MARGIN;
+    this.compactContainer.x = internalWidth - totalSize - MINIMAP_MARGIN;
+    this.compactContainer.y = internalHeight - totalSize - MINIMAP_MARGIN;
+
+    if (this.isWarden) {
+      this.compactContainer.eventMode = 'static';
+      this.compactContainer.cursor = 'pointer';
+      this.compactContainer.hitArea = new Rectangle(0, 0, totalSize, totalSize);
+      this.compactContainer.on('pointertap', (event) => {
+        event.stopPropagation();
+        this.markCanvasClickHandled();
+        this.setExpanded(true);
+      });
+
+      this.expandedOverlay = this.createExpandedOverlay(internalWidth, internalHeight);
+      this.container.addChild(this.expandedOverlay);
+    }
   }
 
   // ── Public API ────────────────────────────────────────────────────────
@@ -182,6 +236,23 @@ export class Minimap {
   /** Attach the minimap to the PixiJS stage. */
   addToStage(stage: Container): void {
     stage.addChild(this.container);
+  }
+
+  /** Whether the fixed whole-maze warden overlay is currently open. */
+  isExpanded(): boolean {
+    return this.expanded;
+  }
+
+  /** Close the whole-maze overlay if it is open. */
+  closeExpanded(): void {
+    this.setExpanded(false);
+  }
+
+  /** Prevent the debug canvas click handler from acting on minimap interactions. */
+  shouldBlockCanvasClick(): boolean {
+    if (!this.expanded && !this.suppressCanvasClick) return false;
+    this.suppressCanvasClick = false;
+    return true;
   }
 
   /** Set the portal position (called when portal spawns). */
@@ -208,7 +279,7 @@ export class Minimap {
       this.lastPlayerTileX = ptx;
       this.lastPlayerTileY = pty;
 
-      this.revealAround(ptx, pty);
+      if (!this.isWarden) this.revealAround(ptx, pty);
       this.redrawCanvas(ptx, pty);
 
       this.ctx.putImageData(this.imageData, 0, 0);
@@ -228,16 +299,154 @@ export class Minimap {
     // Dynamically shift the rendered texture around underneath the UI mask
     this.sprite.x = viewportCenterX - spriteCenterPixelX;
     this.sprite.y = viewportCenterY - spriteCenterPixelY;
+
+    if (this.expandedPlayerMarker) {
+      this.expandedPlayerMarker.x =
+        EXPANDED_PADDING + (playerPixelX / this.mapData.tileSize) * this.expandedMapScale;
+      this.expandedPlayerMarker.y =
+        EXPANDED_PADDING + (playerPixelY / this.mapData.tileSize) * this.expandedMapScale;
+    }
   }
 
   /** Remove from stage and free resources. */
   destroy(): void {
+    if (this.expanded) this.onExpandedChange?.(false);
     this.container.parent?.removeChild(this.container);
     this.container.destroy({ children: true });
     this.texture.destroy(true);
+    this.expandedTexture?.destroy(true);
   }
 
   // ── Canvas rendering ──────────────────────────────────────────────────
+
+  /** Build a screen-fitted, non-player-centered view of the complete maze. */
+  private createExpandedOverlay(internalWidth: number, internalHeight: number): Container {
+    this.expandedCanvas = document.createElement('canvas');
+    this.expandedCanvas.width = this.mapData.width;
+    this.expandedCanvas.height = this.mapData.height;
+    this.expandedCtx = this.expandedCanvas.getContext('2d')!;
+    this.expandedCtx.imageSmoothingEnabled = false;
+    this.expandedImageData = this.expandedCtx.createImageData(
+      this.mapData.width,
+      this.mapData.height,
+    );
+    this.expandedPixels = this.expandedImageData.data;
+    this.redrawExpandedCanvas();
+
+    this.expandedTexture = Texture.from(this.expandedCanvas);
+    this.expandedTexture.source.scaleMode = 'nearest';
+    const mapSprite = new Sprite(this.expandedTexture);
+
+    const maxMapWidth = internalWidth - (EXPANDED_MARGIN + EXPANDED_PADDING) * 2;
+    const maxMapHeight = internalHeight - (EXPANDED_MARGIN + EXPANDED_PADDING) * 2;
+    const mapScale = Math.min(
+      1,
+      maxMapWidth / this.mapData.width,
+      maxMapHeight / this.mapData.height,
+    );
+    this.expandedMapScale = mapScale;
+    mapSprite.scale.set(mapScale);
+    mapSprite.x = EXPANDED_PADDING;
+    mapSprite.y = EXPANDED_PADDING;
+
+    const displayedWidth = this.mapData.width * mapScale;
+    const displayedHeight = this.mapData.height * mapScale;
+    const panelWidth = displayedWidth + EXPANDED_PADDING * 2;
+    const panelHeight = displayedHeight + EXPANDED_PADDING * 2;
+
+    const overlay = new Container();
+    overlay.visible = false;
+
+    const backdrop = new Graphics();
+    backdrop.rect(0, 0, internalWidth, internalHeight);
+    backdrop.fill({ color: 0x050000, alpha: 0.72 });
+    backdrop.eventMode = 'static';
+    backdrop.cursor = 'pointer';
+    backdrop.on('pointertap', (event) => {
+      event.stopPropagation();
+      this.markCanvasClickHandled();
+      this.setExpanded(false);
+    });
+    overlay.addChild(backdrop);
+
+    const panel = new Container();
+    panel.x = Math.round((internalWidth - panelWidth) / 2);
+    panel.y = Math.round((internalHeight - panelHeight) / 2);
+    panel.eventMode = 'static';
+    panel.cursor = 'pointer';
+    panel.hitArea = new Rectangle(0, 0, panelWidth, panelHeight);
+    panel.on('pointertap', (event) => {
+      event.stopPropagation();
+      this.markCanvasClickHandled();
+      this.setExpanded(false);
+    });
+
+    const glow = new Graphics();
+    glow.roundRect(-5, -5, panelWidth + 10, panelHeight + 10, 7);
+    glow.stroke({ color: 0xff2020, alpha: 0.25, width: 8, alignment: 0 });
+    glow.roundRect(-2, -2, panelWidth + 4, panelHeight + 4, 5);
+    glow.stroke({ color: 0xff4a3d, alpha: 0.85, width: 3, alignment: 0 });
+    panel.addChild(glow);
+
+    const frame = new Graphics();
+    frame.roundRect(0, 0, panelWidth, panelHeight, 4);
+    frame.fill({ color: 0x1f0707, alpha: 0.98 });
+    frame.roundRect(1, 1, panelWidth - 2, panelHeight - 2, 3);
+    frame.stroke({ color: 0xff5a4f, alpha: 0.9, width: 1, alignment: 0 });
+    panel.addChild(frame);
+    panel.addChild(mapSprite);
+
+    this.expandedPlayerMarker = new Graphics();
+    this.expandedPlayerMarker.circle(0, 0, 2);
+    this.expandedPlayerMarker.fill({ color: 0xffd43b });
+    this.expandedPlayerMarker.stroke({ color: 0x6b2f00, alpha: 1, width: 1 });
+    panel.addChild(this.expandedPlayerMarker);
+    overlay.addChild(panel);
+
+    return overlay;
+  }
+
+  private setExpanded(expanded: boolean): void {
+    if (!this.isWarden || !this.expandedOverlay || this.expanded === expanded) return;
+
+    this.expanded = expanded;
+    this.expandedOverlay.visible = expanded;
+    this.compactContainer.visible = !expanded;
+
+    if (expanded) {
+      // Gate tiles can change during play, so refresh the layout every time it opens.
+      this.redrawExpandedCanvas();
+      this.expandedTexture?.source.update();
+      // Keep the modal above other HUD elements created after the minimap.
+      this.container.parent?.addChild(this.container);
+    }
+
+    this.onExpandedChange?.(expanded);
+  }
+
+  private markCanvasClickHandled(): void {
+    this.suppressCanvasClick = true;
+    setTimeout(() => {
+      this.suppressCanvasClick = false;
+    }, 0);
+  }
+
+  /** Render every maze tile without fog or entity/objective markers. */
+  private redrawExpandedCanvas(): void {
+    if (!this.expandedPixels || !this.expandedImageData || !this.expandedCtx) return;
+
+    const { width, height, data } = this.mapData;
+    for (let tileIndex = 0; tileIndex < width * height; tileIndex++) {
+      const col = this.tileColor(tileIndex, data[tileIndex]);
+      const pixelIndex = tileIndex * 4;
+      this.expandedPixels[pixelIndex] = col[0];
+      this.expandedPixels[pixelIndex + 1] = col[1];
+      this.expandedPixels[pixelIndex + 2] = col[2];
+      this.expandedPixels[pixelIndex + 3] = col[3];
+    }
+
+    this.expandedCtx.putImageData(this.expandedImageData, 0, 0);
+  }
 
   /**
    * Redraw the local off-screen canvas window with the player at the center.

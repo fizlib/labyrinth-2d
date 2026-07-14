@@ -43,6 +43,7 @@ import {
   type GateState,
   type GameState,
   type PlayerInfo,
+  type PlayerRole,
   type RunestoneInfo,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
@@ -54,6 +55,7 @@ import {
   type RunestoneActivatedMessage,
   type AllRunestonesActivatedMessage,
   type WisdomOrbUsedMessage,
+  type PlayerRoleChangedMessage,
   type GateStateChangedMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
@@ -74,6 +76,53 @@ interface QueuedInput {
   left: boolean;
   right: boolean;
   dt: number;
+}
+
+interface RoomPlayerInfo extends PlayerInfo {
+  /** Stable seat within the assigned three-player team. */
+  teamSlot: number;
+  /** Hidden role that must never be included in public room snapshots. */
+  role: PlayerRole;
+  /** Private, server-authoritative inventory. */
+  wisdomOrbs: number;
+}
+
+type RoomState = Omit<GameState, 'players'> & { players: RoomPlayerInfo[] };
+
+/** Build a legal 7-survivor / 2-warden seat layout for a new room. */
+function createRoleSeats(): PlayerRole[][] {
+  const seats: PlayerRole[][] = Array.from({ length: MAX_TEAMS }, () =>
+    Array<PlayerRole>(PLAYERS_PER_TEAM).fill('survivor'),
+  );
+  const teams = Array.from({ length: MAX_TEAMS }, (_, index) => index);
+
+  for (let i = teams.length - 1; i > 0; i--) {
+    const swapIndex = Math.floor(Math.random() * (i + 1));
+    [teams[i], teams[swapIndex]] = [teams[swapIndex], teams[i]];
+  }
+
+  for (const teamId of teams.slice(0, 2)) {
+    const teamSlot = Math.floor(Math.random() * PLAYERS_PER_TEAM);
+    seats[teamId][teamSlot] = 'warden';
+  }
+
+  return seats;
+}
+
+/** Convert private room state into the player data that every client may see. */
+function toPublicPlayerInfo(player: RoomPlayerInfo): PlayerInfo {
+  return {
+    id: player.id,
+    displayName: player.displayName,
+    teamId: player.teamId,
+    spriteIndex: player.spriteIndex,
+    x: player.x,
+    y: player.y,
+    facing: player.facing,
+    isMoving: player.isMoving,
+    isDead: player.isDead,
+    lastProcessedInput: player.lastProcessedInput,
+  };
 }
 
 /** Pixel distance threshold for runestone activation (1.5 tiles). */
@@ -125,10 +174,13 @@ function isPlayerOnPlate(
 
 export class Room {
   readonly id: string;
-  private state: GameState;
+  private state: RoomState;
   private sockets: Map<string, PlayerSocket> = new Map();
   private inputQueues: Map<string, QueuedInput[]> = new Map();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
+
+  /** Hidden role assigned to every seat in the room. */
+  private readonly roleSeats: PlayerRole[][];
 
   /** Runestone activation state (server-authoritative). */
   private runestones: RunestoneInfo[] = [];
@@ -163,6 +215,7 @@ export class Room {
 
   constructor(id: string) {
     this.id = id;
+    this.roleSeats = createRoleSeats();
     this.mapSeed = Math.floor(Math.random() * 2147483647);
     const layout = generateMazeLayout(this.mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
     this.map = layout.map;
@@ -204,23 +257,33 @@ export class Room {
     const playerId = data.id;
     const displayName = data.displayName;
 
-    this.sockets.set(playerId, ws);
-    this.inputQueues.set(playerId, []);
-
     // ── Team Assignment ─────────────────────────────────────────────
-    // Find the first team (0…MAX_TEAMS-1) that has fewer than PLAYERS_PER_TEAM members.
+    // Fill the first available stable seat so a reconnecting replacement receives
+    // the same role as the player who vacated it.
     let assignedTeam = -1;
+    let assignedTeamSlot = -1;
     for (let t = 0; t < MAX_TEAMS; t++) {
-      const count = this.state.players.filter((p) => p.teamId === t).length;
-      if (count < PLAYERS_PER_TEAM) {
-        assignedTeam = t;
-        break;
+      const occupiedSlots = new Set(
+        this.state.players.filter((p) => p.teamId === t).map((p) => p.teamSlot),
+      );
+      for (let slot = 0; slot < PLAYERS_PER_TEAM; slot++) {
+        if (!occupiedSlots.has(slot)) {
+          assignedTeam = t;
+          assignedTeamSlot = slot;
+          break;
+        }
       }
+      if (assignedTeam !== -1) break;
     }
 
-    // Safety: should never happen because isFull guards beforehand,
-    // but fall back to team 0 just in case.
-    if (assignedTeam === -1) assignedTeam = 0;
+    // Safety: isFull guards this path before addPlayer is called.
+    if (assignedTeam === -1 || assignedTeamSlot === -1) {
+      console.error(`[Room:${this.id}] Could not find an available team seat for ${playerId}`);
+      return;
+    }
+
+    this.sockets.set(playerId, ws);
+    this.inputQueues.set(playerId, []);
 
     // Each team spawns at its corresponding dynamic spawn point
     const spawnTile = this.spawnPoints[assignedTeam] ?? this.spawnPoints[0];
@@ -245,10 +308,14 @@ export class Room {
       spriteIndex = Math.floor(Math.random() * PLAYER_CHARACTER_COUNT);
     }
 
-    const playerInfo: PlayerInfo = {
+    const role = this.roleSeats[assignedTeam][assignedTeamSlot];
+    const wisdomOrbs = role === 'survivor' ? INITIAL_WISDOM_ORBS : 0;
+    const playerInfo: RoomPlayerInfo = {
       id: playerId,
       displayName,
       teamId: assignedTeam,
+      teamSlot: assignedTeamSlot,
+      role,
       spriteIndex,
       x: spawnX,
       y: spawnY,
@@ -256,7 +323,7 @@ export class Room {
       isMoving: false,
       isDead: false,
       lastProcessedInput: 0,
-      wisdomOrbs: INITIAL_WISDOM_ORBS,
+      wisdomOrbs,
     };
     this.state.players.push(playerInfo);
 
@@ -267,12 +334,14 @@ export class Room {
       roomId: this.id,
       playerId,
       mapSeed: this.mapSeed,
+      role,
+      wisdomOrbs,
       gameState: this.cloneState(),
     };
     this.send(ws, joinMsg);
 
     console.info(
-      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) team ${assignedTeam} sprite ${spriteIndex} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
+      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) team ${assignedTeam} seat ${assignedTeamSlot} role ${role} sprite ${spriteIndex} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
     );
 
     if (this.playerCount === 1) {
@@ -361,6 +430,27 @@ export class Room {
         target.isDead = msg.dead;
         console.info(`[Room:${this.id}] Debug marked ${target.id} ${msg.dead ? 'dead' : 'alive'}`);
         break;
+
+      case 'set-role': {
+        if (msg.role !== 'survivor' && msg.role !== 'warden') return;
+
+        target.role = msg.role;
+        target.wisdomOrbs = msg.role === 'survivor' ? INITIAL_WISDOM_ORBS : 0;
+        this.roleSeats[target.teamId][target.teamSlot] = msg.role;
+
+        const targetSocket = this.sockets.get(target.id);
+        if (targetSocket) {
+          const roleChangedMessage: PlayerRoleChangedMessage = {
+            type: MessageType.PlayerRoleChanged,
+            role: target.role,
+            wisdomOrbs: target.wisdomOrbs,
+          };
+          this.send(targetSocket, roleChangedMessage);
+        }
+
+        console.info(`[Room:${this.id}] Debug changed ${target.id} role to ${target.role}`);
+        break;
+      }
     }
   }
 
@@ -444,6 +534,10 @@ export class Room {
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player) {
       console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: player ${playerId} not found in state (${this.state.players.length} players)`);
+      return;
+    }
+    if (player.role === 'warden') {
+      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: ${playerId} is a warden`);
       return;
     }
     if (player.wisdomOrbs <= 0) {
@@ -647,7 +741,7 @@ export class Room {
   private cloneState(): GameState {
     return {
       tick: this.state.tick,
-      players: this.state.players.map((p) => ({ ...p })),
+      players: this.state.players.map(toPublicPlayerInfo),
       runestones: this.runestones.map((r) => ({ ...r })),
       portal: this.portalPosition ? { ...this.portalPosition } : null,
       gateStates: this.state.gateStates.map((g) => ({ ...g })),

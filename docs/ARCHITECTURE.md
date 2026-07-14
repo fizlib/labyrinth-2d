@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-04-02 - Mobile touch controls and narrow-screen canvas fit
+Last updated: 2026-07-14 - Hidden survivor/warden roles and warden map
 
 ## Project Overview
 
@@ -10,7 +10,7 @@ Labyrinth 2D is a multiplayer top-down pixel-art labyrinth game built as a TypeS
 - `packages/server`: the authoritative multiplayer simulation and room management.
 - `packages/client`: the PixiJS renderer, client prediction, interpolation, HUD, and input handling.
 
-One room owns one maze instance. The server is authoritative for player state, runestones, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
+One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
 ## Tech Stack
 
@@ -39,7 +39,7 @@ One room owns one maze instance. The server is authoritative for player state, r
 ### Room Lifecycle
 
 1. A client connects and sends `JOIN_ROOM`.
-2. The server creates or reuses the room and assigns the player to the first team with space.
+2. The server creates or reuses the room and assigns the player to the first free stable seat. Each room preselects two warden seats in different teams; all other seats are survivors.
 3. The room generates one gated maze layout from a random seed and derives team spawn points from the ungated base maze.
 4. The room starts its fixed tick loop when the first player joins.
 5. The room stops and is destroyed when the last player leaves.
@@ -71,12 +71,13 @@ One room owns one maze instance. The server is authoritative for player state, r
 
 | Message | Purpose |
 | --- | --- |
-| `ROOM_JOINED` | Initial join payload with `playerId`, `mapSeed`, and full `gameState` |
+| `ROOM_JOINED` | Initial join payload with `playerId`, `mapSeed`, full `gameState`, and the recipient's private role/orb inventory |
 | `TICK_UPDATE` | Authoritative room snapshot broadcast every server tick |
 | `PLAYER_LEFT` | Notify clients that one player disconnected |
 | `RUNESTONE_ACTIVATED` | Broadcast that one runestone is now active |
 | `ALL_RUNESTONES_ACTIVATED` | Broadcast portal spawn coordinates once all runestones are active |
 | `WISDOM_ORB_USED` | Private response to the player who spent an orb, containing the hint direction and remaining orb count |
+| `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
 | `ERROR` | Report room-join or protocol errors |
 
 ### Shared State Contracts
@@ -93,7 +94,8 @@ One room owns one maze instance. The server is authoritative for player state, r
 | `facing` | `'up' | 'down' | 'left' | 'right'` | Authoritative sprite facing |
 | `isMoving` | `boolean` | Current movement animation state |
 | `lastProcessedInput` | `number` | Highest acknowledged local input sequence |
-| `wisdomOrbs` | `number` | Remaining wisdom orbs for that player |
+
+Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and public snapshots. `ROOM_JOINED` privately provides the recipient's `role` (`'survivor' | 'warden'`) and starting `wisdomOrbs`; later orb changes use the private `WISDOM_ORB_USED` response.
 
 #### `RunestoneInfo`
 
@@ -130,10 +132,11 @@ One room owns one maze instance. The server is authoritative for player state, r
 - As soon as the authoritative portal position exists, wisdom orbs switch from hub guidance to portal guidance.
 - The portal is a world entity, not a tilemap tile.
 
-### Wisdom Orbs and Shared Navigation
+### Hidden Roles and Wisdom Orbs
 
-- Each player starts with `3` wisdom orbs.
-- Wisdom orbs are server-authoritative and stored directly on `PlayerInfo`.
+- A full room has `7` survivors and `2` wardens. The wardens occupy different teams, and a stable team-seat assignment preserves that distribution when a disconnected player is replaced.
+- Each survivor starts with `1` wisdom orb; wardens start with `0` and server-side role validation rejects their orb requests.
+- Roles and wisdom orbs are server-authoritative private room state. They are never included in broadcast `GameState` snapshots.
 - Shared phase-aware guidance lives in `packages/shared/src/navigation.ts`.
 - `computeHubDistanceField()` builds the phase 1 pathfield toward the central hub.
 - `computePortalDistanceField()` builds the phase 2 pathfield toward walkable portal-approach tiles around the blocked portal collider.
@@ -255,9 +258,10 @@ The client currently has multiple UI subsystems, not just the minimap:
   - screen-space HUD in the bottom-right corner
   - player-centered exploration view with fog of war
   - supports portal display once the portal is spawned
+  - wardens receive a red clickable frame with no fog-of-war; it opens a fixed whole-maze view scaled to fit the internal screen and marks only the local warden's position
 - `WisdomOrbHud`
   - screen-space HUD in the top-left corner
-  - shows `3` orb slots and the current remaining count
+  - survivors see one orb slot and the current remaining count; wardens do not receive this HUD
   - filled orbs are clickable
 - `IntroDialogueHud`
   - screen-space dialogue panel centered along the bottom of the screen
@@ -282,7 +286,9 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Intro dialogue skip: `E`, the clickable arrow button, or the mobile `E` button while the current page is still typing
 - Runestone interaction: `E` or the mobile `E` button after the intro dialogue is dismissed
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
+- Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.
 - Debug-only tools can enable scroll zoom, zoom toggling, and click teleport
+- The debug player menu can authoritatively change a selected player's role. The server updates that seat and privately rebuilds the affected player's role-specific HUD and inventory.
 
 ## Monorepo Structure
 
@@ -302,7 +308,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `packages/server/src/index.ts`
   - WebSocket server bootstrap and protocol routing
 - `packages/server/src/Room.ts`
-  - room lifecycle, authoritative state, tick loop, runestone logic, portal spawning, wisdom-orb handling
+  - room lifecycle, hidden role seats/private inventories, authoritative state, tick loop, runestone logic, portal spawning, wisdom-orb handling
 
 ### Client Package
 

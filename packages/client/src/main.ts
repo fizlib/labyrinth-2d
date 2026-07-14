@@ -10,7 +10,6 @@ TextureStyle.defaultOptions.scaleMode = 'nearest';
 import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
-  INITIAL_WISDOM_ORBS,
   TILE_SIZE,
   TILE_FLOOR,
   TILE_GATE_HORIZONTAL,
@@ -29,7 +28,7 @@ import {
   applyInputWithCollision,
   deriveFacingDirection,
 } from '@labyrinth/shared';
-import type { GameState, TileMapData, FacingDirection, GatePlacement, PressurePlateInfo, GeneratedMazeLayout } from '@labyrinth/shared';
+import type { GameState, TileMapData, FacingDirection, GatePlacement, PressurePlateInfo, GeneratedMazeLayout, PlayerRole } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 import { SnapshotBuffer, INTERPOLATION_DELAY, type TimestampedSnapshot } from './net/SnapshotBuffer';
 import { loadAssets, type GameAssets } from './assets/AssetLoader';
@@ -43,9 +42,14 @@ import { IntroDialogueHud } from './systems/IntroDialogueHud';
 import { MobileControls, type MobileControlDirection } from './systems/MobileControls';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
-const SPAWN_DIALOGUE_PAGES = [
+const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
   'You have been cast into the Maze. Scattered and alone, find your way to the heart of the labyrinth — where other survivors await.',
   'Together, activate the three ancient runes to unlock the portal and escape… before the Maze claims you forever.',
+];
+
+const WARDEN_SPAWN_DIALOGUE_PAGES = [
+  'You are a Warden. Keep your role hidden from the survivors.',
+  'Your goal is to delay and misdirect the survivors until time runs out. Use your complete map to lead them astray.',
 ];
 
 // ── Input State ─────────────────────────────────────────────────────────────
@@ -131,6 +135,7 @@ let inputSequenceNumber = 0;
 let localX = 0;
 let localY = 0;
 let localPlayerInitialized = false;
+let localPlayerRole: PlayerRole | null = null;
 let localFacing: FacingDirection = 'down';
 
 /** Briefly suppress reconciliation while a click-teleport reaches the server. */
@@ -440,6 +445,8 @@ function createDebugUI(): DebugUiDom {
               ${PLAYER_CHARACTER_NAMES.map((name, index) => `<option value="${index}">${name}</option>`).join('')}
             </select>
           </label>
+          <button type="button" data-player-action="set-survivor">Set survivor</button>
+          <button type="button" data-player-action="set-warden">Set warden</button>
           <button type="button" id="debug-toggle-dead" class="danger" data-player-action="toggle-dead">Make dead</button>
         </div>
       </div>
@@ -615,6 +622,12 @@ function setupDebugPlayerActions(
         }
         break;
       }
+      case 'set-survivor':
+        net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-role', { role: 'survivor' });
+        break;
+      case 'set-warden':
+        net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-role', { role: 'warden' });
+        break;
     }
   });
 
@@ -1008,10 +1021,15 @@ async function main(): Promise<void> {
   // ── Network Manager ───────────────────────────────────────────────────
 
   let latestServerState: GameState | null = null;
+  let applyLocalRoleUi: (
+    role: PlayerRole,
+    wisdomOrbs: number,
+    showIntroDialogue: boolean,
+  ) => void = () => {};
 
   const net = new NetworkManager({
-    onRoomJoined: (roomId, playerId, mapSeed, gameState) => {
-      console.info(`[Main] Joined room "${roomId}" as ${playerId} (maze seed: ${mapSeed})`);
+    onRoomJoined: (roomId, playerId, mapSeed, role, wisdomOrbs, gameState) => {
+      console.info(`[Main] Joined room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`);
 
       // Clear previous slide states on new room join
       gateSlideStates.clear();
@@ -1085,27 +1103,7 @@ async function main(): Promise<void> {
         localPlayerInitialized = true;
       }
 
-      // ── Minimap ──────────────────────────────────────────────────────
-      if (minimap) minimap.destroy();
-      minimap = new Minimap(currentMap!, layout.dirtMask, INTERNAL_WIDTH, INTERNAL_HEIGHT);
-      minimap.addToStage(app.stage);
-
-      if (wisdomOrbHud) wisdomOrbHud.destroy();
-      wisdomOrbHud = new WisdomOrbHud(assets.wisdomOrbTexture, () => {
-        triggerUseWisdomOrb('Click');
-      });
-      wisdomOrbHud.addToStage(app.stage);
-      wisdomOrbHud.setRemaining(me?.wisdomOrbs ?? INITIAL_WISDOM_ORBS);
-
-      wisdomArrow?.destroy();
-      wisdomArrow = new WisdomArrow(entityLayer);
-      introDialogueHud?.destroy();
-      introDialogueHud = new IntroDialogueHud(
-        INTERNAL_WIDTH,
-        INTERNAL_HEIGHT,
-        SPAWN_DIALOGUE_PAGES,
-      );
-      introDialogueHud.addToStage(app.stage);
+      applyLocalRoleUi(role, wisdomOrbs, true);
 
       // ── Sync runestone activation state from initial GameState ─────
       for (const rsInfo of gameState.runestones) {
@@ -1227,7 +1225,6 @@ async function main(): Promise<void> {
         }
 
         setRoundedPosition(data.container, localX, localY, 1);
-        wisdomOrbHud?.setRemaining(localPlayerData.wisdomOrbs);
       }
 
       knownRemotePlayers.clear();
@@ -1278,6 +1275,11 @@ async function main(): Promise<void> {
       wisdomArrow?.show(direction);
     },
 
+    onPlayerRoleChanged: (role, wisdomOrbs) => {
+      console.info(`[Main] Debug role changed to ${role}`);
+      applyLocalRoleUi(role, wisdomOrbs, false);
+    },
+
     onError: (code, message) => {
       console.error(`[Main] Server error [${code}]: ${message}`);
       if (statusEl) {
@@ -1295,6 +1297,9 @@ async function main(): Promise<void> {
 
     onDisconnect: () => {
       console.info('[Main] Disconnected from server');
+      minimap?.closeExpanded();
+      localPlayerRole = null;
+      mobileControls.setWisdomAvailable(false);
       if (statusEl) {
         statusEl.textContent = '🔴 Disconnected';
         statusEl.classList.remove('connected');
@@ -1319,11 +1324,21 @@ async function main(): Promise<void> {
       console.warn(`[WisdomOrb][${source}] BLOCKED: not connected`);
       return;
     }
+    if (localPlayerRole !== 'survivor') {
+      console.warn(`[WisdomOrb][${source}] BLOCKED: local role has no wisdom orbs`);
+      return;
+    }
+    if (minimap?.isExpanded()) {
+      console.warn(`[WisdomOrb][${source}] BLOCKED: warden map is open`);
+      return;
+    }
     console.info(`[WisdomOrb][${source}] Sending USE_WISDOM_ORB, player at (${localX.toFixed(1)}, ${localY.toFixed(1)})`);
     net.sendUseWisdomOrb();
   };
 
   const triggerInteract = (): void => {
+    if (minimap?.isExpanded()) return;
+
     if (introDialogueHud?.isVisible()) {
       introDialogueHud.advance();
       return;
@@ -1359,6 +1374,54 @@ async function main(): Promise<void> {
       triggerUseWisdomOrb('MobileQ');
     },
   });
+  mobileControls.setWisdomAvailable(false);
+
+  applyLocalRoleUi = (role, wisdomOrbs, showIntroDialogue) => {
+    localPlayerRole = role;
+    if (!currentMap || !currentLayout) return;
+
+    minimap?.destroy();
+    minimap = new Minimap(
+      currentMap,
+      currentLayout.dirtMask,
+      INTERNAL_WIDTH,
+      INTERNAL_HEIGHT,
+      {
+        isWarden: role === 'warden',
+      },
+    );
+    minimap.addToStage(app.stage);
+    if (latestServerState?.portal) {
+      minimap.setPortalPosition(latestServerState.portal.x, latestServerState.portal.y);
+    }
+
+    wisdomOrbHud?.destroy();
+    wisdomOrbHud = null;
+    wisdomArrow?.destroy();
+    wisdomArrow = null;
+    mobileControls.setWisdomAvailable(role === 'survivor');
+
+    if (role === 'survivor') {
+      wisdomOrbHud = new WisdomOrbHud(assets.wisdomOrbTexture, () => {
+        triggerUseWisdomOrb('Click');
+      });
+      wisdomOrbHud.addToStage(app.stage);
+      wisdomOrbHud.setRemaining(wisdomOrbs);
+      wisdomArrow = new WisdomArrow(entityLayer);
+    }
+
+    introDialogueHud?.destroy();
+    introDialogueHud = null;
+    if (showIntroDialogue) {
+      introDialogueHud = new IntroDialogueHud(
+        INTERNAL_WIDTH,
+        INTERNAL_HEIGHT,
+        role === 'warden' ? WARDEN_SPAWN_DIALOGUE_PAGES : SURVIVOR_SPAWN_DIALOGUE_PAGES,
+      );
+      introDialogueHud.addToStage(app.stage);
+    }
+  };
+
   window.addEventListener('beforeunload', () => mobileControls.destroy(), { once: true });
 
   // ── 60 FPS Game Loop ──────────────────────────────────────────────────
@@ -1569,6 +1632,7 @@ async function main(): Promise<void> {
 
   // ── Click-to-Teleport (debug) ─────────────────────────────────────────
   app.canvas.addEventListener('click', (e: MouseEvent) => {
+    if (minimap?.shouldBlockCanvasClick()) return;
     if (!DebugSettings.isEnabled('clickTeleport')) return;
     if (!localPlayerInitialized || !currentMap) return;
 
@@ -1611,8 +1675,17 @@ async function main(): Promise<void> {
 
   // ── Keyboard Input ────────────────────────────────────────────────────
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.code === 'Escape' && minimap?.isExpanded()) {
+      e.preventDefault();
+      minimap.closeExpanded();
+      return;
+    }
+
     const dir = KEY_MAP[e.code];
     if (dir) setKeyboardDirection(dir, true);
+
+    // The expanded warden map remains modal for actions, but movement stays active.
+    if (minimap?.isExpanded()) return;
 
     if (e.code === 'KeyQ' && !e.repeat) {
       triggerUseWisdomOrb('KeyQ');
