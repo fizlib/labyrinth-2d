@@ -149,6 +149,7 @@ export enum MessageType {
   AllRunestonesActivated = 'ALL_RUNESTONES_ACTIVATED',
   WisdomOrbUsed = 'WISDOM_ORB_USED',
   PlayerRoleChanged = 'PLAYER_ROLE_CHANGED',
+  DebugPlayerRole = 'DEBUG_PLAYER_ROLE',
   GateStateChanged = 'GATE_STATE_CHANGED',
   Error = 'ERROR',
 }
@@ -191,6 +192,7 @@ export interface DebugTeleportMessage {
 export type DebugPlayerAction =
   | 'teleport-to'
   | 'teleport-here'
+  | 'get-role'
   | 'set-skin'
   | 'set-dead'
   | 'set-role';
@@ -299,6 +301,13 @@ export interface PlayerRoleChangedMessage {
   wisdomOrbs: number;
 }
 
+/** Private debug response containing the authoritative role of one player. */
+export interface DebugPlayerRoleMessage {
+  type: MessageType.DebugPlayerRole;
+  playerId: string;
+  role: PlayerRole;
+}
+
 export interface ErrorMessage {
   type: MessageType.Error;
   code: string;
@@ -362,5 +371,6 @@ export type ServerToClientMessage =
   | AllRunestonesActivatedMessage
   | WisdomOrbUsedMessage
   | PlayerRoleChangedMessage
+  | DebugPlayerRoleMessage
   | GateStateChangedMessage
   | ErrorMessage;

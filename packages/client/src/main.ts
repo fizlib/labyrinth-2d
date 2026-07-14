@@ -421,6 +421,7 @@ interface DebugUiDom {
   playerActionName: HTMLElement;
   playerActionMeta: HTMLSpanElement;
   playerSkinSelect: HTMLSelectElement;
+  playerRoleSelect: HTMLSelectElement;
   teleportToButton: HTMLButtonElement;
   teleportHereButton: HTMLButtonElement;
   toggleDeadButton: HTMLButtonElement;
@@ -430,6 +431,7 @@ const DEBUG_UI_UPDATE_INTERVAL_MS = 150;
 let lastDebugUiUpdateAt = -Infinity;
 let lastDebugPlayerListMarkup = '';
 let selectedDebugPlayerId: string | null = null;
+const debugPlayerRoles = new Map<string, PlayerRole>();
 
 function escapeHtml(value: string): string {
   const replacements: Record<string, string> = {
@@ -485,14 +487,20 @@ function createDebugUI(): DebugUiDom {
         <div class="debug-player-action-grid">
           <button type="button" id="debug-teleport-to" data-player-action="teleport-to">Teleport to them</button>
           <button type="button" id="debug-teleport-here" data-player-action="teleport-here">Teleport them to me</button>
-          <label class="debug-player-skin-control">
+          <label class="debug-player-select-control">
             <span>Character skin</span>
             <select id="debug-player-skin-select">
               ${PLAYER_CHARACTER_NAMES.map((name, index) => `<option value="${index}">${name}</option>`).join('')}
             </select>
           </label>
-          <button type="button" data-player-action="set-survivor">Set survivor</button>
-          <button type="button" data-player-action="set-warden">Set warden</button>
+          <label class="debug-player-select-control">
+            <span>Role</span>
+            <select id="debug-player-role-select">
+              <option value="" disabled>Loading…</option>
+              <option value="survivor">Survivor</option>
+              <option value="warden">Warden</option>
+            </select>
+          </label>
           <button type="button" id="debug-toggle-dead" class="danger" data-player-action="toggle-dead">Make dead</button>
         </div>
       </div>
@@ -541,6 +549,9 @@ function createDebugUI(): DebugUiDom {
   const playerSkinSelect = debugDiv.querySelector<HTMLSelectElement>(
     '#debug-player-skin-select',
   );
+  const playerRoleSelect = debugDiv.querySelector<HTMLSelectElement>(
+    '#debug-player-role-select',
+  );
   const teleportToButton =
     debugDiv.querySelector<HTMLButtonElement>('#debug-teleport-to');
   const teleportHereButton =
@@ -558,6 +569,7 @@ function createDebugUI(): DebugUiDom {
     !playerActionName ||
     !playerActionMeta ||
     !playerSkinSelect ||
+    !playerRoleSelect ||
     !teleportToButton ||
     !teleportHereButton ||
     !toggleDeadButton
@@ -568,6 +580,7 @@ function createDebugUI(): DebugUiDom {
   lastDebugUiUpdateAt = -Infinity;
   lastDebugPlayerListMarkup = '';
   selectedDebugPlayerId = null;
+  debugPlayerRoles.clear();
 
   return {
     root: debugDiv,
@@ -580,6 +593,7 @@ function createDebugUI(): DebugUiDom {
     playerActionName,
     playerActionMeta,
     playerSkinSelect,
+    playerRoleSelect,
     teleportToButton,
     teleportHereButton,
     toggleDeadButton,
@@ -631,6 +645,9 @@ function renderDebugPlayerActions(
   debugUi.playerActionName.textContent = player.displayName;
   debugUi.playerActionMeta.textContent = `${skinName} · ${player.isDead ? 'dead' : 'alive'}`;
   debugUi.playerSkinSelect.value = String(player.spriteIndex);
+  const role = debugPlayerRoles.get(player.id);
+  debugUi.playerRoleSelect.value = role ?? '';
+  debugUi.playerRoleSelect.disabled = role === undefined;
   debugUi.teleportToButton.disabled = isLocalPlayer;
   debugUi.teleportHereButton.disabled = isLocalPlayer;
   debugUi.toggleDeadButton.textContent = player.isDead ? 'Revive player' : 'Make dead';
@@ -655,6 +672,9 @@ function setupDebugPlayerActions(
     );
     if (!playerButton) return;
     selectedDebugPlayerId = playerButton.dataset.debugPlayerId ?? null;
+    if (selectedDebugPlayerId) {
+      net.sendDebugPlayerAction(selectedDebugPlayerId, 'get-role');
+    }
     refresh();
   });
 
@@ -688,14 +708,6 @@ function setupDebugPlayerActions(
         }
         break;
       }
-      case 'set-survivor':
-        net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-role', {
-          role: 'survivor',
-        });
-        break;
-      case 'set-warden':
-        net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-role', { role: 'warden' });
-        break;
     }
   });
 
@@ -704,6 +716,15 @@ function setupDebugPlayerActions(
     const spriteIndex = Number.parseInt(debugUi.playerSkinSelect.value, 10);
     if (Number.isInteger(spriteIndex)) {
       net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-skin', { spriteIndex });
+    }
+  });
+
+  debugUi.playerRoleSelect.addEventListener('change', () => {
+    if (!selectedDebugPlayerId) return;
+    const role = debugUi.playerRoleSelect.value;
+    if (role === 'survivor' || role === 'warden') {
+      debugPlayerRoles.set(selectedDebugPlayerId, role);
+      net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-role', { role });
     }
   });
 }
@@ -1115,6 +1136,8 @@ async function main(): Promise<void> {
       console.info(
         `[Main] Joined room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
       );
+      debugPlayerRoles.clear();
+      debugPlayerRoles.set(playerId, role);
 
       // Clear previous slide states on new room join
       gateSlideStates.clear();
@@ -1364,6 +1387,7 @@ async function main(): Promise<void> {
       console.info(`[Main] Player left: ${playerId}`);
       removePlayerSprite(playerId);
       knownRemotePlayers.delete(playerId);
+      debugPlayerRoles.delete(playerId);
     },
 
     onRunestoneActivated: (runestoneIndex) => {
@@ -1396,7 +1420,15 @@ async function main(): Promise<void> {
 
     onPlayerRoleChanged: (role, wisdomOrbs) => {
       console.info(`[Main] Debug role changed to ${role}`);
+      if (net.playerId) debugPlayerRoles.set(net.playerId, role);
       applyLocalRoleUi(role, wisdomOrbs, false);
+    },
+
+    onDebugPlayerRole: (playerId, role) => {
+      debugPlayerRoles.set(playerId, role);
+      if (debugUi && latestServerState) {
+        updateDebugUI(debugUi, latestServerState, net.playerId, true);
+      }
     },
 
     onError: (code, message) => {
@@ -1425,6 +1457,7 @@ async function main(): Promise<void> {
       console.info('[Main] Disconnected from server');
       minimap?.closeExpanded();
       localPlayerRole = null;
+      debugPlayerRoles.clear();
       mobileControls.setWisdomAvailable(false);
       if (statusEl) {
         statusEl.textContent = '🔴 Disconnected';

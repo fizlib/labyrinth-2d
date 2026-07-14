@@ -78,6 +78,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `ALL_RUNESTONES_ACTIVATED` | Broadcast portal spawn coordinates once all runestones are active |
 | `WISDOM_ORB_USED` | Private response to the player who spent an orb, containing the hint direction and remaining orb count |
 | `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
+| `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
 | `ERROR` | Report room-join or protocol errors |
 
 ### Shared State Contracts
@@ -290,7 +291,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
 - Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.
 - Debug-only tools can enable scroll zoom, zoom toggling, and click teleport
-- The debug player menu can authoritatively change a selected player's role. The server updates that seat and privately rebuilds the affected player's role-specific HUD and inventory.
+- The debug player menu privately fetches a selected player's current role and can authoritatively change it. The server updates that seat and privately rebuilds the affected player's role-specific HUD and inventory.
 
 ## Monorepo Structure
 

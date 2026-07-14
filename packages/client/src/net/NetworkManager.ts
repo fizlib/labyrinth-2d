@@ -39,6 +39,7 @@ export interface NetworkCallbacks {
   onAllRunestonesActivated: (portalX: number, portalY: number) => void;
   onWisdomOrbUsed: (direction: HubDirection, remainingWisdomOrbs: number) => void;
   onPlayerRoleChanged: (role: PlayerRole, wisdomOrbs: number) => void;
+  onDebugPlayerRole: (playerId: string, role: PlayerRole) => void;
   onGateStateChanged: (gateIndex: number, open: boolean) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
@@ -223,6 +224,10 @@ export class NetworkManager {
 
       case MessageType.PlayerRoleChanged:
         this.callbacks.onPlayerRoleChanged(msg.role, msg.wisdomOrbs);
+        break;
+
+      case MessageType.DebugPlayerRole:
+        this.callbacks.onDebugPlayerRole(msg.playerId, msg.role);
         break;
 
       case MessageType.Error:

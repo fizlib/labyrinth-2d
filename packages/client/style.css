@@ -331,7 +331,7 @@ canvas {
 }
 
 .debug-player-action-grid > button,
-.debug-player-skin-control select {
+.debug-player-select-control select {
   min-height: 30px;
   border: 1px solid #3b3858;
   border-radius: 4px;
@@ -347,7 +347,7 @@ canvas {
 }
 
 .debug-player-action-grid > button:hover:not(:disabled),
-.debug-player-skin-control select:hover {
+.debug-player-select-control select:hover:not(:disabled) {
   border-color: #6a5acd;
   background: #22203b;
 }
@@ -368,7 +368,7 @@ canvas {
   color: #65e59a;
 }
 
-.debug-player-skin-control {
+.debug-player-select-control {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: auto 1fr;
@@ -378,10 +378,15 @@ canvas {
   font-size: 0.62rem;
 }
 
-.debug-player-skin-control select {
+.debug-player-select-control select {
   width: 100%;
   padding: 4px 6px;
   cursor: pointer;
+}
+
+.debug-player-select-control select:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 /* ── Debug Settings Toggles ────────────────────────────────────────────── */

@@ -56,6 +56,7 @@ import {
   type AllRunestonesActivatedMessage,
   type WisdomOrbUsedMessage,
   type PlayerRoleChangedMessage,
+  type DebugPlayerRoleMessage,
   type GateStateChangedMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
@@ -412,6 +413,10 @@ export class Room {
         console.info(`[Room:${this.id}] Debug teleported ${target.id} to ${requesterId}`);
         break;
 
+      case 'get-role':
+        this.sendDebugPlayerRole(requester, target);
+        break;
+
       case 'set-skin':
         if (
           typeof msg.spriteIndex !== 'number' ||
@@ -448,6 +453,8 @@ export class Room {
           this.send(targetSocket, roleChangedMessage);
         }
 
+        this.sendDebugPlayerRole(requester, target);
+
         console.info(`[Room:${this.id}] Debug changed ${target.id} role to ${target.role}`);
         break;
       }
@@ -469,6 +476,19 @@ export class Room {
       queue.length = 0;
     }
     player.isMoving = false;
+  }
+
+  /** Reply privately with a selected player's authoritative role for debug UI. */
+  private sendDebugPlayerRole(requester: RoomPlayerInfo, target: RoomPlayerInfo): void {
+    const requesterSocket = this.sockets.get(requester.id);
+    if (!requesterSocket) return;
+
+    const message: DebugPlayerRoleMessage = {
+      type: MessageType.DebugPlayerRole,
+      playerId: target.id,
+      role: target.role,
+    };
+    this.send(requesterSocket, message);
   }
 
   /** Handle a runestone activation request. Validates proximity server-side. */
