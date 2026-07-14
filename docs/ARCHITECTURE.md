@@ -246,6 +246,8 @@ The loader attempts to load authored PNG assets first and falls back to generate
 - `assets/runestones.png`
 - `assets/portal_spritesheet.png`
 - `assets/wisdom_orb.png`
+- `assets/expand_button.png`
+- `assets/contract_button.png`
 - Pixel Operator font files
 
 Fallback texture generation lives in `packages/client/src/assets/FallbackTextures.ts`.
@@ -258,7 +260,7 @@ The client currently has multiple UI subsystems, not just the minimap:
   - screen-space HUD in the bottom-right corner
   - player-centered exploration view with fog of war
   - supports portal display once the portal is spawned
-  - wardens receive a red clickable frame with no fog-of-war; it opens a fixed whole-maze view scaled to fit the internal screen and marks only the local warden's position
+  - wardens receive a solid red frame with no fog-of-war and a wooden corner expand button; the fixed whole-maze view is scaled to fit the internal screen, marks only the local warden's position, and provides a matching contract button
 - `WisdomOrbHud`
   - screen-space HUD in the top-left corner
   - survivors see one orb slot and the current remaining count; wardens do not receive this HUD

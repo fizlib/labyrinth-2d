@@ -167,6 +167,10 @@ export interface GameAssets {
   portalEmergenceCount: number;
   /** Wisdom orb HUD texture. */
   wisdomOrbTexture: Texture;
+  /** Warden minimap expand button texture. */
+  expandMapButtonTexture: Texture | null;
+  /** Warden minimap contract button texture. */
+  contractMapButtonTexture: Texture | null;
   /** Pressure plate animation frames: [frame0 (up), frame1 (mid), frame2 (pressed)]. */
   pressurePlateFrames: Texture[];
   /** Hub-side pressure plate animation frames (24x16). */
@@ -219,6 +223,8 @@ export async function loadAssets(): Promise<GameAssets> {
   let portalFrames: Texture[] = [];
   let portalEmergenceCount = 6;
   let wisdomOrbTexture: Texture;
+  let expandMapButtonTexture: Texture | null = null;
+  let contractMapButtonTexture: Texture | null = null;
   let pressurePlateFrames: Texture[] = [];
   let hubPressurePlateFrames: Texture[] = [];
 
@@ -226,47 +232,122 @@ export async function loadAssets(): Promise<GameAssets> {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
     tilesheet.source.scaleMode = 'nearest';
     if (tilesheet.width < 272 || tilesheet.height < 16) {
-      throw new Error(`Expected tiles.png to be at least 272x16 but received ${tilesheet.width}x${tilesheet.height}`);
+      throw new Error(
+        `Expected tiles.png to be at least 272x16 but received ${tilesheet.width}x${tilesheet.height}`,
+      );
     }
 
-    floorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(0, 0, 16, 16) });
-    floorShadowTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(16, 0, 16, 16) });
-    wallTopTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(48, 0, 16, 16) });
-    wallInteriorTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(64, 0, 16, 16) });
-    wallSideLeftTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(80, 0, 16, 16) });
-    wallSideRightTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(96, 0, 16, 16) });
-    wallBottomTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(112, 0, 16, 16) });
-    wallCornerTLTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(128, 0, 16, 16) });
-    wallCornerTRTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(144, 0, 16, 16) });
-    wallCornerBLTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(160, 0, 16, 16) });
-    wallCornerBRTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(176, 0, 16, 16) });
-    wallTopEdgeTexture = new Texture({ source: tilesheet.source, frame: new Rectangle(192, 0, 16, 16) });
+    floorTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(0, 0, 16, 16),
+    });
+    floorShadowTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(16, 0, 16, 16),
+    });
+    wallTopTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(48, 0, 16, 16),
+    });
+    wallInteriorTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(64, 0, 16, 16),
+    });
+    wallSideLeftTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(80, 0, 16, 16),
+    });
+    wallSideRightTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(96, 0, 16, 16),
+    });
+    wallBottomTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(112, 0, 16, 16),
+    });
+    wallCornerTLTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(128, 0, 16, 16),
+    });
+    wallCornerTRTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(144, 0, 16, 16),
+    });
+    wallCornerBLTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(160, 0, 16, 16),
+    });
+    wallCornerBRTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(176, 0, 16, 16),
+    });
+    wallTopEdgeTexture = new Texture({
+      source: tilesheet.source,
+      frame: new Rectangle(192, 0, 16, 16),
+    });
 
     // 4 grass variant textures at positions 13–16 (208–272 px)
     for (let i = 0; i < 4; i++) {
       grassVariantTextures.push(
-        new Texture({ source: tilesheet.source, frame: new Rectangle(208 + i * 16, 0, 16, 16) }),
+        new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(208 + i * 16, 0, 16, 16),
+        }),
       );
     }
 
     if (tilesheet.height >= 32) {
       dirtTextures = {
-        center: new Texture({ source: tilesheet.source, frame: new Rectangle(0, 16, 16, 16) }),
-        plainAlt: new Texture({ source: tilesheet.source, frame: new Rectangle(16, 16, 16, 16) }),
-        north: new Texture({ source: tilesheet.source, frame: new Rectangle(32, 16, 16, 16) }),
-        northEast: new Texture({ source: tilesheet.source, frame: new Rectangle(48, 16, 16, 16) }),
-        east: new Texture({ source: tilesheet.source, frame: new Rectangle(64, 16, 16, 16) }),
-        southEast: new Texture({ source: tilesheet.source, frame: new Rectangle(80, 16, 16, 16) }),
-        south: new Texture({ source: tilesheet.source, frame: new Rectangle(96, 16, 16, 16) }),
-        southWest: new Texture({ source: tilesheet.source, frame: new Rectangle(112, 16, 16, 16) }),
-        west: new Texture({ source: tilesheet.source, frame: new Rectangle(128, 16, 16, 16) }),
-        northWest: new Texture({ source: tilesheet.source, frame: new Rectangle(144, 16, 16, 16) }),
+        center: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(0, 16, 16, 16),
+        }),
+        plainAlt: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(16, 16, 16, 16),
+        }),
+        north: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(32, 16, 16, 16),
+        }),
+        northEast: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(48, 16, 16, 16),
+        }),
+        east: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(64, 16, 16, 16),
+        }),
+        southEast: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(80, 16, 16, 16),
+        }),
+        south: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(96, 16, 16, 16),
+        }),
+        southWest: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(112, 16, 16, 16),
+        }),
+        west: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(128, 16, 16, 16),
+        }),
+        northWest: new Texture({
+          source: tilesheet.source,
+          frame: new Rectangle(144, 16, 16, 16),
+        }),
       };
     } else {
-      console.warn('[Assets] tiles.png is missing the dirt row - using fallback dirt textures');
+      console.warn(
+        '[Assets] tiles.png is missing the dirt row - using fallback dirt textures',
+      );
     }
 
-    console.info('[Assets] Loaded tiles.png (wall tiles, grass variants, dirt transitions)');
+    console.info(
+      '[Assets] Loaded tiles.png (wall tiles, grass variants, dirt transitions)',
+    );
   } catch {
     console.info('[Assets] tiles.png not found — using fallback textures');
     // Map existing fallback generators to the new semantic naming
@@ -293,7 +374,10 @@ export async function loadAssets(): Promise<GameAssets> {
 
     for (let i = 0; i < 4; i++) {
       wallFaceVariantTextures.push(
-        new Texture({ source: wallFaceSheet.source, frame: new Rectangle(i * 16, 0, 16, 16) }),
+        new Texture({
+          source: wallFaceSheet.source,
+          frame: new Rectangle(i * 16, 0, 16, 16),
+        }),
       );
     }
 
@@ -313,23 +397,54 @@ export async function loadAssets(): Promise<GameAssets> {
     const gateSheet = await Assets.load<Texture>('assets/gates.png');
     gateSheet.source.scaleMode = 'nearest';
     if (gateSheet.width < 48 || gateSheet.height < 48) {
-      throw new Error(`Expected a 48x48 front-gate atlas but received ${gateSheet.width}x${gateSheet.height}`);
+      throw new Error(
+        `Expected a 48x48 front-gate atlas but received ${gateSheet.width}x${gateSheet.height}`,
+      );
     }
 
     frontGateTextures = {
-      topLeft: new Texture({ source: gateSheet.source, frame: new Rectangle(0, 0, 16, 16) }),
-      topMid: new Texture({ source: gateSheet.source, frame: new Rectangle(16, 0, 16, 16) }),
-      topRight: new Texture({ source: gateSheet.source, frame: new Rectangle(32, 0, 16, 16) }),
-      midLeft: new Texture({ source: gateSheet.source, frame: new Rectangle(0, 16, 16, 16) }),
-      midCenter: new Texture({ source: gateSheet.source, frame: new Rectangle(16, 16, 16, 16) }),
-      midRight: new Texture({ source: gateSheet.source, frame: new Rectangle(32, 16, 16, 16) }),
-      bottomLeft: new Texture({ source: gateSheet.source, frame: new Rectangle(0, 32, 16, 16) }),
-      bottomMid: new Texture({ source: gateSheet.source, frame: new Rectangle(16, 32, 16, 16) }),
-      bottomRight: new Texture({ source: gateSheet.source, frame: new Rectangle(32, 32, 16, 16) }),
+      topLeft: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(0, 0, 16, 16),
+      }),
+      topMid: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(16, 0, 16, 16),
+      }),
+      topRight: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(32, 0, 16, 16),
+      }),
+      midLeft: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(0, 16, 16, 16),
+      }),
+      midCenter: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(16, 16, 16, 16),
+      }),
+      midRight: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(32, 16, 16, 16),
+      }),
+      bottomLeft: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(0, 32, 16, 16),
+      }),
+      bottomMid: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(16, 32, 16, 16),
+      }),
+      bottomRight: new Texture({
+        source: gateSheet.source,
+        frame: new Rectangle(32, 32, 16, 16),
+      }),
     };
     console.info('[Assets] Loaded gates.png (front-facing 3x3 gate atlas)');
   } catch (err) {
-    console.info('[Assets] gates.png not found or invalid - using fallback gate textures');
+    console.info(
+      '[Assets] gates.png not found or invalid - using fallback gate textures',
+    );
     if (err instanceof Error) {
       console.warn('[Assets] Gate atlas load error:', err.message);
     }
@@ -338,7 +453,9 @@ export async function loadAssets(): Promise<GameAssets> {
   try {
     treeTexture = await Assets.load<Texture>('assets/oak-tree.png');
     treeTexture.source.scaleMode = 'nearest';
-    console.info(`[Assets] Loaded oak-tree.png (${treeTexture.width}×${treeTexture.height})`);
+    console.info(
+      `[Assets] Loaded oak-tree.png (${treeTexture.width}×${treeTexture.height})`,
+    );
   } catch {
     console.info('[Assets] oak-tree.png not found — using fallback tree');
     treeTexture = generateTreeTexture();
@@ -403,11 +520,18 @@ export async function loadAssets(): Promise<GameAssets> {
     treeTexture = forestTreeTextures[0];
     console.info('[Assets] Loaded forest trees, understory, terrain, paths, and shadows');
   } catch {
-    console.warn('[Assets] Forest asset set incomplete — using existing terrain fallbacks');
+    console.warn(
+      '[Assets] Forest asset set incomplete — using existing terrain fallbacks',
+    );
     forestTreeTextures = [treeTexture, treeTexture];
     forestCanopyTextures = [treeTexture, treeTexture];
     forestUnderstoryTextures = [treeTexture];
-    forestGroundTextures = [floorShadowTexture, floorShadowTexture, floorShadowTexture, floorShadowTexture];
+    forestGroundTextures = [
+      floorShadowTexture,
+      floorShadowTexture,
+      floorShadowTexture,
+      floorShadowTexture,
+    ];
     forestPathTextures = dirtTextures;
     forestShadowTexture = generateShadowCornerTexture();
   }
@@ -418,7 +542,9 @@ export async function loadAssets(): Promise<GameAssets> {
   try {
     const fiorwoodsRoot = 'assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods';
     const loadFiorwoodsTile = async (id: number): Promise<Texture> => {
-      const texture = await Assets.load<Texture>(`${fiorwoodsRoot}/Sprite_Fiorwoods_${id}.png`);
+      const texture = await Assets.load<Texture>(
+        `${fiorwoodsRoot}/Sprite_Fiorwoods_${id}.png`,
+      );
       texture.source.scaleMode = 'nearest';
       return texture;
     };
@@ -426,7 +552,9 @@ export async function loadAssets(): Promise<GameAssets> {
     forestWallTextures = {
       southFaceRows: await Promise.all(
         faceRowStarts.map((start) =>
-          Promise.all(Array.from({ length: 6 }, (_, column) => loadFiorwoodsTile(start + column))),
+          Promise.all(
+            Array.from({ length: 6 }, (_, column) => loadFiorwoodsTile(start + column)),
+          ),
         ),
       ),
       // The three modules are the bright crown, dark leaf underside, and
@@ -437,22 +565,27 @@ export async function loadAssets(): Promise<GameAssets> {
       sideHedgeTextures: await Promise.all([80, 31, 32].map(loadFiorwoodsTile)),
       southFaceCornerTexture: await loadFiorwoodsTile(379),
       interiorTexture: await loadFiorwoodsTile(301),
-      insideNorthEdgeTextures: await Promise.all([438, 439, 440, 441, 442, 443].map(loadFiorwoodsTile)),
+      insideNorthEdgeTextures: await Promise.all(
+        [438, 439, 440, 441, 442, 443].map(loadFiorwoodsTile),
+      ),
       insideEastEvenTextures: await Promise.all([549, 550].map(loadFiorwoodsTile)),
       insideEastOddTextures: await Promise.all([599, 600].map(loadFiorwoodsTile)),
-      insideNorthEastCapRows: await Promise.all([
-        [1131],
-        [1181],
-        [1231, 1232],
-        [1281, 1282],
-      ].map((row) => Promise.all(row.map(loadFiorwoodsTile)))),
-      styleDecorationTextures: Object.fromEntries(await Promise.all([
-        110, 160, 438, 439, 440, 441, 442, 443, 492, 493, 539, 543, 549, 550,
-        580, 587, 589, 590, 592, 593, 599, 600, 636, 637, 643, 832, 833, 847, 848, 849,
-        880, 881, 882, 897, 898, 899, 930, 931, 932, 946, 947, 948, 949, 980,
-        981, 982, 983, 996, 997, 998, 999, 1030, 1031, 1032, 1033, 1046, 1047,
-        1048, 1049, 1080, 1081, 1082, 1089, 1131, 1181, 1231, 1232, 1281, 1282,
-      ].map(async (id) => [id, await loadFiorwoodsTile(id)] as const))),
+      insideNorthEastCapRows: await Promise.all(
+        [[1131], [1181], [1231, 1232], [1281, 1282]].map((row) =>
+          Promise.all(row.map(loadFiorwoodsTile)),
+        ),
+      ),
+      styleDecorationTextures: Object.fromEntries(
+        await Promise.all(
+          [
+            110, 160, 438, 439, 440, 441, 442, 443, 492, 493, 539, 543, 549, 550, 580,
+            587, 589, 590, 592, 593, 599, 600, 636, 637, 643, 832, 833, 847, 848, 849,
+            880, 881, 882, 897, 898, 899, 930, 931, 932, 946, 947, 948, 949, 980, 981,
+            982, 983, 996, 997, 998, 999, 1030, 1031, 1032, 1033, 1046, 1047, 1048, 1049,
+            1080, 1081, 1082, 1089, 1131, 1181, 1231, 1232, 1281, 1282,
+          ].map(async (id) => [id, await loadFiorwoodsTile(id)] as const),
+        ),
+      ),
     };
     // These grass modules are the same ground-family tiles used on Fiorwoods'
     // playable floor layers. They replace the earlier generic green fill.
@@ -470,10 +603,14 @@ export async function loadAssets(): Promise<GameAssets> {
       insideNorthEdgeTextures: forestCanopyTextures.slice(0, 6),
       insideEastEvenTextures: forestCanopyTextures.slice(0, 2),
       insideEastOddTextures: forestCanopyTextures.slice(2, 4),
-      insideNorthEastCapRows: forestCanopyTextures.slice(0, 4).map((texture) => [texture]),
+      insideNorthEastCapRows: forestCanopyTextures
+        .slice(0, 4)
+        .map((texture) => [texture]),
       styleDecorationTextures: {},
     };
-    console.warn('[Assets] Fiorwoods wall modules unavailable — using curated forest fallback');
+    console.warn(
+      '[Assets] Fiorwoods wall modules unavailable — using curated forest fallback',
+    );
   }
 
   // ── Shadow overlay assets (16×16 semi-transparent PNGs) ───────────────────
@@ -609,7 +746,10 @@ export async function loadAssets(): Promise<GameAssets> {
         tex.source.scaleMode = 'nearest';
         return tex;
       };
-      runestoneTextures.push([makeFallback(colors[i], false), makeFallback(colors[i], true)]);
+      runestoneTextures.push([
+        makeFallback(colors[i], false),
+        makeFallback(colors[i], true),
+      ]);
     }
   }
 
@@ -626,23 +766,31 @@ export async function loadAssets(): Promise<GameAssets> {
     portalFrames = [];
     // Row 1 (y=0): emergence frames
     for (let i = 0; i < framesPerRow; i++) {
-      portalFrames.push(new Texture({
-        source: portalSheet.source,
-        frame: new Rectangle(i * frameW, 0, frameW, frameH),
-      }));
+      portalFrames.push(
+        new Texture({
+          source: portalSheet.source,
+          frame: new Rectangle(i * frameW, 0, frameW, frameH),
+        }),
+      );
     }
     const emergenceCount = framesPerRow;
     portalEmergenceCount = emergenceCount;
     // Row 2 (y=frameH): idle frames
     for (let i = 0; i < framesPerRow; i++) {
-      portalFrames.push(new Texture({
-        source: portalSheet.source,
-        frame: new Rectangle(i * frameW, frameH, frameW, frameH),
-      }));
+      portalFrames.push(
+        new Texture({
+          source: portalSheet.source,
+          frame: new Rectangle(i * frameW, frameH, frameW, frameH),
+        }),
+      );
     }
-    console.info(`[Assets] Loaded portal_spritesheet.png (${emergenceCount} emergence + ${framesPerRow} idle, ${frameW}×${frameH} each)`);
+    console.info(
+      `[Assets] Loaded portal_spritesheet.png (${emergenceCount} emergence + ${framesPerRow} idle, ${frameW}×${frameH} each)`,
+    );
   } catch {
-    console.info('[Assets] portal_spritesheet.png not found — using fallback portal textures');
+    console.info(
+      '[Assets] portal_spritesheet.png not found — using fallback portal textures',
+    );
     portalFrames = [];
     for (let i = 0; i < 12; i++) {
       const c = document.createElement('canvas');
@@ -666,10 +814,26 @@ export async function loadAssets(): Promise<GameAssets> {
   try {
     wisdomOrbTexture = await Assets.load<Texture>('assets/wisdom_orb.png');
     wisdomOrbTexture.source.scaleMode = 'nearest';
-    console.info(`[Assets] Loaded wisdom_orb.png (${wisdomOrbTexture.width}x${wisdomOrbTexture.height})`);
+    console.info(
+      `[Assets] Loaded wisdom_orb.png (${wisdomOrbTexture.width}x${wisdomOrbTexture.height})`,
+    );
   } catch {
     console.info('[Assets] wisdom_orb.png not found - using fallback orb texture');
-     wisdomOrbTexture = generateWisdomOrbTexture();
+    wisdomOrbTexture = generateWisdomOrbTexture();
+  }
+
+  try {
+    [expandMapButtonTexture, contractMapButtonTexture] = await Promise.all([
+      Assets.load<Texture>('assets/expand_button.png'),
+      Assets.load<Texture>('assets/contract_button.png'),
+    ]);
+    expandMapButtonTexture.source.scaleMode = 'nearest';
+    contractMapButtonTexture.source.scaleMode = 'nearest';
+    console.info('[Assets] Loaded 18x18 minimap expand and contract buttons');
+  } catch {
+    console.info('[Assets] Minimap button PNGs not found - using generated controls');
+    expandMapButtonTexture = null;
+    contractMapButtonTexture = null;
   }
 
   try {
@@ -692,20 +856,24 @@ export async function loadAssets(): Promise<GameAssets> {
     // Row 1: 16x16 frames
     pressurePlateFrames = [];
     for (let i = 0; i < 3; i++) {
-      pressurePlateFrames.push(new Texture({
-        source: plateSheet.source,
-        frame: new Rectangle(i * 16, 0, 16, 16),
-      }));
+      pressurePlateFrames.push(
+        new Texture({
+          source: plateSheet.source,
+          frame: new Rectangle(i * 16, 0, 16, 16),
+        }),
+      );
     }
 
     // Row 2: 24x16 frames
     hubPressurePlateFrames = [];
     if (plateSheet.height >= 32) {
       for (let i = 0; i < 3; i++) {
-        hubPressurePlateFrames.push(new Texture({
-          source: plateSheet.source,
-          frame: new Rectangle(i * 24, 16, 24, 16),
-        }));
+        hubPressurePlateFrames.push(
+          new Texture({
+            source: plateSheet.source,
+            frame: new Rectangle(i * 24, 16, 24, 16),
+          }),
+        );
       }
       console.info('[Assets] Loaded plate_spritesheet.png Row 2 (24x16 hub plates)');
     } else {
@@ -713,7 +881,9 @@ export async function loadAssets(): Promise<GameAssets> {
       hubPressurePlateFrames = pressurePlateFrames;
     }
   } catch {
-    console.info('[Assets] plate_spritesheet.png not found — using fallback pressure plate textures');
+    console.info(
+      '[Assets] plate_spritesheet.png not found — using fallback pressure plate textures',
+    );
     pressurePlateFrames = [
       generatePressurePlateTexture(0),
       generatePressurePlateTexture(1),
@@ -757,6 +927,8 @@ export async function loadAssets(): Promise<GameAssets> {
     portalFrames,
     portalEmergenceCount,
     wisdomOrbTexture,
+    expandMapButtonTexture,
+    contractMapButtonTexture,
     pressurePlateFrames,
     hubPressurePlateFrames,
   };

@@ -4,7 +4,15 @@
 // Step 9: 2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Application, AnimatedSprite, Container, Text, TextStyle, TextureStyle, Graphics } from 'pixi.js';
+import {
+  Application,
+  AnimatedSprite,
+  Container,
+  Text,
+  TextStyle,
+  TextureStyle,
+  Graphics,
+} from 'pixi.js';
 
 TextureStyle.defaultOptions.scaleMode = 'nearest';
 import {
@@ -28,13 +36,29 @@ import {
   applyInputWithCollision,
   deriveFacingDirection,
 } from '@labyrinth/shared';
-import type { GameState, TileMapData, FacingDirection, GatePlacement, PressurePlateInfo, GeneratedMazeLayout, PlayerRole } from '@labyrinth/shared';
+import type {
+  GameState,
+  TileMapData,
+  FacingDirection,
+  GatePlacement,
+  PressurePlateInfo,
+  GeneratedMazeLayout,
+  PlayerRole,
+} from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
-import { SnapshotBuffer, INTERPOLATION_DELAY, type TimestampedSnapshot } from './net/SnapshotBuffer';
+import {
+  SnapshotBuffer,
+  INTERPOLATION_DELAY,
+  type TimestampedSnapshot,
+} from './net/SnapshotBuffer';
 import { loadAssets, type GameAssets } from './assets/AssetLoader';
 import { DebugSettings } from './config/DebugSettings';
 import { Minimap } from './systems/Minimap';
-import { TilemapRenderer, type RunestoneSpriteData, type PressurePlateSpriteData } from './systems/TilemapRenderer';
+import {
+  TilemapRenderer,
+  type RunestoneSpriteData,
+  type PressurePlateSpriteData,
+} from './systems/TilemapRenderer';
 import { Portal } from './systems/Portal';
 import { WisdomOrbHud } from './systems/WisdomOrbHud';
 import { WisdomArrow } from './systems/WisdomArrow';
@@ -117,7 +141,6 @@ function resetKeyboardInput(): void {
   clearMoveState(keyboardKeys);
   syncActiveKeys();
 }
-
 
 // ── Prediction State ────────────────────────────────────────────────────────
 
@@ -277,7 +300,6 @@ function createCellBoundaryOverlay(): Graphics {
   return overlay;
 }
 
-
 // ── Interpolation ───────────────────────────────────────────────────────────
 
 function lerp(a: number, b: number, t: number): number {
@@ -303,7 +325,6 @@ function getInterpolatedPlayer(
   pair: SnapshotPair | null,
   latest: TimestampedSnapshot | null,
 ): InterpolatedPlayer | null {
-
   if (pair) {
     const pastPlayer = pair.past.state.players.find((p) => p.id === playerId);
     const futurePlayer = pair.future.state.players.find((p) => p.id === playerId);
@@ -318,13 +339,34 @@ function getInterpolatedPlayer(
       };
     }
 
-    if (futurePlayer) return { x: futurePlayer.x, y: futurePlayer.y, facing: futurePlayer.facing, isMoving: futurePlayer.isMoving, isDead: futurePlayer.isDead };
-    if (pastPlayer) return { x: pastPlayer.x, y: pastPlayer.y, facing: pastPlayer.facing, isMoving: pastPlayer.isMoving, isDead: pastPlayer.isDead };
+    if (futurePlayer)
+      return {
+        x: futurePlayer.x,
+        y: futurePlayer.y,
+        facing: futurePlayer.facing,
+        isMoving: futurePlayer.isMoving,
+        isDead: futurePlayer.isDead,
+      };
+    if (pastPlayer)
+      return {
+        x: pastPlayer.x,
+        y: pastPlayer.y,
+        facing: pastPlayer.facing,
+        isMoving: pastPlayer.isMoving,
+        isDead: pastPlayer.isDead,
+      };
   }
 
   if (latest) {
     const player = latest.state.players.find((p) => p.id === playerId);
-    if (player) return { x: player.x, y: player.y, facing: player.facing, isMoving: player.isMoving, isDead: player.isDead };
+    if (player)
+      return {
+        x: player.x,
+        y: player.y,
+        facing: player.facing,
+        isMoving: player.isMoving,
+        isDead: player.isDead,
+      };
   }
 
   return null;
@@ -332,7 +374,11 @@ function getInterpolatedPlayer(
 
 // ── Animation Helpers ───────────────────────────────────────────────────────
 
-function getAnimationKey(facing: FacingDirection, isMoving: boolean, isDead = false): string {
+function getAnimationKey(
+  facing: FacingDirection,
+  isMoving: boolean,
+  isDead = false,
+): string {
   if (isDead) return 'lying';
   return isMoving ? `walk-${facing}` : `idle-${facing}`;
 }
@@ -486,12 +532,21 @@ function createDebugUI(): DebugUiDom {
   const snapshot = debugDiv.querySelector<HTMLSpanElement>('#snapshot-count');
   const playerList = debugDiv.querySelector<HTMLUListElement>('#player-list');
   const playerActions = debugDiv.querySelector<HTMLDivElement>('#debug-player-actions');
-  const playerActionName = debugDiv.querySelector<HTMLElement>('#debug-player-action-name');
-  const playerActionMeta = debugDiv.querySelector<HTMLSpanElement>('#debug-player-action-meta');
-  const playerSkinSelect = debugDiv.querySelector<HTMLSelectElement>('#debug-player-skin-select');
-  const teleportToButton = debugDiv.querySelector<HTMLButtonElement>('#debug-teleport-to');
-  const teleportHereButton = debugDiv.querySelector<HTMLButtonElement>('#debug-teleport-here');
-  const toggleDeadButton = debugDiv.querySelector<HTMLButtonElement>('#debug-toggle-dead');
+  const playerActionName = debugDiv.querySelector<HTMLElement>(
+    '#debug-player-action-name',
+  );
+  const playerActionMeta = debugDiv.querySelector<HTMLSpanElement>(
+    '#debug-player-action-meta',
+  );
+  const playerSkinSelect = debugDiv.querySelector<HTMLSelectElement>(
+    '#debug-player-skin-select',
+  );
+  const teleportToButton =
+    debugDiv.querySelector<HTMLButtonElement>('#debug-teleport-to');
+  const teleportHereButton =
+    debugDiv.querySelector<HTMLButtonElement>('#debug-teleport-here');
+  const toggleDeadButton =
+    debugDiv.querySelector<HTMLButtonElement>('#debug-toggle-dead');
 
   if (
     !status ||
@@ -560,14 +615,17 @@ function renderDebugPlayerActions(
   state: GameState,
   localPlayerId: string | null,
 ): void {
-  const player = state.players.find((candidate) => candidate.id === selectedDebugPlayerId);
+  const player = state.players.find(
+    (candidate) => candidate.id === selectedDebugPlayerId,
+  );
   if (!player) {
     selectedDebugPlayerId = null;
     debugUi.playerActions.hidden = true;
     return;
   }
 
-  const skinName = PLAYER_CHARACTER_NAMES[player.spriteIndex] ?? `Skin ${player.spriteIndex}`;
+  const skinName =
+    PLAYER_CHARACTER_NAMES[player.spriteIndex] ?? `Skin ${player.spriteIndex}`;
   const isLocalPlayer = player.id === localPlayerId;
   debugUi.playerActions.hidden = false;
   debugUi.playerActionName.textContent = player.displayName;
@@ -592,16 +650,20 @@ function setupDebugPlayerActions(
 
   debugUi.playerList.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return;
-    const playerButton = event.target.closest<HTMLButtonElement>('[data-debug-player-id]');
+    const playerButton = event.target.closest<HTMLButtonElement>(
+      '[data-debug-player-id]',
+    );
     if (!playerButton) return;
     selectedDebugPlayerId = playerButton.dataset.debugPlayerId ?? null;
     refresh();
   });
 
-  debugUi.root.querySelector<HTMLButtonElement>('#debug-player-actions-close')?.addEventListener('click', () => {
-    selectedDebugPlayerId = null;
-    refresh();
-  });
+  debugUi.root
+    .querySelector<HTMLButtonElement>('#debug-player-actions-close')
+    ?.addEventListener('click', () => {
+      selectedDebugPlayerId = null;
+      refresh();
+    });
 
   debugUi.playerActions.addEventListener('click', (event) => {
     if (!(event.target instanceof Element) || !selectedDebugPlayerId) return;
@@ -616,14 +678,20 @@ function setupDebugPlayerActions(
         net.sendDebugPlayerAction(selectedDebugPlayerId, 'teleport-here');
         break;
       case 'toggle-dead': {
-        const player = getState()?.players.find((candidate) => candidate.id === selectedDebugPlayerId);
+        const player = getState()?.players.find(
+          (candidate) => candidate.id === selectedDebugPlayerId,
+        );
         if (player) {
-          net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-dead', { dead: !player.isDead });
+          net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-dead', {
+            dead: !player.isDead,
+          });
         }
         break;
       }
       case 'set-survivor':
-        net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-role', { role: 'survivor' });
+        net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-role', {
+          role: 'survivor',
+        });
         break;
       case 'set-warden':
         net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-role', { role: 'warden' });
@@ -640,7 +708,12 @@ function setupDebugPlayerActions(
   });
 }
 
-function updateDebugUI(debugUi: DebugUiDom, state: GameState, playerId: string | null, force = false): void {
+function updateDebugUI(
+  debugUi: DebugUiDom,
+  state: GameState,
+  playerId: string | null,
+  force = false,
+): void {
   const now = performance.now();
   if (!force && now - lastDebugUiUpdateAt < DEBUG_UI_UPDATE_INTERVAL_MS) return;
   lastDebugUiUpdateAt = now;
@@ -650,18 +723,20 @@ function updateDebugUI(debugUi: DebugUiDom, state: GameState, playerId: string |
   const snapshotText = snapshotBuffer.length.toString();
 
   if (debugUi.tick.textContent !== tickText) debugUi.tick.textContent = tickText;
-  if (debugUi.pending.textContent !== pendingText) debugUi.pending.textContent = pendingText;
-  if (debugUi.snapshot.textContent !== snapshotText) debugUi.snapshot.textContent = snapshotText;
+  if (debugUi.pending.textContent !== pendingText)
+    debugUi.pending.textContent = pendingText;
+  if (debugUi.snapshot.textContent !== snapshotText)
+    debugUi.snapshot.textContent = snapshotText;
 
   const playerListMarkup = state.players
-      .map((p) => {
-        const isYou = p.id === playerId ? ' <span class="you-badge">← you</span>' : '';
-        const isSelected = p.id === selectedDebugPlayerId ? ' selected' : '';
-        const deadBadge = p.isDead ? '<span class="dead-badge">dead</span>' : '';
-        const skinName = PLAYER_CHARACTER_NAMES[p.spriteIndex] ?? `Skin ${p.spriteIndex}`;
-        return `<li><button type="button" class="debug-player-row${isSelected}" data-debug-player-id="${escapeHtml(p.id)}"><span class="player-name">${escapeHtml(p.displayName)}</span><span class="player-pos">${escapeHtml(skinName)} · (${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${deadBadge}${isYou}</button></li>`;
-      })
-      .join('');
+    .map((p) => {
+      const isYou = p.id === playerId ? ' <span class="you-badge">← you</span>' : '';
+      const isSelected = p.id === selectedDebugPlayerId ? ' selected' : '';
+      const deadBadge = p.isDead ? '<span class="dead-badge">dead</span>' : '';
+      const skinName = PLAYER_CHARACTER_NAMES[p.spriteIndex] ?? `Skin ${p.spriteIndex}`;
+      return `<li><button type="button" class="debug-player-row${isSelected}" data-debug-player-id="${escapeHtml(p.id)}"><span class="player-name">${escapeHtml(p.displayName)}</span><span class="player-pos">${escapeHtml(skinName)} · (${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${deadBadge}${isYou}</button></li>`;
+    })
+    .join('');
 
   if (playerListMarkup !== lastDebugPlayerListMarkup) {
     debugUi.playerList.innerHTML = playerListMarkup;
@@ -978,7 +1053,13 @@ async function main(): Promise<void> {
     container.addChild(shadow, sprite);
     entityLayer.addChild(container);
 
-    const data: PlayerSpriteData = { container, shadow, sprite, currentAnimKey: animKey, spriteIndex };
+    const data: PlayerSpriteData = {
+      container,
+      shadow,
+      sprite,
+      currentAnimKey: animKey,
+      spriteIndex,
+    };
     playerSprites.set(playerId, data);
     return data;
   }
@@ -1001,7 +1082,9 @@ async function main(): Promise<void> {
     const frames = animSet.animations[animKey];
     if (!frames) return;
     data.sprite.textures = frames;
-    data.sprite.scale.x = animSet.mirroredKeys.has(animKey) ? -animSet.scale : animSet.scale;
+    data.sprite.scale.x = animSet.mirroredKeys.has(animKey)
+      ? -animSet.scale
+      : animSet.scale;
     data.sprite.scale.y = animSet.scale;
     data.sprite.play();
     data.currentAnimKey = animKey;
@@ -1029,7 +1112,9 @@ async function main(): Promise<void> {
 
   const net = new NetworkManager({
     onRoomJoined: (roomId, playerId, mapSeed, role, wisdomOrbs, gameState) => {
-      console.info(`[Main] Joined room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`);
+      console.info(
+        `[Main] Joined room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
+      );
 
       // Clear previous slide states on new room join
       gateSlideStates.clear();
@@ -1042,13 +1127,19 @@ async function main(): Promise<void> {
 
       // ── Build chunk-based tilemap ──────────────────────────────────────
       tilemapRenderer?.destroy();
-      tilemapRenderer = new TilemapRenderer(currentMap, layout.gates, layout.pressurePlates, layout.dirtMask, assets, app.renderer);
+      tilemapRenderer = new TilemapRenderer(
+        currentMap,
+        layout.gates,
+        layout.pressurePlates,
+        layout.dirtMask,
+        assets,
+        app.renderer,
+      );
       if (cellBoundaryOverlay?.parent === worldContainer) {
         worldContainer.removeChild(cellBoundaryOverlay);
       }
       cellBoundaryOverlay?.destroy();
       cellBoundaryOverlay = createCellBoundaryOverlay();
-
 
       // Rebuild the fixed layer order. Forest walls remain above every entity.
       worldContainer.removeChild(entityLayer);
@@ -1107,7 +1198,9 @@ async function main(): Promise<void> {
 
       // ── Sync runestone activation state from initial GameState ─────
       for (const rsInfo of gameState.runestones) {
-        const rsData = tilemapRenderer?.runestoneSprites.find((r) => r.index === rsInfo.index);
+        const rsData = tilemapRenderer?.runestoneSprites.find(
+          (r) => r.index === rsInfo.index,
+        );
         if (rsData && rsInfo.activated && !rsData.activated) {
           rsData.activated = true;
           rsData.sprite.texture = assets.runestoneTextures[rsInfo.index][1];
@@ -1125,14 +1218,23 @@ async function main(): Promise<void> {
           true, // skip emergence for late joiners
         );
         minimap?.setPortalPosition(gameState.portal.x, gameState.portal.y);
-        console.info(`[Main] Late-join: portal already active at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`);
+        console.info(
+          `[Main] Late-join: portal already active at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`,
+        );
       }
 
       // ── Late-join gate state sync ────────────────────────────────────
       if (gameState.gateStates && currentLayout) {
         for (const gs of gameState.gateStates) {
           if (gs.open) {
-            applyGateState(gs.gateIndex, true, currentLayout.gates, currentMap!, tilemapRenderer!, assets);
+            applyGateState(
+              gs.gateIndex,
+              true,
+              currentLayout.gates,
+              currentMap!,
+              tilemapRenderer!,
+              assets,
+            );
           }
         }
       }
@@ -1154,7 +1256,7 @@ async function main(): Promise<void> {
             blur: 0, // 0 blur keeps the shadow blocky
             color: '#000000',
             distance: 8, // 8px shadow becomes 1px thick when scaled down
-            angle: Math.PI / 4
+            angle: Math.PI / 4,
           },
           align: 'center',
         }),
@@ -1172,7 +1274,10 @@ async function main(): Promise<void> {
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
         const data = ensurePlayerSprite(player.id, player.spriteIndex);
-        setPlayerAnimation(data, getAnimationKey(player.facing, player.isMoving, player.isDead));
+        setPlayerAnimation(
+          data,
+          getAnimationKey(player.facing, player.isMoving, player.isDead),
+        );
         setRoundedPosition(data.container, player.x, player.y, 1);
         if (!isLocal) knownRemotePlayers.add(player.id);
       }
@@ -1204,7 +1309,14 @@ async function main(): Promise<void> {
           );
 
           for (const input of pendingInputs) {
-            const result = applyInputWithCollision(reconciledX, reconciledY, input, input.dt, currentMap!, latestServerState?.portal);
+            const result = applyInputWithCollision(
+              reconciledX,
+              reconciledY,
+              input,
+              input.dt,
+              currentMap!,
+              latestServerState?.portal,
+            );
             reconciledX = result.x;
             reconciledY = result.y;
           }
@@ -1215,7 +1327,8 @@ async function main(): Promise<void> {
           const correctionDistSq = cdx * cdx + cdy * cdy;
 
           // Hard snap if correction is large (teleport/respawn), smooth otherwise
-          if (correctionDistSq > 25) { // > 5 pixels
+          if (correctionDistSq > 25) {
+            // > 5 pixels
             localX = reconciledX;
             localY = reconciledY;
           } else {
@@ -1255,7 +1368,9 @@ async function main(): Promise<void> {
 
     onRunestoneActivated: (runestoneIndex) => {
       console.info(`[Main] Runestone ${runestoneIndex} activated!`);
-      const rsData = tilemapRenderer?.runestoneSprites.find((r) => r.index === runestoneIndex);
+      const rsData = tilemapRenderer?.runestoneSprites.find(
+        (r) => r.index === runestoneIndex,
+      );
       if (rsData && !rsData.activated) {
         rsData.activated = true;
         rsData.sprite.texture = assets.runestoneTextures[runestoneIndex][1];
@@ -1263,14 +1378,18 @@ async function main(): Promise<void> {
     },
 
     onAllRunestonesActivated: (portalX, portalY) => {
-      console.info(`[Main] All runestones activated! Portal at (${Math.round(portalX)}, ${Math.round(portalY)})`);
+      console.info(
+        `[Main] All runestones activated! Portal at (${Math.round(portalX)}, ${Math.round(portalY)})`,
+      );
       // Start screen shake — portal will spawn after shake completes
       shakeTimeRemaining = SHAKE_DURATION;
       pendingPortalPos = { x: portalX, y: portalY };
     },
 
     onWisdomOrbUsed: (direction, remainingWisdomOrbs) => {
-      console.info(`[WisdomOrb][Response] Server accepted! direction=${direction}, remaining=${remainingWisdomOrbs}`);
+      console.info(
+        `[WisdomOrb][Response] Server accepted! direction=${direction}, remaining=${remainingWisdomOrbs}`,
+      );
       wisdomOrbHud?.setRemaining(remainingWisdomOrbs);
       wisdomArrow?.show(direction);
     },
@@ -1291,7 +1410,14 @@ async function main(): Promise<void> {
     onGateStateChanged: (gateIndex, open) => {
       console.info(`[Main] Gate ${gateIndex} ${open ? 'OPENED' : 'CLOSED'}`);
       if (currentLayout && currentMap && tilemapRenderer) {
-        applyGateState(gateIndex, open, currentLayout.gates, currentMap, tilemapRenderer, assets);
+        applyGateState(
+          gateIndex,
+          open,
+          currentLayout.gates,
+          currentMap,
+          tilemapRenderer,
+          assets,
+        );
       }
     },
 
@@ -1309,13 +1435,20 @@ async function main(): Promise<void> {
   });
 
   if (debugUi) {
-    setupDebugPlayerActions(debugUi, net, () => latestServerState, () => net.playerId);
+    setupDebugPlayerActions(
+      debugUi,
+      net,
+      () => latestServerState,
+      () => net.playerId,
+    );
   }
 
   // ── Interaction Helpers + Mobile Controls ────────────────────────────
 
   const triggerUseWisdomOrb = (source: 'Click' | 'KeyQ' | 'MobileQ'): void => {
-    console.info(`[WisdomOrb][${source}] Triggered. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`);
+    console.info(
+      `[WisdomOrb][${source}] Triggered. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`,
+    );
     if (!localPlayerInitialized) {
       console.warn(`[WisdomOrb][${source}] BLOCKED: local player not initialized`);
       return;
@@ -1332,7 +1465,9 @@ async function main(): Promise<void> {
       console.warn(`[WisdomOrb][${source}] BLOCKED: warden map is open`);
       return;
     }
-    console.info(`[WisdomOrb][${source}] Sending USE_WISDOM_ORB, player at (${localX.toFixed(1)}, ${localY.toFixed(1)})`);
+    console.info(
+      `[WisdomOrb][${source}] Sending USE_WISDOM_ORB, player at (${localX.toFixed(1)}, ${localY.toFixed(1)})`,
+    );
     net.sendUseWisdomOrb();
   };
 
@@ -1388,6 +1523,8 @@ async function main(): Promise<void> {
       INTERNAL_HEIGHT,
       {
         isWarden: role === 'warden',
+        expandButtonTexture: assets.expandMapButtonTexture,
+        contractButtonTexture: assets.contractMapButtonTexture,
       },
     );
     minimap.addToStage(app.stage);
@@ -1433,9 +1570,12 @@ async function main(): Promise<void> {
     const now = performance.now();
 
     // ── 1. Local player prediction ────────────────────────────────
-    const localPlayerState = latestServerState?.players.find((player) => player.id === net.playerId);
+    const localPlayerState = latestServerState?.players.find(
+      (player) => player.id === net.playerId,
+    );
     const isLocalDead = localPlayerState?.isDead ?? false;
-    const isMoving = activeKeys.up || activeKeys.down || activeKeys.left || activeKeys.right;
+    const isMoving =
+      activeKeys.up || activeKeys.down || activeKeys.left || activeKeys.right;
     if (isMoving) {
       localFacing = deriveFacingFromKeys();
       inputSequenceNumber++;
@@ -1449,13 +1589,27 @@ async function main(): Promise<void> {
         dt: dtSeconds,
       };
 
-      const result = applyInputWithCollision(localX, localY, input, dtSeconds, currentMap!, latestServerState?.portal);
+      const result = applyInputWithCollision(
+        localX,
+        localY,
+        input,
+        dtSeconds,
+        currentMap!,
+        latestServerState?.portal,
+      );
       localX = result.x;
       localY = result.y;
 
       pendingInputs.push(input);
 
-      net.sendInput(input.sequenceNumber, input.up, input.down, input.left, input.right, dtSeconds);
+      net.sendInput(
+        input.sequenceNumber,
+        input.up,
+        input.down,
+        input.left,
+        input.right,
+        dtSeconds,
+      );
     }
 
     const localData = playerSprites.get(net.playerId);
@@ -1479,7 +1633,11 @@ async function main(): Promise<void> {
       if (interp) {
         setRoundedPosition(data.container, interp.x, interp.y, 1);
 
-        const remoteAnimKey = getAnimationKey(interp.facing, interp.isMoving, interp.isDead);
+        const remoteAnimKey = getAnimationKey(
+          interp.facing,
+          interp.isMoving,
+          interp.isDead,
+        );
         setPlayerAnimation(data, remoteAnimKey);
       }
     }
@@ -1584,7 +1742,8 @@ async function main(): Promise<void> {
 
       if (nearestRS) {
         if (!interactPrompt.visible) interactPrompt.visible = true;
-        if (interactPrompt.x !== nearestRS.sprite.x) interactPrompt.x = nearestRS.sprite.x;
+        if (interactPrompt.x !== nearestRS.sprite.x)
+          interactPrompt.x = nearestRS.sprite.x;
         const promptY = nearestRS.sprite.y - 34;
         if (interactPrompt.y !== promptY) interactPrompt.y = promptY; // above the runestone
         if (interactPrompt.zIndex !== 99999) interactPrompt.zIndex = 99999;
@@ -1595,18 +1754,27 @@ async function main(): Promise<void> {
 
     // ── 6. Pressure plate animations ───────────────────────────────────
     if (tilemapRenderer && latestServerState) {
-      updatePressurePlateAnimations(tilemapRenderer, latestServerState, dtSeconds, assets);
+      updatePressurePlateAnimations(
+        tilemapRenderer,
+        latestServerState,
+        dtSeconds,
+        assets,
+      );
     }
   });
 
   // ── Mousewheel Zoom (debug) ───────────────────────────────────────────
-  app.canvas.addEventListener('wheel', (e: WheelEvent) => {
-    e.preventDefault();
-    if (!DebugSettings.isEnabled('scrollZoom')) return;
-    if (e.deltaY < 0) zoomLevel = Math.min(MAX_ZOOM, zoomLevel + ZOOM_STEP);
-    else zoomLevel = Math.max(MIN_ZOOM, zoomLevel - ZOOM_STEP);
-    zoomToggleState = 'default'; // manual scroll resets the toggle cycle
-  }, { passive: false });
+  app.canvas.addEventListener(
+    'wheel',
+    (e: WheelEvent) => {
+      e.preventDefault();
+      if (!DebugSettings.isEnabled('scrollZoom')) return;
+      if (e.deltaY < 0) zoomLevel = Math.min(MAX_ZOOM, zoomLevel + ZOOM_STEP);
+      else zoomLevel = Math.max(MIN_ZOOM, zoomLevel - ZOOM_STEP);
+      zoomToggleState = 'default'; // manual scroll resets the toggle cycle
+    },
+    { passive: false },
+  );
 
   // ── Minus-key Zoom Toggle (debug) ─────────────────────────────────────
   // Cycles:  default → fully zoomed-out → fully zoomed-in → default
@@ -1670,7 +1838,9 @@ async function main(): Promise<void> {
       setRoundedPosition(localData.container, localX, localY, 1);
     }
 
-    console.info(`[Debug] Teleported to (${Math.round(clampedX)}, ${Math.round(clampedY)})`);
+    console.info(
+      `[Debug] Teleported to (${Math.round(clampedX)}, ${Math.round(clampedY)})`,
+    );
   });
 
   // ── Keyboard Input ────────────────────────────────────────────────────
@@ -1698,7 +1868,6 @@ async function main(): Promise<void> {
       }
       return;
     }
-
   });
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {
@@ -1720,21 +1889,24 @@ async function main(): Promise<void> {
   // the long-lived game socket through Vite's HMR server/proxy. uWebSockets is
   // bound to IPv4, so normalise localhost to IPv4 instead of relying on a
   // browser's IPv4/IPv6 resolution preference (which differs in Chrome).
-  const devServerHost = window.location.hostname === 'localhost'
-    ? '127.0.0.1'
-    : window.location.hostname;
+  const devServerHost =
+    window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
   const defaultWsUrl = import.meta.env.DEV
     ? `ws://${devServerHost}:9001/ws`
     : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
   const wsUrl = envUrl || defaultWsUrl;
-  const displayName = `Explorer-${Math.floor(Math.random() * 9999).toString().padStart(4, '0')}`;
+  const displayName = `Explorer-${Math.floor(Math.random() * 9999)
+    .toString()
+    .padStart(4, '0')}`;
 
   net.connect(wsUrl, 'default', displayName);
 
   console.info('─────────────────────────────────────────────────');
   console.info('  🏰 Labyrinth 2D Client');
   console.info('  Step 9: 2.5D Perspective (Stardew style walls)');
-  console.info(`  Map: ${MAZE_WIDTH}×${MAZE_HEIGHT} tiles (${mapPixelW}×${mapPixelH} px)`);
+  console.info(
+    `  Map: ${MAZE_WIDTH}×${MAZE_HEIGHT} tiles (${mapPixelW}×${mapPixelH} px)`,
+  );
   console.info(`  Display name: ${displayName}`);
   console.info('─────────────────────────────────────────────────');
 }

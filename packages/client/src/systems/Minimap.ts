@@ -42,6 +42,10 @@ const MINIMAP_MARGIN = 8;
 const EXPANDED_MARGIN = 16;
 const EXPANDED_PADDING = 5;
 
+/** Warden-only map toggle styled after the wooden HUD frame. */
+const MAP_TOGGLE_SIZE = 18;
+const MAP_TOGGLE_OVERLAP = 5;
+
 /** Circular reveal radius in tiles around the player */
 const REVEAL_RADIUS = 7;
 
@@ -58,6 +62,8 @@ const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot ce
 
 export interface MinimapOptions {
   isWarden?: boolean;
+  expandButtonTexture?: Texture | null;
+  contractButtonTexture?: Texture | null;
   onExpandedChange?: (expanded: boolean) => void;
 }
 
@@ -100,6 +106,8 @@ export class Minimap {
   private portalActive = false;
 
   private readonly isWarden: boolean;
+  private readonly expandButtonTexture: Texture | null;
+  private readonly contractButtonTexture: Texture | null;
   private readonly onExpandedChange?: (expanded: boolean) => void;
   private expanded = false;
   private suppressCanvasClick = false;
@@ -116,6 +124,8 @@ export class Minimap {
     this.mapData = mapData;
     this.dirtMask = dirtMask;
     this.isWarden = options.isWarden ?? false;
+    this.expandButtonTexture = options.expandButtonTexture ?? null;
+    this.contractButtonTexture = options.contractButtonTexture ?? null;
     this.onExpandedChange = options.onExpandedChange;
     this.fog = new Uint8Array(mapData.width * mapData.height); // all 0 (hidden)
     if (this.isWarden) this.fog.fill(1);
@@ -149,19 +159,10 @@ export class Minimap {
     this.compactContainer = new Container();
     this.container.addChild(this.compactContainer);
 
-    // Slight transparency so it doesn't block gameplay too aggressively
-    this.compactContainer.alpha = 0.85;
+    // Keep the warden's red frame vivid; survivor maps remain slightly translucent.
+    this.compactContainer.alpha = this.isWarden ? 1 : 0.85;
 
     const totalSize = MINIMAP_SIZE + MINIMAP_PADDING * 2;
-
-    if (this.isWarden) {
-      const glow = new Graphics();
-      glow.roundRect(-4, -4, totalSize + 8, totalSize + 8, 8);
-      glow.stroke({ color: 0xff2020, alpha: 0.22, width: 7, alignment: 0 });
-      glow.roundRect(-2, -2, totalSize + 4, totalSize + 4, 6);
-      glow.stroke({ color: 0xff3b30, alpha: 0.65, width: 3, alignment: 0 });
-      this.compactContainer.addChild(glow);
-    }
 
     // Wooden background & frame
     const bg = new Graphics();
@@ -172,19 +173,24 @@ export class Minimap {
 
     // Base thick dark outline
     bg.roundRect(0, 0, totalSize, totalSize, 4);
-    bg.fill({ color: 0x3e2312 });
+    bg.fill({ color: this.isWarden ? 0x5f0c0c : 0x3e2312 });
 
-    // Main wood body (Muted to stand out less)
+    // Main frame body
     bg.roundRect(2, 2, totalSize - 4, totalSize - 4, 3);
-    bg.fill({ color: 0xa36a43 });
+    bg.fill({ color: this.isWarden ? 0xb42a24 : 0xa36a43 });
 
-    // Inner brighter wood highlight (Muted)
+    // Inner frame highlight
     bg.roundRect(2, 2, totalSize - 4, totalSize - 4, 3);
-    bg.stroke({ color: 0xcd8e5e, alpha: 0.6, width: 2, alignment: 0 });
+    bg.stroke({
+      color: this.isWarden ? 0xf06a5d : 0xcd8e5e,
+      alpha: this.isWarden ? 0.9 : 0.6,
+      width: 2,
+      alignment: 0,
+    });
 
     // Very dark rim specifically around the map viewport
     bg.rect(MINIMAP_PADDING - 1, MINIMAP_PADDING - 1, MINIMAP_SIZE + 2, MINIMAP_SIZE + 2);
-    bg.fill({ color: 0x2a1608 });
+    bg.fill({ color: this.isWarden ? 0x3a0909 : 0x2a1608 });
 
     // Unexplored deep map background
     bg.rect(MINIMAP_PADDING, MINIMAP_PADDING, MINIMAP_SIZE, MINIMAP_SIZE);
@@ -212,6 +218,17 @@ export class Minimap {
     playerMarker.y = MINIMAP_PADDING + MINIMAP_SIZE / 2;
     this.compactContainer.addChild(playerMarker);
 
+    if (this.isWarden) {
+      const expandButton = this.createMapToggleButton(
+        false,
+        this.expandButtonTexture,
+        () => this.setExpanded(true),
+      );
+      expandButton.x = totalSize - MAP_TOGGLE_SIZE + MAP_TOGGLE_OVERLAP;
+      expandButton.y = -MAP_TOGGLE_OVERLAP;
+      this.compactContainer.addChild(expandButton);
+    }
+
     // Position entire widget at bottom-right
     this.compactContainer.x = internalWidth - totalSize - MINIMAP_MARGIN;
     this.compactContainer.y = internalHeight - totalSize - MINIMAP_MARGIN;
@@ -219,7 +236,12 @@ export class Minimap {
     if (this.isWarden) {
       this.compactContainer.eventMode = 'static';
       this.compactContainer.cursor = 'pointer';
-      this.compactContainer.hitArea = new Rectangle(0, 0, totalSize, totalSize);
+      this.compactContainer.hitArea = new Rectangle(
+        -MAP_TOGGLE_OVERLAP,
+        -MAP_TOGGLE_OVERLAP,
+        totalSize + MAP_TOGGLE_OVERLAP * 2,
+        totalSize + MAP_TOGGLE_OVERLAP * 2,
+      );
       this.compactContainer.on('pointertap', (event) => {
         event.stopPropagation();
         this.markCanvasClickHandled();
@@ -293,8 +315,8 @@ export class Minimap {
     const viewportCenterX = MINIMAP_PADDING + MINIMAP_SIZE / 2;
     const viewportCenterY = MINIMAP_PADDING + MINIMAP_SIZE / 2;
 
-    const spriteCenterPixelX = Math.floor(CANVAS_SIZE / 2) * SCALE + (fracX * SCALE);
-    const spriteCenterPixelY = Math.floor(CANVAS_SIZE / 2) * SCALE + (fracY * SCALE);
+    const spriteCenterPixelX = Math.floor(CANVAS_SIZE / 2) * SCALE + fracX * SCALE;
+    const spriteCenterPixelY = Math.floor(CANVAS_SIZE / 2) * SCALE + fracY * SCALE;
 
     // Dynamically shift the rendered texture around underneath the UI mask
     this.sprite.x = viewportCenterX - spriteCenterPixelX;
@@ -320,7 +342,10 @@ export class Minimap {
   // ── Canvas rendering ──────────────────────────────────────────────────
 
   /** Build a screen-fitted, non-player-centered view of the complete maze. */
-  private createExpandedOverlay(internalWidth: number, internalHeight: number): Container {
+  private createExpandedOverlay(
+    internalWidth: number,
+    internalHeight: number,
+  ): Container {
     this.expandedCanvas = document.createElement('canvas');
     this.expandedCanvas.width = this.mapData.width;
     this.expandedCanvas.height = this.mapData.height;
@@ -381,18 +406,11 @@ export class Minimap {
       this.setExpanded(false);
     });
 
-    const glow = new Graphics();
-    glow.roundRect(-5, -5, panelWidth + 10, panelHeight + 10, 7);
-    glow.stroke({ color: 0xff2020, alpha: 0.25, width: 8, alignment: 0 });
-    glow.roundRect(-2, -2, panelWidth + 4, panelHeight + 4, 5);
-    glow.stroke({ color: 0xff4a3d, alpha: 0.85, width: 3, alignment: 0 });
-    panel.addChild(glow);
-
     const frame = new Graphics();
     frame.roundRect(0, 0, panelWidth, panelHeight, 4);
-    frame.fill({ color: 0x1f0707, alpha: 0.98 });
+    frame.fill({ color: 0xa82520, alpha: 0.98 });
     frame.roundRect(1, 1, panelWidth - 2, panelHeight - 2, 3);
-    frame.stroke({ color: 0xff5a4f, alpha: 0.9, width: 1, alignment: 0 });
+    frame.stroke({ color: 0xf06a5d, alpha: 0.95, width: 1, alignment: 0 });
     panel.addChild(frame);
     panel.addChild(mapSprite);
 
@@ -401,6 +419,15 @@ export class Minimap {
     this.expandedPlayerMarker.fill({ color: 0xffd43b });
     this.expandedPlayerMarker.stroke({ color: 0x6b2f00, alpha: 1, width: 1 });
     panel.addChild(this.expandedPlayerMarker);
+
+    const contractButton = this.createMapToggleButton(
+      true,
+      this.contractButtonTexture,
+      () => this.setExpanded(false),
+    );
+    contractButton.x = panelWidth - MAP_TOGGLE_SIZE + MAP_TOGGLE_OVERLAP;
+    contractButton.y = -MAP_TOGGLE_OVERLAP;
+    panel.addChild(contractButton);
     overlay.addChild(panel);
 
     return overlay;
@@ -429,6 +456,129 @@ export class Minimap {
     setTimeout(() => {
       this.suppressCanvasClick = false;
     }, 0);
+  }
+
+  /** Wooden corner button with outward expand or inward contract arrows. */
+  private createMapToggleButton(
+    contract: boolean,
+    buttonTexture: Texture | null,
+    onToggle: () => void,
+  ): Container {
+    const button = new Container();
+    button.eventMode = 'static';
+    button.cursor = 'pointer';
+    button.hitArea = new Rectangle(0, 0, MAP_TOGGLE_SIZE, MAP_TOGGLE_SIZE);
+
+    if (buttonTexture) {
+      const sprite = new Sprite(buttonTexture);
+      sprite.width = MAP_TOGGLE_SIZE;
+      sprite.height = MAP_TOGGLE_SIZE;
+      button.addChild(sprite);
+    } else {
+      const frame = new Graphics();
+      frame.roundRect(2, 2, MAP_TOGGLE_SIZE, MAP_TOGGLE_SIZE, 3);
+      frame.fill({ color: 0x160b08, alpha: 0.55 });
+      frame.roundRect(0, 0, MAP_TOGGLE_SIZE, MAP_TOGGLE_SIZE, 3);
+      frame.fill({ color: 0x3a2115 });
+      frame.roundRect(2, 2, MAP_TOGGLE_SIZE - 4, MAP_TOGGLE_SIZE - 4, 2);
+      frame.fill({ color: 0x725039 });
+      frame.roundRect(2, 2, MAP_TOGGLE_SIZE - 4, MAP_TOGGLE_SIZE - 4, 2);
+      frame.stroke({ color: 0xb77b50, alpha: 0.75, width: 1, alignment: 0 });
+      button.addChild(frame);
+
+      const glyph = new Graphics();
+      const arrowColor = 0xe3cfaa;
+      const drawPath = (points: ReadonlyArray<readonly [number, number]>): void => {
+        glyph.moveTo(points[0][0], points[0][1]);
+        for (let i = 1; i < points.length; i++) glyph.lineTo(points[i][0], points[i][1]);
+        glyph.stroke({ color: arrowColor, width: 1.75, cap: 'square', join: 'miter' });
+      };
+
+      if (contract) {
+        drawPath([
+          [3.5, 3.5],
+          [7.5, 7.5],
+          [7.5, 4.5],
+        ]);
+        drawPath([
+          [7.5, 7.5],
+          [4.5, 7.5],
+        ]);
+        drawPath([
+          [14.5, 3.5],
+          [10.5, 7.5],
+          [13.5, 7.5],
+        ]);
+        drawPath([
+          [10.5, 7.5],
+          [10.5, 4.5],
+        ]);
+        drawPath([
+          [3.5, 14.5],
+          [7.5, 10.5],
+          [4.5, 10.5],
+        ]);
+        drawPath([
+          [7.5, 10.5],
+          [7.5, 13.5],
+        ]);
+        drawPath([
+          [14.5, 14.5],
+          [10.5, 10.5],
+          [10.5, 13.5],
+        ]);
+        drawPath([
+          [10.5, 10.5],
+          [13.5, 10.5],
+        ]);
+      } else {
+        drawPath([
+          [7.5, 7.5],
+          [3.5, 3.5],
+          [7.5, 3.5],
+        ]);
+        drawPath([
+          [3.5, 3.5],
+          [3.5, 7.5],
+        ]);
+        drawPath([
+          [10.5, 7.5],
+          [14.5, 3.5],
+          [10.5, 3.5],
+        ]);
+        drawPath([
+          [14.5, 3.5],
+          [14.5, 7.5],
+        ]);
+        drawPath([
+          [7.5, 10.5],
+          [3.5, 14.5],
+          [7.5, 14.5],
+        ]);
+        drawPath([
+          [3.5, 14.5],
+          [3.5, 10.5],
+        ]);
+        drawPath([
+          [10.5, 10.5],
+          [14.5, 14.5],
+          [10.5, 14.5],
+        ]);
+        drawPath([
+          [14.5, 14.5],
+          [14.5, 10.5],
+        ]);
+      }
+      button.addChild(glyph);
+    }
+
+    button.on('pointertap', (event) => {
+      event.stopPropagation();
+      this.markCanvasClickHandled();
+      onToggle();
+    });
+
+    return button;
   }
 
   /** Render every maze tile without fog or entity/objective markers. */
@@ -470,17 +620,17 @@ export class Minimap {
             if (this.portalActive) {
               const dx = Math.abs(tx - this.portalTileX);
               const dy = Math.abs(ty - this.portalTileY);
-              
+
               if (dx === 0 && dy === 0) {
                 col = COL_PORTAL_GLOW; // center
               } else if (dx + dy === 1) {
                 col = COL_PORTAL; // diamond edges
               } else {
-                 col = this.tileColor(fogIdx, data[fogIdx]);
-               }
-             } else {
-               col = this.tileColor(fogIdx, data[fogIdx]);
-             }
+                col = this.tileColor(fogIdx, data[fogIdx]);
+              }
+            } else {
+              col = this.tileColor(fogIdx, data[fogIdx]);
+            }
           }
         }
 
@@ -497,7 +647,8 @@ export class Minimap {
 
   /** Get the minimap colour for a given tile ID. */
   private tileColor(tileIndex: number, id: number): readonly number[] {
-    const isGroundTile = id === TILE_FLOOR ||
+    const isGroundTile =
+      id === TILE_FLOOR ||
       id === TILE_FLOOR_SHADOW ||
       id === TILE_GATE_HORIZONTAL ||
       id === TILE_GATE_VERTICAL;
