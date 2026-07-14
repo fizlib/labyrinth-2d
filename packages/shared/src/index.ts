@@ -282,9 +282,9 @@ export interface RunestoneActivatedMessage {
 
 export interface AllRunestonesActivatedMessage {
   type: MessageType.AllRunestonesActivated;
-  /** Portal spawn X in pixel coordinates. */
+  /** Activated portal X in pixel coordinates. */
   portalX: number;
-  /** Portal spawn Y in pixel coordinates. */
+  /** Activated portal Y in pixel coordinates. */
   portalY: number;
 }
 
@@ -347,7 +347,7 @@ export interface GameState {
   tick: number;
   players: PlayerInfo[];
   runestones: RunestoneInfo[];
-  /** Portal position in pixel coordinates. null until all runestones are activated. */
+  /** Portal position in pixel coordinates, selected when the room is created. */
   portal: { x: number; y: number } | null;
   /** Per-gate open/closed state. */
   gateStates: GateState[];

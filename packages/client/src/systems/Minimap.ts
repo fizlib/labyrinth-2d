@@ -77,6 +77,7 @@ export class Minimap {
   private expandedOverlay: Container | null = null;
   private expandedTexture: Texture | null = null;
   private expandedPlayerMarker: Graphics | null = null;
+  private expandedPortalMarker: Graphics | null = null;
   private expandedMapScale = 1;
 
   // ── Offscreen canvas for per-pixel rendering ───────────────────────────
@@ -103,7 +104,7 @@ export class Minimap {
   // ── Portal marker ──────────────────────────────────────────────────────
   private portalTileX = -1;
   private portalTileY = -1;
-  private portalActive = false;
+  private portalMarked = false;
 
   private readonly isWarden: boolean;
   private readonly expandButtonTexture: Texture | null;
@@ -277,11 +278,12 @@ export class Minimap {
     return true;
   }
 
-  /** Set the portal position (called when portal spawns). */
+  /** Set the portal position and expose it on the warden's full map. */
   setPortalPosition(pixelX: number, pixelY: number): void {
     this.portalTileX = Math.floor(pixelX / this.mapData.tileSize);
     this.portalTileY = Math.floor(pixelY / this.mapData.tileSize);
-    this.portalActive = true;
+    this.portalMarked = true;
+    this.updateExpandedPortalMarker();
     // Force a redraw on next update
     this.lastPlayerTileX = -1;
     this.lastPlayerTileY = -1;
@@ -414,6 +416,14 @@ export class Minimap {
     panel.addChild(frame);
     panel.addChild(mapSprite);
 
+    this.expandedPortalMarker = new Graphics();
+    this.expandedPortalMarker.poly([0, -3, 3, 0, 0, 3, -3, 0]);
+    this.expandedPortalMarker.fill({ color: 0x00f2ff });
+    this.expandedPortalMarker.stroke({ color: 0xffffff, alpha: 1, width: 1 });
+    this.expandedPortalMarker.visible = false;
+    panel.addChild(this.expandedPortalMarker);
+    this.updateExpandedPortalMarker();
+
     this.expandedPlayerMarker = new Graphics();
     this.expandedPlayerMarker.circle(0, 0, 2);
     this.expandedPlayerMarker.fill({ color: 0xffd43b });
@@ -431,6 +441,18 @@ export class Minimap {
     overlay.addChild(panel);
 
     return overlay;
+  }
+
+  private updateExpandedPortalMarker(): void {
+    if (!this.expandedPortalMarker) return;
+
+    this.expandedPortalMarker.visible = this.portalMarked;
+    if (!this.portalMarked) return;
+
+    this.expandedPortalMarker.x =
+      EXPANDED_PADDING + (this.portalTileX + 0.5) * this.expandedMapScale;
+    this.expandedPortalMarker.y =
+      EXPANDED_PADDING + (this.portalTileY + 0.5) * this.expandedMapScale;
   }
 
   private setExpanded(expanded: boolean): void {
@@ -617,7 +639,7 @@ export class Minimap {
           const fogIdx = ty * width + tx;
           if (this.fog[fogIdx] === 1) {
             // Check if this tile is the portal (drawn as a high-visibility diamond)
-            if (this.portalActive) {
+            if (this.portalMarked) {
               const dx = Math.abs(tx - this.portalTileX);
               const dy = Math.abs(ty - this.portalTileY);
 

@@ -161,10 +161,10 @@ export interface GameAssets {
   playerAnimationSets: PlayerAnimationSet[];
   /** Runestone textures: 3 pairs of [inactive, active]. Access via runestoneTextures[index][0|1]. */
   runestoneTextures: [Texture, Texture][];
-  /** Portal animation frames (row 1 emergence + row 2 idle, flattened). */
+  /** Portal animation frames (row 1 activation + row 2 active idle, flattened). */
   portalFrames: Texture[];
-  /** Number of emergence frames (the rest are idle). */
-  portalEmergenceCount: number;
+  /** Number of activation frames (the rest are active idle frames). */
+  portalActivationCount: number;
   /** Wisdom orb HUD texture. */
   wisdomOrbTexture: Texture;
   /** Warden minimap expand button texture. */
@@ -221,7 +221,7 @@ export async function loadAssets(): Promise<GameAssets> {
   const playerAnimationSets: PlayerAnimationSet[] = [];
   let runestoneTextures: [Texture, Texture][] = [];
   let portalFrames: Texture[] = [];
-  let portalEmergenceCount = 6;
+  let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
   let expandMapButtonTexture: Texture | null = null;
   let contractMapButtonTexture: Texture | null = null;
@@ -753,7 +753,7 @@ export async function loadAssets(): Promise<GameAssets> {
     }
   }
 
-  // ── Portal spritesheet (2 rows: row 1 = emergence, row 2 = idle) ──────────
+  // ── Portal spritesheet (2 rows: row 1 = activation, row 2 = active idle) ──────
   try {
     const portalSheet = await Assets.load<Texture>('assets/portal_spritesheet.png');
     portalSheet.source.scaleMode = 'nearest';
@@ -764,7 +764,7 @@ export async function loadAssets(): Promise<GameAssets> {
     const framesPerRow = Math.floor(portalSheet.width / frameW);
 
     portalFrames = [];
-    // Row 1 (y=0): emergence frames
+    // Row 1 (y=0): inactive frame followed by the activation sequence
     for (let i = 0; i < framesPerRow; i++) {
       portalFrames.push(
         new Texture({
@@ -773,9 +773,9 @@ export async function loadAssets(): Promise<GameAssets> {
         }),
       );
     }
-    const emergenceCount = framesPerRow;
-    portalEmergenceCount = emergenceCount;
-    // Row 2 (y=frameH): idle frames
+    const activationCount = framesPerRow;
+    portalActivationCount = activationCount;
+    // Row 2 (y=frameH): active idle frames
     for (let i = 0; i < framesPerRow; i++) {
       portalFrames.push(
         new Texture({
@@ -785,7 +785,7 @@ export async function loadAssets(): Promise<GameAssets> {
       );
     }
     console.info(
-      `[Assets] Loaded portal_spritesheet.png (${emergenceCount} emergence + ${framesPerRow} idle, ${frameW}×${frameH} each)`,
+      `[Assets] Loaded portal_spritesheet.png (${activationCount} activation + ${framesPerRow} active idle, ${frameW}×${frameH} each)`,
     );
   } catch {
     console.info(
@@ -925,7 +925,7 @@ export async function loadAssets(): Promise<GameAssets> {
     playerAnimationSets,
     runestoneTextures,
     portalFrames,
-    portalEmergenceCount,
+    portalActivationCount,
     wisdomOrbTexture,
     expandMapButtonTexture,
     contractMapButtonTexture,

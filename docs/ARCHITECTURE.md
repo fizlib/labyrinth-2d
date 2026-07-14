@@ -32,7 +32,8 @@ One room owns one maze instance. The server is authoritative for player state, h
   - one generated maze
   - one player list
   - one runestone state array
-  - one optional portal position
+  - one portal position selected during room creation
+  - one portal activation flag
   - one precomputed hub-distance field for phase 1 wisdom guidance
   - one optional portal-distance field for phase 2 wisdom guidance
 
@@ -75,7 +76,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `TICK_UPDATE` | Authoritative room snapshot broadcast every server tick |
 | `PLAYER_LEFT` | Notify clients that one player disconnected |
 | `RUNESTONE_ACTIVATED` | Broadcast that one runestone is now active |
-| `ALL_RUNESTONES_ACTIVATED` | Broadcast portal spawn coordinates once all runestones are active |
+| `ALL_RUNESTONES_ACTIVATED` | Broadcast the existing portal coordinates once all runestones are active |
 | `WISDOM_ORB_USED` | Private response to the player who spent an orb, containing the hint direction and remaining orb count |
 | `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
 | `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
@@ -113,7 +114,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | `tick` | `number` | Authoritative simulation tick counter |
 | `players` | `PlayerInfo[]` | All connected players in the room |
 | `runestones` | `RunestoneInfo[]` | Three runestones with activation state |
-| `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels once spawned |
+| `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
 
 ## Shared Gameplay Systems
 
@@ -123,14 +124,15 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Both client and server use the same feet-based collision logic.
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
-- Collision also respects the spawned portal when present.
+- Collision respects the portal from the beginning of the match.
 
 ### Runestones and Portal Flow
 
 - The generated map contains exactly three runestone tiles inside the hub area.
 - The server validates runestone activation by proximity before accepting a request.
-- When all three runestones are active, the server computes one portal position farther from the hub than player spawns and broadcasts it.
-- As soon as the authoritative portal position exists, wisdom orbs switch from hub guidance to portal guidance.
+- During room creation, the server computes one portal position farther from the hub than player spawns, so the inactive portal is present from the beginning.
+- When all three runestones are active, the server broadcasts the existing portal position and the client plays its light-up animation.
+- Wisdom orbs switch from hub guidance to portal guidance only after the portal is activated.
 - The portal is a world entity, not a tilemap tile.
 
 ### Hidden Roles and Wisdom Orbs
@@ -260,8 +262,8 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `Minimap`
   - screen-space HUD in the bottom-right corner
   - player-centered exploration view with fog of war
-  - supports portal display once the portal is spawned
-  - wardens receive a solid red frame with no fog-of-war and a wooden corner expand button; the fixed whole-maze view is scaled to fit the internal screen, marks only the local warden's position, and provides a matching contract button
+  - supports portal display from the beginning of the match
+  - wardens receive a solid red frame with no fog-of-war and a wooden corner expand button; the fixed whole-maze view is scaled to fit the internal screen, marks the portal and the local warden's position, and provides a matching contract button
 - `WisdomOrbHud`
   - screen-space HUD in the top-left corner
   - survivors see one orb slot and the current remaining count; wardens do not receive this HUD
@@ -311,7 +313,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `packages/server/src/index.ts`
   - WebSocket server bootstrap and protocol routing
 - `packages/server/src/Room.ts`
-  - room lifecycle, hidden role seats/private inventories, authoritative state, tick loop, runestone logic, portal spawning, wisdom-orb handling
+  - room lifecycle, hidden role seats/private inventories, authoritative state, tick loop, runestone logic, portal activation, wisdom-orb handling
 
 ### Client Package
 

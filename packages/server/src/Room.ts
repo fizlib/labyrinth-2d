@@ -186,9 +186,11 @@ export class Room {
   /** Runestone activation state (server-authoritative). */
   private runestones: RunestoneInfo[] = [];
 
-  /** Portal position (set when all runestones are activated). */
+  /** Portal position, chosen when the room is created. */
   private portalPosition: { x: number; y: number } | null = null;
 
+  /** Whether all runestones have activated the portal. */
+  private portalActivated = false;
 
   /** Random seed used to generate this room's maze. */
   readonly mapSeed: number;
@@ -226,11 +228,28 @@ export class Room {
     this.gateOpenStates = new Array(this.gates.length).fill(false);
     this.hubDistanceField = computeHubDistanceField(this.map);
     this.runestones = findRunestonePositions(this.map);
+
+    const portalTile = computePortalPosition(this.map.data, SPAWN_DISTANCE);
+    if (portalTile) {
+      this.portalPosition = {
+        x: (portalTile.x + 0.5) * TILE_SIZE,
+        y: (portalTile.y + 0.5) * TILE_SIZE,
+      };
+      this.portalDistanceField = computePortalDistanceField(
+        this.map,
+        this.portalPosition,
+      );
+    } else {
+      console.warn(
+        `[Room:${this.id}] No valid portal position found during room creation`,
+      );
+    }
+
     this.state = {
       tick: 0,
       players: [],
       runestones: this.runestones,
-      portal: null,
+      portal: this.portalPosition,
       gateStates: this.gates.map((_, i) => ({ gateIndex: i, open: false })),
     };
     console.info(
@@ -241,6 +260,11 @@ export class Room {
       console.info(`  Team ${i} spawn: tile (${sp.x}, ${sp.y}) → px (${(sp.x + 0.5) * TILE_SIZE}, ${(sp.y + 0.5) * TILE_SIZE})`);
     }
     console.info(`  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}`);
+    if (this.portalPosition) {
+      console.info(
+        `  Portal: (${Math.round(this.portalPosition.x)}, ${Math.round(this.portalPosition.y)})`,
+      );
+    }
   }
 
   // ── Player Management ─────────────────────────────────────────────────
@@ -520,28 +544,26 @@ export class Room {
     };
     this.broadcast(activatedMsg);
 
-    // Check if ALL runestones are now activated → spawn portal
+    // Check if ALL runestones are now activated → light up the existing portal
     const allActivated = this.runestones.every((r) => r.activated);
-    if (allActivated && !this.portalPosition) {
-      const portalTile = computePortalPosition(this.map.data, SPAWN_DISTANCE);
-      if (portalTile) {
-        // Convert tile coordinates to pixel coordinates (center of cell)
-        const portalPxX = (portalTile.x + 0.5) * TILE_SIZE;
-        const portalPxY = (portalTile.y + 0.5) * TILE_SIZE;
-        this.portalPosition = { x: portalPxX, y: portalPxY };
-        this.portalDistanceField = computePortalDistanceField(this.map, this.portalPosition);
-        this.state.portal = this.portalPosition;
+    if (allActivated && !this.portalActivated) {
+      this.portalActivated = true;
 
-        console.info(`[Room:${this.id}] All runestones activated! Portal spawned at (${Math.round(portalPxX)}, ${Math.round(portalPxY)})`);
+      if (this.portalPosition) {
+        console.info(
+          `[Room:${this.id}] All runestones activated! Portal lit up at (${Math.round(this.portalPosition.x)}, ${Math.round(this.portalPosition.y)})`,
+        );
 
         const portalMsg: AllRunestonesActivatedMessage = {
           type: MessageType.AllRunestonesActivated,
-          portalX: portalPxX,
-          portalY: portalPxY,
+          portalX: this.portalPosition.x,
+          portalY: this.portalPosition.y,
         };
         this.broadcast(portalMsg);
       } else {
-        console.warn(`[Room:${this.id}] All runestones activated but no valid portal position found!`);
+        console.warn(
+          `[Room:${this.id}] All runestones activated but the room has no portal position`,
+        );
       }
     }
   }
@@ -565,8 +587,10 @@ export class Room {
       return;
     }
 
-    const activeTarget = this.portalPosition ? 'portal' : 'hub';
-    const activeDistanceField = this.portalPosition ? this.portalDistanceField : this.hubDistanceField;
+    const activeTarget = this.portalActivated ? 'portal' : 'hub';
+    const activeDistanceField = this.portalActivated
+      ? this.portalDistanceField
+      : this.hubDistanceField;
     if (!activeDistanceField) {
       console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: no distance field available (target=${activeTarget}, portalPos=${JSON.stringify(this.portalPosition)}, portalField=${!!this.portalDistanceField}, hubField=${!!this.hubDistanceField})`);
       return;

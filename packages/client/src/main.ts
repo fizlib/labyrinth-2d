@@ -181,7 +181,7 @@ const PLATE_ANIM_SPEED = 12;
 /** Floating "Press E" interaction prompt */
 let interactPrompt: Text | null = null;
 
-/** Portal instance (created when all runestones are activated). */
+/** Portal instance, present from the beginning and lit after rune activation. */
 let portal: Portal | null = null;
 
 /** Top-left HUD showing remaining wisdom orbs. */
@@ -199,7 +199,7 @@ let shakeTimeRemaining = 0;
 const SHAKE_DURATION = 0.8;
 const SHAKE_MAX_INTENSITY = 3; // max ±px displacement
 
-/** Pending portal position to spawn after shake completes. */
+/** Pending portal position to activate after the shake completes. */
 let pendingPortalPos: { x: number; y: number } | null = null;
 
 /**
@@ -1141,6 +1141,11 @@ async function main(): Promise<void> {
 
       // Clear previous slide states on new room join
       gateSlideStates.clear();
+      portal?.destroy();
+      portal = null;
+      pendingPortalPos = null;
+      shakeTimeRemaining = 0;
+      cinematicPhase = 'idle';
 
       const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
       currentMap = layout.map;
@@ -1230,19 +1235,20 @@ async function main(): Promise<void> {
         }
       }
 
-      // ── Late-join portal sync ──────────────────────────────────────
-      if (gameState.portal && !portal) {
+      // ── Initial portal sync ────────────────────────────────────────
+      if (gameState.portal) {
+        const portalAlreadyActive = gameState.runestones.every((rs) => rs.activated);
         portal = new Portal(
           gameState.portal.x,
           gameState.portal.y,
           assets.portalFrames,
-          assets.portalEmergenceCount,
+          assets.portalActivationCount,
           entityLayer,
-          true, // skip emergence for late joiners
+          portalAlreadyActive,
         );
         minimap?.setPortalPosition(gameState.portal.x, gameState.portal.y);
         console.info(
-          `[Main] Late-join: portal already active at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`,
+          `[Main] Portal ${portalAlreadyActive ? 'active' : 'inactive'} at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`,
         );
       }
 
@@ -1405,7 +1411,7 @@ async function main(): Promise<void> {
       console.info(
         `[Main] All runestones activated! Portal at (${Math.round(portalX)}, ${Math.round(portalY)})`,
       );
-      // Start screen shake — portal will spawn after shake completes
+      // Start screen shake — portal will light up after it completes
       shakeTimeRemaining = SHAKE_DURATION;
       pendingPortalPos = { x: portalX, y: portalY };
     },
@@ -1713,18 +1719,18 @@ async function main(): Promise<void> {
       worldContainer.x += shakeX;
       worldContainer.y += shakeY;
 
-      // When shake ends, instantly teleport camera to portal and spawn it
+      // When shake ends, light the portal and move the camera to it.
       if (shakeTimeRemaining <= 0 && pendingPortalPos) {
-        // Spawn portal
-        portal?.destroy();
-        portal = new Portal(
-          pendingPortalPos.x,
-          pendingPortalPos.y,
-          assets.portalFrames,
-          assets.portalEmergenceCount,
-          entityLayer,
-          false, // play emergence animation
-        );
+        if (!portal) {
+          portal = new Portal(
+            pendingPortalPos.x,
+            pendingPortalPos.y,
+            assets.portalFrames,
+            assets.portalActivationCount,
+            entityLayer,
+          );
+        }
+        portal.activate();
         minimap?.setPortalPosition(pendingPortalPos.x, pendingPortalPos.y);
         // Instant camera jump to portal (no directional clues)
         cinematicPhase = 'watch_portal';

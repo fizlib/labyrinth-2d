@@ -1,9 +1,10 @@
 // packages/client/src/systems/Portal.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Animated portal sprite with two-phase animation:
+// Animated portal sprite with three phases:
 //
-//   Phase 1 — Emergence: Plays through emergence frames once sequentially.
-//   Phase 2 — Idle: Loops through idle frames continuously.
+//   Phase 1 — Inactive: Shows the unlit portal from the start of the match.
+//   Phase 2 — Activation: Lights the portal once all runestones are active.
+//   Phase 3 — Active: Loops through the lit idle frames continuously.
 //
 // Frame counts are passed in from the asset loader (no hardcoded counts).
 // No additional scale, rotation, or alpha effects — the spritesheet
@@ -12,13 +13,13 @@
 
 import { Sprite, Container, Texture } from 'pixi.js';
 
-type PortalPhase = 'emergence' | 'idle';
+type PortalPhase = 'inactive' | 'activation' | 'active';
 
-/** Duration (seconds) for the full emergence animation. */
-const EMERGENCE_DURATION = 0.6;
+/** Duration (seconds) for the full activation animation. */
+const ACTIVATION_DURATION = 0.6;
 
-/** Duration (seconds) for one full idle cycle. */
-const IDLE_CYCLE_DURATION = 1.0;
+/** Duration (seconds) for one full active idle cycle. */
+const ACTIVE_CYCLE_DURATION = 1.0;
 
 export class Portal {
   readonly sprite: Sprite;
@@ -27,34 +28,34 @@ export class Portal {
   private phase: PortalPhase;
   private elapsed = 0;
 
-  /** Number of emergence frames (first N in the frames array). */
-  private emergenceCount: number;
-  /** Number of idle frames (remaining frames after emergence). */
-  private idleCount: number;
+  /** Number of activation frames (first N in the frames array). */
+  private activationCount: number;
+  /** Number of active idle frames (remaining frames after activation). */
+  private activeCount: number;
 
   /**
    * @param x                World pixel X (center of cell)
    * @param y                World pixel Y (center of cell)
-   * @param frames           All portal textures (emergence first, then idle)
-   * @param emergenceCount   How many frames are emergence (the rest are idle)
+   * @param frames           All portal textures (activation first, then active idle)
+   * @param activationCount  How many frames are activation (the rest are active idle)
    * @param parent           Container to add the sprite to (entityLayer)
-   * @param skipEmergence    If true, start directly in idle (for late joiners)
+   * @param active           Whether the portal should start already lit
    */
   constructor(
     x: number,
     y: number,
     frames: Texture[],
-    emergenceCount: number,
+    activationCount: number,
     parent: Container,
-    skipEmergence = false,
+    active = false,
   ) {
     this.frames = frames;
-    this.emergenceCount = emergenceCount;
-    this.idleCount = frames.length - emergenceCount;
-    this.phase = skipEmergence ? 'idle' : 'emergence';
+    this.activationCount = activationCount;
+    this.activeCount = frames.length - activationCount;
+    this.phase = active ? 'active' : 'inactive';
 
-    // Create sprite using the first appropriate frame
-    const initialFrame = skipEmergence ? frames[emergenceCount] : frames[0];
+    // The first activation frame is the fully inactive portal.
+    const initialFrame = active ? frames[activationCount] : frames[0];
     this.sprite = new Sprite(initialFrame);
     this.sprite.anchor.set(0.5, 0.5);
     this.sprite.x = x;
@@ -71,39 +72,52 @@ export class Portal {
    * Call every frame from the game loop.
    */
   update(dt: number): void {
+    if (this.phase === 'inactive') return;
+
     this.elapsed += dt;
 
-    if (this.phase === 'emergence') {
-      this.updateEmergence();
+    if (this.phase === 'activation') {
+      this.updateActivation();
     } else {
-      this.updateIdle();
+      this.updateActive();
     }
   }
 
-  // ── Emergence Animation ─────────────────────────────────────────────────
+  // ── Activation Animation ────────────────────────────────────────────────
 
-  private updateEmergence(): void {
-    const t = Math.min(this.elapsed / EMERGENCE_DURATION, 1);
+  /** Start the one-shot light-up sequence. */
+  activate(): void {
+    if (this.phase !== 'inactive') return;
+    this.phase = 'activation';
+    this.elapsed = 0;
+  }
 
-    // Linear frame progression through emergence frames
-    const frameIdx = Math.min(Math.floor(t * this.emergenceCount), this.emergenceCount - 1);
+  private updateActivation(): void {
+    const t = Math.min(this.elapsed / ACTIVATION_DURATION, 1);
+
+    const frameIdx = Math.min(
+      Math.floor(t * this.activationCount),
+      this.activationCount - 1,
+    );
     this.sprite.texture = this.frames[frameIdx];
 
-    // Transition to idle when emergence is complete
+    // Transition to the active loop when the light-up sequence is complete.
     if (t >= 1) {
-      this.phase = 'idle';
+      this.phase = 'active';
       this.elapsed = 0;
-      this.sprite.texture = this.frames[this.emergenceCount];
+      this.sprite.texture = this.frames[this.activationCount];
     }
   }
 
-  // ── Idle Animation ──────────────────────────────────────────────────────
+  // ── Active Animation ────────────────────────────────────────────────────
 
-  private updateIdle(): void {
-    // Cycle through idle frames continuously
-    const tIdle = (this.elapsed % IDLE_CYCLE_DURATION) / IDLE_CYCLE_DURATION;
-    const frameOffset = Math.min(Math.floor(tIdle * this.idleCount), this.idleCount - 1);
-    const frameIdx = this.emergenceCount + frameOffset;
+  private updateActive(): void {
+    const tActive = (this.elapsed % ACTIVE_CYCLE_DURATION) / ACTIVE_CYCLE_DURATION;
+    const frameOffset = Math.min(
+      Math.floor(tActive * this.activeCount),
+      this.activeCount - 1,
+    );
+    const frameIdx = this.activationCount + frameOffset;
     this.sprite.texture = this.frames[frameIdx];
   }
 
