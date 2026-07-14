@@ -1069,25 +1069,33 @@ export function computeSpawnPoints(
 // ── Portal Position Computation ─────────────────────────────────────────────
 
 /**
- * Compute a portal spawn position that is farther from the hub than the
- * player spawn points.
+ * Compute a portal position at the south face of a forest wall separating
+ * two vertically adjacent 6×6 cells, farther from the hub than player spawns.
  *
  * Algorithm:
  *   1. Build a cell-level adjacency graph (same as computeSpawnPoints).
  *   2. BFS from all hub cells.
- *   3. Find reachable floor cells at distance > spawnDistance.
+ *   3. Find reachable lower cells at distance > spawnDistance where both the
+ *      lower cell and the cell above it have an intact north forest wall.
  *      Target distance = spawnDistance + 2, capped at GRID_CELLS - 1.
  *   4. Pick the cell with the highest BFS distance (deepest in the maze).
  *      Ties broken by closest to due-south direction from hub center.
  *
  * @param data           Flat tile array from generateMaze
  * @param spawnDistance   The spawn distance used for teams (to ensure portal is farther)
- * @returns              Pixel coordinates { x, y } of the portal center, or null if none found
+ * @returns              Tile-space coordinates of the portal center, or null if none found
  */
 export function computePortalPosition(
   data: number[],
   spawnDistance: number,
 ): SpawnPoint | null {
+  const supportsPortalPlatform = (cx: number, cy: number): boolean => {
+    if (cy < 2) return false;
+    const lowerNorthWall = !areCellsConnected(data, cx, cy, cx, cy - 1);
+    const upperNorthWall = !areCellsConnected(data, cx, cy - 1, cx, cy - 2);
+    return lowerNorthWall && upperNorthWall;
+  };
+
   // ── 1. Identify hub cells ───────────────────────────────────────────
   const hubTileX = Math.floor((MAP_WIDTH - HUB_SIZE) / 2);
   const hubTileY = Math.floor((MAP_HEIGHT - HUB_SIZE) / 2);
@@ -1136,6 +1144,7 @@ export function computePortalPosition(
       if (d === -1) continue;
       if (d < targetMinDist || d > targetMaxDist) continue;
       if (hubCells.has(`${cx},${cy}`)) continue;
+      if (!supportsPortalPlatform(cx, cy)) continue;
 
       const { tx, ty } = cellToTile(cx, cy);
       const pixX = tx + CELL_SIZE / 2;
@@ -1152,6 +1161,7 @@ export function computePortalPosition(
         const d = cellDist[cy * GRID_CELLS + cx];
         if (d === -1 || d <= spawnDistance) continue;
         if (hubCells.has(`${cx},${cy}`)) continue;
+        if (!supportsPortalPlatform(cx, cy)) continue;
 
         const { tx, ty } = cellToTile(cx, cy);
         const pixX = tx + CELL_SIZE / 2;
@@ -1179,8 +1189,11 @@ export function computePortalPosition(
   const best = candidates[0];
   const { tx, ty } = cellToTile(best.cx, best.cy);
 
+  // Center horizontally on the 6×6 lower cell. Vertically, the arch sits
+  // 12px (0.75 tile) inside the south face of the separating forest wall,
+  // matching the authored platform layout.
   return {
-    x: tx + (CELL_SIZE - 1) / 2,
-    y: ty + (CELL_SIZE - 1) / 2,
+    x: tx + CELL_SIZE / 2,
+    y: ty - 0.75,
   };
 }

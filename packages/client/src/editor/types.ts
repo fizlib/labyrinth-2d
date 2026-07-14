@@ -1,5 +1,7 @@
 export type EditorTool = 'select' | 'add' | 'paint' | 'erase' | 'collider' | 'pan';
 
+export type EditorColliderShape = 'rectangle' | 'right-triangle';
+
 export type SemanticRole =
   | 'ground.grass'
   | 'ground.path'
@@ -80,6 +82,11 @@ export interface EditorCollider {
   y: number;
   width: number;
   height: number;
+  /** Omitted by legacy v1 documents; missing values render as rectangles. */
+  shape?: EditorColliderShape;
+  /** Mirror a right-triangle collider within its bounding box. */
+  flipX?: boolean;
+  flipY?: boolean;
   enabled: boolean;
 }
 

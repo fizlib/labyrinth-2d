@@ -89,13 +89,14 @@
         <div id="collider-inspector" class="inspector-section disabled">
           <label>Name<input id="collider-name" class="field" /></label>
           <label>Bound role<input id="collider-role" class="field" /></label>
+          <label>Shape<select id="collider-shape" class="field"><option value="rectangle">Rectangle</option><option value="right-triangle">Right triangle</option></select></label>
           <div class="number-grid">
             <label>X<input id="collider-x" type="number" class="field" /></label>
             <label>Y<input id="collider-y" type="number" class="field" /></label>
             <label>Width<input id="collider-width" type="number" min="1" class="field" /></label>
             <label>Height<input id="collider-height" type="number" min="1" class="field" /></label>
           </div>
-          <label><input id="collider-enabled" type="checkbox" /> Enabled</label>
+          <div class="check-row"><label><input id="collider-flip-x" type="checkbox" /> Flip X</label><label><input id="collider-flip-y" type="checkbox" /> Flip Y</label><label><input id="collider-enabled" type="checkbox" /> Enabled</label></div>
         </div>
 
         <label class="notes-label">Style notes<textarea id="style-notes" class="field" rows="4" placeholder="Describe repetition, spacing, intended density, or exceptions…"></textarea></label>

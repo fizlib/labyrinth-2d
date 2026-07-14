@@ -232,8 +232,8 @@ export class Room {
     const portalTile = computePortalPosition(this.map.data, SPAWN_DISTANCE);
     if (portalTile) {
       this.portalPosition = {
-        x: (portalTile.x + 0.5) * TILE_SIZE,
-        y: (portalTile.y + 0.5) * TILE_SIZE,
+        x: portalTile.x * TILE_SIZE,
+        y: portalTile.y * TILE_SIZE,
       };
       this.portalDistanceField = computePortalDistanceField(
         this.map,

@@ -30,6 +30,7 @@ import {
   generateWisdomOrbTexture,
   generatePressurePlateTexture,
 } from './FallbackTextures';
+import { PORTAL_PLATFORM_ASSET_PATHS } from '../systems/PortalPlatformLayout';
 
 export interface FrontGateTextures {
   topLeft: Texture;
@@ -163,6 +164,8 @@ export interface GameAssets {
   runestoneTextures: [Texture, Texture][];
   /** Portal animation frames (row 1 activation + row 2 active idle, flattened). */
   portalFrames: Texture[];
+  /** Authored ground and masonry modules used by the raised portal platform. */
+  portalPlatformTextures: ReadonlyMap<string, Texture>;
   /** Number of activation frames (the rest are active idle frames). */
   portalActivationCount: number;
   /** Wisdom orb HUD texture. */
@@ -221,6 +224,7 @@ export async function loadAssets(): Promise<GameAssets> {
   const playerAnimationSets: PlayerAnimationSet[] = [];
   let runestoneTextures: [Texture, Texture][] = [];
   let portalFrames: Texture[] = [];
+  let portalPlatformTextures = new Map<string, Texture>();
   let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
   let expandMapButtonTexture: Texture | null = null;
@@ -810,6 +814,25 @@ export async function loadAssets(): Promise<GameAssets> {
     }
   }
 
+  // ── Authored portal platform modules ─────────────────────────────────────
+  try {
+    portalPlatformTextures = new Map(
+      await Promise.all(
+        PORTAL_PLATFORM_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded portal platform (${portalPlatformTextures.size} source modules)`,
+    );
+  } catch (error) {
+    portalPlatformTextures.clear();
+    console.warn('[Assets] Portal platform modules unavailable', error);
+  }
+
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
   try {
     wisdomOrbTexture = await Assets.load<Texture>('assets/wisdom_orb.png');
@@ -925,6 +948,7 @@ export async function loadAssets(): Promise<GameAssets> {
     playerAnimationSets,
     runestoneTextures,
     portalFrames,
+    portalPlatformTextures,
     portalActivationCount,
     wisdomOrbTexture,
     expandMapButtonTexture,

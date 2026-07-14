@@ -13,7 +13,12 @@ import {
 function isSolidForNavigation(tile: number): boolean {
   return isSolidTileId(tile) && !isGateTileId(tile);
 }
-import { getPortalBounds, type PortalCollider } from './physics.js';
+import {
+  getPortalBounds,
+  getPortalPlatformBounds,
+  type PortalBounds,
+  type PortalCollider,
+} from './physics.js';
 
 export type HubDirection = 'north' | 'east' | 'south' | 'west';
 
@@ -70,16 +75,28 @@ export function computePortalDistanceField(
   const seedCellSet = new Set<string>();
   const bounds = getPortalBounds(portal);
 
+  const markBlockedBounds = (blockedBounds: PortalBounds): void => {
+    const left = Math.floor(blockedBounds.left / map.tileSize);
+    const top = Math.floor(blockedBounds.top / map.tileSize);
+    const right = Math.floor(blockedBounds.right / map.tileSize);
+    const bottom = Math.floor(blockedBounds.bottom / map.tileSize);
+
+    for (let ty = top; ty <= bottom; ty++) {
+      for (let tx = left; tx <= right; tx++) {
+        if (tx < 0 || tx >= map.width || ty < 0 || ty >= map.height) continue;
+        blockedTiles[ty * map.width + tx] = 1;
+      }
+    }
+  };
+
   const tileLeft = Math.floor(bounds.left / map.tileSize);
   const tileTop = Math.floor(bounds.top / map.tileSize);
   const tileRight = Math.floor(bounds.right / map.tileSize);
   const tileBottom = Math.floor(bounds.bottom / map.tileSize);
 
-  for (let ty = tileTop; ty <= tileBottom; ty++) {
-    for (let tx = tileLeft; tx <= tileRight; tx++) {
-      if (tx < 0 || tx >= map.width || ty < 0 || ty >= map.height) continue;
-      blockedTiles[ty * map.width + tx] = 1;
-    }
+  markBlockedBounds(bounds);
+  for (const platformBounds of getPortalPlatformBounds(portal)) {
+    markBlockedBounds(platformBounds);
   }
 
   for (let ty = tileTop; ty <= tileBottom; ty++) {

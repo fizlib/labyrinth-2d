@@ -3,6 +3,8 @@ import {
   CELL_STEP_X,
   CELL_STEP_Y,
   GRID_CELLS,
+  PORTAL_HITBOX_H,
+  PORTAL_HITBOX_W,
   SPAWN_DISTANCE,
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
@@ -12,6 +14,7 @@ import {
   WALL_WIDTH,
   generateMazeLayout,
   getHubTileBounds,
+  getPortalPlatformBounds,
   isSolidTileId,
   type GeneratedMazeLayout,
   type GatePlacement,
@@ -24,6 +27,12 @@ import {
   isForestWallTileId,
   type ForestStylePlacementSpec,
 } from '../systems/ForestWallLayout';
+import {
+  PORTAL_PLATFORM_GROUND_SPRITES,
+  PORTAL_PLATFORM_STRUCTURE_SPRITES,
+  PORTAL_VISUAL_OFFSET_X,
+  getPortalPlatformAssetPath,
+} from '../systems/PortalPlatformLayout';
 import type { EditorCollider, EditorElement, SemanticRole, StyleEditorDocumentV1 } from './types';
 
 const TILE = 16;
@@ -31,7 +40,7 @@ const MAZE_SEED = 44;
 const CROP_CELL_X = 2;
 const CROP_CELL_Y = 5;
 const CROP_CELLS_WIDE = 7;
-const CROP_CELLS_HIGH = 6;
+const CROP_CELLS_HIGH = 10;
 const CROP_TILE_X = CROP_CELL_X * CELL_STEP_X;
 const CROP_TILE_Y = CROP_CELL_Y * CELL_STEP_Y;
 const SAMPLE_TILES_WIDE = WALL_WIDTH + CROP_CELLS_WIDE * CELL_STEP_X;
@@ -43,6 +52,12 @@ const FOREST_ROOT = '/assets/forest';
 const GATE_SHEET = '/assets/gates.png';
 const PLATE_SHEET = '/assets/plate_spritesheet.png';
 const RUNESTONE_SHEET = '/assets/runestones.png';
+const PORTAL_SHEET = '/assets/portal_spritesheet.png';
+const PORTAL_FRAME_SIZE = 48;
+const PORTAL_SAMPLE_CELL_X = 8;
+const PORTAL_SAMPLE_CELL_Y = 14;
+const PORTAL_PLATFORM_STRUCTURE_Z = 240000;
+const PORTAL_Z = 240002;
 const HUB_TREE = `${FOREST_ROOT}/tree_primary_02.png`;
 const HUB_TREE_SHADOW = `${FOREST_ROOT}/tree_shadow.png`;
 const GRASS_IDS = [102, 105, 108, 154] as const;
@@ -135,6 +150,9 @@ function collider(
   height: number,
   ownerRole: EditorCollider['ownerRole'] = 'wall.solid',
   ownerId: string | null = null,
+  shape: EditorCollider['shape'] = 'rectangle',
+  flipX = false,
+  flipY = false,
 ): EditorCollider {
   return {
     id: id('collider'),
@@ -145,6 +163,9 @@ function collider(
     y,
     width,
     height,
+    shape,
+    flipX,
+    flipY,
     enabled: true,
   };
 }
@@ -484,6 +505,88 @@ function addCentralHubElements(
   }
 }
 
+function addPortalCellElements(
+  elements: EditorElement[],
+  colliders: EditorCollider[],
+): void {
+  // Seed 44 cells (8,13) and (8,14) both have intact north walls, so this
+  // showcase obeys the same vertical wall-pair rule as runtime generation.
+  const lowerCellTileX = WALL_WIDTH + PORTAL_SAMPLE_CELL_X * CELL_STEP_X;
+  const lowerCellTileY = WALL_HEIGHT + PORTAL_SAMPLE_CELL_Y * CELL_STEP_Y;
+  const centerMapX = (lowerCellTileX + CELL_SIZE / 2) * TILE;
+  const centerMapY = lowerCellTileY * TILE - 12;
+  const centerX = centerMapX - CROP_TILE_X * TILE;
+  const centerY = centerMapY - CROP_TILE_Y * TILE;
+
+  for (const spec of PORTAL_PLATFORM_GROUND_SPRITES) {
+    elements.push(assetElement(
+      `Portal cell · clearing ground · ${spec.asset}`,
+      'ground.path',
+      getPortalPlatformAssetPath(spec.asset),
+      spec.w,
+      spec.h,
+      centerX + spec.x,
+      centerY + spec.y,
+      spec.w,
+      spec.h,
+      1,
+    ));
+  }
+
+  for (const spec of PORTAL_PLATFORM_STRUCTURE_SPRITES) {
+    elements.push(assetElement(
+      `Portal cell · raised platform · ${spec.asset}`,
+      'landmark',
+      getPortalPlatformAssetPath(spec.asset),
+      spec.w,
+      spec.h,
+      centerX + spec.x,
+      centerY + spec.y,
+      spec.w,
+      spec.h,
+      PORTAL_PLATFORM_STRUCTURE_Z + (spec.z ?? 0),
+    ));
+  }
+
+  const portal = assetElement(
+    `Portal cell · inactive escape portal · lower cell ${PORTAL_SAMPLE_CELL_X},${PORTAL_SAMPLE_CELL_Y}`,
+    'portal',
+    PORTAL_SHEET,
+    PORTAL_FRAME_SIZE,
+    PORTAL_FRAME_SIZE,
+    centerX - PORTAL_FRAME_SIZE / 2 + PORTAL_VISUAL_OFFSET_X,
+    centerY - PORTAL_FRAME_SIZE / 2,
+    PORTAL_FRAME_SIZE,
+    PORTAL_FRAME_SIZE,
+    PORTAL_Z,
+    false,
+    false,
+    { x: 0, y: 0, width: PORTAL_FRAME_SIZE, height: PORTAL_FRAME_SIZE },
+  );
+  elements.push(portal);
+  colliders.push(collider(
+    `Portal cell · escape portal collider · lower cell ${PORTAL_SAMPLE_CELL_X},${PORTAL_SAMPLE_CELL_Y}`,
+    centerX - PORTAL_HITBOX_W / 2,
+    centerY - PORTAL_HITBOX_H / 2,
+    PORTAL_HITBOX_W,
+    PORTAL_HITBOX_H,
+    'portal',
+    portal.id,
+  ));
+
+  for (const [sideIndex, bounds] of getPortalPlatformBounds({ x: centerX, y: centerY }).entries()) {
+    colliders.push(collider(
+      `Portal cell · ${sideIndex === 0 ? 'left' : 'right'} platform side · stairs remain open`,
+      bounds.left,
+      bounds.top,
+      bounds.right - bounds.left + 1,
+      bounds.bottom - bounds.top + 1,
+      'portal',
+      portal.id,
+    ));
+  }
+}
+
 function addWallElements(map: TileMapData, elements: EditorElement[]): void {
   const cropLeft = CROP_TILE_X * TILE;
   const cropTop = CROP_TILE_Y * TILE;
@@ -573,6 +676,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
   addWallColliders(map, colliders);
   addGateObstacleElements(layout, elements, colliders);
   addCentralHubElements(map, elements, colliders);
+  addPortalCellElements(elements, colliders);
 
   const topologyGrid = Array.from({ length: CROP_CELLS_HIGH }, (_, row) =>
     topology
@@ -587,15 +691,16 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
     createdAt: now,
     updatedAt: now,
     sample: {
-      name: 'Generated Fiorwoods Topology Atlas · seed 44 · cells 2,5–8,10',
+      name: 'Generated Fiorwoods Topology Atlas · seed 44 · cells 2,5–8,14',
       width: SAMPLE_WIDTH,
       height: SAMPLE_HEIGHT,
       tileSize: TILE,
     },
     notes: [
-      'Exact crop of generated maze seed 44: map cells (2,5) through (8,10), using the same wall-placement builder and generated obstacle layout as the game.',
+      'Exact crop of generated maze seed 44: map cells (2,5) through (8,14), using the same wall-placement builder and generated obstacle layout as the game.',
       'Connection letters are N/E/S/W openings. This fixture includes both straights, all four turns, every T-junction orientation, a four-way cross, and every dead-end orientation.',
       'The central hub section includes its editable ground tiles, thick side walls, corrected north-west and north-east corner transitions, sacred tree, tree shadow, and three runestones.',
+      'The portal section is anchored between seed-44 cells (8,13) and (8,14), which both have intact north forest walls. It includes the exact editable clearing, raised stone platform, inactive portal frame, portal hitbox, and two platform-side colliders; the 32px central stairway is the only approach.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',

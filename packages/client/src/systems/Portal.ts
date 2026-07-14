@@ -12,6 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Sprite, Container, Texture } from 'pixi.js';
+import { PORTAL_RENDER_Z_OFFSET, PORTAL_VISUAL_OFFSET_X } from './PortalPlatformLayout';
 
 type PortalPhase = 'inactive' | 'activation' | 'active';
 
@@ -38,7 +39,7 @@ export class Portal {
    * @param y                World pixel Y (center of cell)
    * @param frames           All portal textures (activation first, then active idle)
    * @param activationCount  How many frames are activation (the rest are active idle)
-   * @param parent           Container to add the sprite to (entityLayer)
+   * @param parent           Y-sorted entity container shared with player characters
    * @param active           Whether the portal should start already lit
    */
   constructor(
@@ -58,11 +59,12 @@ export class Portal {
     const initialFrame = active ? frames[activationCount] : frames[0];
     this.sprite = new Sprite(initialFrame);
     this.sprite.anchor.set(0.5, 0.5);
-    this.sprite.x = x;
+    this.sprite.x = x + PORTAL_VISUAL_OFFSET_X;
     this.sprite.y = y;
 
-    // Portal should Y-sort with other entities
-    this.sprite.zIndex = Math.round(y) + 1;
+    // The platform collision keeps player feet at least 20 px below the portal
+    // origin, so this offset sorts the entire arch behind players on the platform.
+    this.sprite.zIndex = Math.round(y) + PORTAL_RENDER_Z_OFFSET;
 
     parent.addChild(this.sprite);
   }

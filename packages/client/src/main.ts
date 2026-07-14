@@ -60,6 +60,7 @@ import {
   type PressurePlateSpriteData,
 } from './systems/TilemapRenderer';
 import { Portal } from './systems/Portal';
+import { PortalPlatform } from './systems/PortalPlatform';
 import { WisdomOrbHud } from './systems/WisdomOrbHud';
 import { WisdomArrow } from './systems/WisdomArrow';
 import { IntroDialogueHud } from './systems/IntroDialogueHud';
@@ -183,6 +184,9 @@ let interactPrompt: Text | null = null;
 
 /** Portal instance, present from the beginning and lit after rune activation. */
 let portal: Portal | null = null;
+
+/** Raised portal clearing and stair platform, present with the inactive portal. */
+let portalPlatform: PortalPlatform | null = null;
 
 /** Top-left HUD showing remaining wisdom orbs. */
 let wisdomOrbHud: WisdomOrbHud | null = null;
@@ -1143,6 +1147,8 @@ async function main(): Promise<void> {
       gateSlideStates.clear();
       portal?.destroy();
       portal = null;
+      portalPlatform?.destroy();
+      portalPlatform = null;
       pendingPortalPos = null;
       shakeTimeRemaining = 0;
       cinematicPhase = 'idle';
@@ -1238,6 +1244,13 @@ async function main(): Promise<void> {
       // ── Initial portal sync ────────────────────────────────────────
       if (gameState.portal) {
         const portalAlreadyActive = gameState.runestones.every((rs) => rs.activated);
+        portalPlatform = new PortalPlatform(
+          gameState.portal.x,
+          gameState.portal.y,
+          assets.portalPlatformTextures,
+          tilemapRenderer.groundDetailLayer,
+          entityLayer,
+        );
         portal = new Portal(
           gameState.portal.x,
           gameState.portal.y,
@@ -1721,6 +1734,15 @@ async function main(): Promise<void> {
 
       // When shake ends, light the portal and move the camera to it.
       if (shakeTimeRemaining <= 0 && pendingPortalPos) {
+        if (!portalPlatform && tilemapRenderer) {
+          portalPlatform = new PortalPlatform(
+            pendingPortalPos.x,
+            pendingPortalPos.y,
+            assets.portalPlatformTextures,
+            tilemapRenderer.groundDetailLayer,
+            entityLayer,
+          );
+        }
         if (!portal) {
           portal = new Portal(
             pendingPortalPos.x,

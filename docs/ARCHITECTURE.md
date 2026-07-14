@@ -124,13 +124,13 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Both client and server use the same feet-based collision logic.
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
-- Collision respects the portal from the beginning of the match.
+- Collision respects the portal from the beginning of the match. The raised platform adds solid left and right sides around a 32px central opening, so players can only approach through the stairs.
 
 ### Runestones and Portal Flow
 
 - The generated map contains exactly three runestone tiles inside the hub area.
 - The server validates runestone activation by proximity before accepting a request.
-- During room creation, the server computes one portal position farther from the hub than player spawns, so the inactive portal is present from the beginning.
+- During room creation, the server computes one portal position farther from the hub than player spawns. It is centered at the wall between two vertically adjacent 6×6 cells, and both cells must retain their north forest walls.
 - When all three runestones are active, the server broadcasts the existing portal position and the client plays its light-up animation.
 - Wisdom orbs switch from hub guidance to portal guidance only after the portal is activated.
 - The portal is a world entity, not a tilemap tile.
@@ -248,6 +248,7 @@ The loader attempts to load authored PNG assets first and falls back to generate
 - `assets/player_2.png`
 - `assets/runestones.png`
 - `assets/portal_spritesheet.png`
+- `assets/portal-platform/` (the authored Tormund masonry modules used by the portal stairs and platform)
 - `assets/wisdom_orb.png`
 - `assets/expand_button.png`
 - `assets/contract_button.png`
@@ -329,6 +330,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - chunked tilemap rendering, world decorations, runestone sprites
 - `packages/client/src/systems/Portal.ts`
   - animated portal world entity
+- `packages/client/src/systems/PortalPlatform.ts`
+  - authored portal clearing, raised stone platform, and stairs
 - `packages/client/src/systems/Minimap.ts`
   - minimap HUD
 - `packages/client/src/systems/WisdomOrbHud.ts`

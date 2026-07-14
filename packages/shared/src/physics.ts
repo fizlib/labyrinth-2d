@@ -27,6 +27,12 @@ export interface PortalCollider {
 export const PORTAL_HITBOX_W = 28;
 export const PORTAL_HITBOX_H = 16;
 
+/** Raised platform sides; the 32px gap between them is the staircase. */
+export const PORTAL_PLATFORM_SIDE_WIDTH = 24;
+export const PORTAL_PLATFORM_STAIR_WIDTH = 32;
+export const PORTAL_PLATFORM_COLLIDER_TOP_OFFSET = 12;
+export const PORTAL_PLATFORM_COLLIDER_HEIGHT = 64;
+
 export interface PortalBounds {
   left: number;
   top: number;
@@ -47,6 +53,26 @@ export function getPortalBounds(portal: PortalCollider): PortalBounds {
     right: left + PORTAL_HITBOX_W - 1,
     bottom: top + PORTAL_HITBOX_H - 1,
   };
+}
+
+/** Solid side walls around the portal platform, leaving only the stairs open. */
+export function getPortalPlatformBounds(portal: PortalCollider): PortalBounds[] {
+  const stairLeft = portal.x - PORTAL_PLATFORM_STAIR_WIDTH / 2;
+  const top = portal.y + PORTAL_PLATFORM_COLLIDER_TOP_OFFSET;
+  return [
+    {
+      left: stairLeft - PORTAL_PLATFORM_SIDE_WIDTH,
+      top,
+      right: stairLeft - 1,
+      bottom: top + PORTAL_PLATFORM_COLLIDER_HEIGHT - 1,
+    },
+    {
+      left: stairLeft + PORTAL_PLATFORM_STAIR_WIDTH,
+      top,
+      right: stairLeft + PORTAL_PLATFORM_STAIR_WIDTH + PORTAL_PLATFORM_SIDE_WIDTH - 1,
+      bottom: top + PORTAL_PLATFORM_COLLIDER_HEIGHT - 1,
+    },
+  ];
 }
 
 export function applyInput(
@@ -100,17 +126,18 @@ export function isPositionValid(
     }
   }
 
-  // Check portal collision (dynamic entity, AABB overlap test)
+  // Check portal and raised-platform collision (dynamic AABB overlap tests)
   if (portal) {
-    const bounds = getPortalBounds(portal);
-
-    if (
-      left <= bounds.right &&
-      right >= bounds.left &&
-      top <= bounds.bottom &&
-      bottom >= bounds.top
-    ) {
-      return false;
+    const collisionBounds = [getPortalBounds(portal), ...getPortalPlatformBounds(portal)];
+    for (const bounds of collisionBounds) {
+      if (
+        left <= bounds.right &&
+        right >= bounds.left &&
+        top <= bounds.bottom &&
+        bottom >= bounds.top
+      ) {
+        return false;
+      }
     }
   }
 

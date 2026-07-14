@@ -22,7 +22,7 @@ import {
   type StyleEditorDocumentV1,
 } from './types';
 
-const STORAGE_KEY = 'labyrinth-style-editor-v1-topology-atlas-r14';
+const STORAGE_KEY = 'labyrinth-style-editor-v1-topology-atlas-r17';
 const STORAGE_ARCHIVE_PREFIX = 'zip-base64:';
 const PAGE_SIZE = 200;
 const HISTORY_LIMIT = 20;
@@ -312,14 +312,27 @@ async function rebuildScene(): Promise<void> {
   renderLayers();
 }
 
+/** Draw a collider inside its editable bounding box. Legacy colliders are rectangles. */
+function drawColliderShape(graphic: Graphics, collider: EditorCollider): Graphics {
+  if (collider.shape !== 'right-triangle') {
+    return graphic.rect(collider.x, collider.y, collider.width, collider.height);
+  }
+
+  const point = (xRatio: number, yRatio: number): [number, number] => [
+    collider.x + (collider.flipX ? 1 - xRatio : xRatio) * collider.width,
+    collider.y + (collider.flipY ? 1 - yRatio : yRatio) * collider.height,
+  ];
+  const [top, bottomLeft, bottomRight] = [point(0, 0), point(0, 1), point(1, 1)];
+  return graphic.poly([...top, ...bottomLeft, ...bottomRight], true);
+}
+
 function rebuildColliders(): void {
   for (const child of colliderLayer.removeChildren()) child.destroy();
   colliderGraphicById.clear();
   for (const collider of documentState.colliders) {
     if (!collider.enabled) continue;
     const selected = selectedColliderIds.has(collider.id);
-    const graphic = new Graphics()
-      .rect(collider.x, collider.y, collider.width, collider.height)
+    const graphic = drawColliderShape(new Graphics(), collider)
       .fill({ color: selected ? 0xff9f2f : 0xff2222, alpha: selected ? 0.12 : 0.035 })
       .stroke({ color: selected ? 0xffa73d : 0xff3333, width: selected ? 2 : 1 });
     graphic.eventMode = 'static';
@@ -399,7 +412,7 @@ function updateSelectionOverlay(): void {
       selectionFrame.rect(el.x, el.y, el.width, el.height).stroke({ color: 0xffdf68, width: 0.5, alpha: 0.35 });
     }
     for (const col of colliders) {
-      selectionFrame.rect(col.x, col.y, col.width, col.height).stroke({ color: 0xffa73d, width: 0.5, alpha: 0.35 });
+      drawColliderShape(selectionFrame, col).stroke({ color: 0xffa73d, width: 0.5, alpha: 0.35 });
     }
   }
 
@@ -417,7 +430,7 @@ function updateSelectionOverlay(): void {
   } else {
     const collider = colliders[0];
     resizeHandle.position.set(collider.x + collider.width, collider.y + collider.height);
-    selectionLabel.text = `Collider ${Math.round(collider.width)}×${Math.round(collider.height)} px`;
+    selectionLabel.text = `${collider.shape === 'right-triangle' ? 'Right triangle' : 'Collider'} ${Math.round(collider.width)}×${Math.round(collider.height)} px`;
     selectionLabel.position.set(collider.x, Math.max(0, collider.y - 18));
     resizeHandle.visible = selectionLabel.visible = selectionFrame.visible = true;
   }
@@ -679,7 +692,8 @@ function addColliderAt(point: { x: number; y: number }): void {
   const owner = selectedElement();
   const collider: EditorCollider = {
     id: createEditorId(), name: 'New collider', ownerId: owner?.id ?? null,
-    ownerRole: owner?.role ?? 'freeform', x: snap(point.x, 16), y: snap(point.y, 16), width: 16, height: 16, enabled: true,
+    ownerRole: owner?.role ?? 'freeform', x: snap(point.x, 16), y: snap(point.y, 16), width: 16, height: 16,
+    shape: 'rectangle', flipX: false, flipY: false, enabled: true,
   };
   documentState.colliders.push(collider);
   setSelection(null, collider.id);
@@ -849,7 +863,11 @@ function renderInspector(): void {
   if (isMulti) {
     selectionKind.textContent = `${totalSelected} items selected`;
   } else {
-    selectionKind.textContent = element ? element.role : collider ? 'Collider' : 'Nothing selected';
+    selectionKind.textContent = element
+      ? element.role
+      : collider
+        ? collider.shape === 'right-triangle' ? 'Right triangle collider' : 'Collider'
+        : 'Nothing selected';
   }
 
   if (element && !isMulti) {
@@ -874,6 +892,12 @@ function renderInspector(): void {
     required<HTMLInputElement>('collider-y').value = String(Math.round(collider.y));
     required<HTMLInputElement>('collider-width').value = String(Math.round(collider.width));
     required<HTMLInputElement>('collider-height').value = String(Math.round(collider.height));
+    const colliderShape = collider.shape ?? 'rectangle';
+    required<HTMLSelectElement>('collider-shape').value = colliderShape;
+    required<HTMLInputElement>('collider-flip-x').checked = collider.flipX ?? false;
+    required<HTMLInputElement>('collider-flip-x').disabled = colliderShape !== 'right-triangle';
+    required<HTMLInputElement>('collider-flip-y').checked = collider.flipY ?? false;
+    required<HTMLInputElement>('collider-flip-y').disabled = colliderShape !== 'right-triangle';
     required<HTMLInputElement>('collider-enabled').checked = collider.enabled;
   }
 }
@@ -995,6 +1019,18 @@ function bindElementInspector(): void {
     const collider = selectedCollider(); if (!collider) return;
     collider.ownerRole = (event.currentTarget as HTMLInputElement).value as EditorCollider['ownerRole']; commitHistory();
   });
+  required<HTMLSelectElement>('collider-shape').addEventListener('change', (event) => {
+    const collider = selectedCollider(); if (!collider) return;
+    collider.shape = (event.currentTarget as HTMLSelectElement).value as EditorCollider['shape'];
+    rebuildColliders(); updateSelectionOverlay(); renderInspector(); commitHistory();
+  });
+  for (const [inputId, key] of [['collider-flip-x', 'flipX'], ['collider-flip-y', 'flipY']] as const) {
+    required<HTMLInputElement>(inputId).addEventListener('change', (event) => {
+      const collider = selectedCollider(); if (!collider) return;
+      collider[key] = (event.currentTarget as HTMLInputElement).checked;
+      rebuildColliders(); updateSelectionOverlay(); commitHistory();
+    });
+  }
   required<HTMLInputElement>('collider-enabled').addEventListener('change', (event) => {
     const collider = selectedCollider(); if (!collider) return;
     collider.enabled = (event.currentTarget as HTMLInputElement).checked; rebuildColliders(); commitHistory();
