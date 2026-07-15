@@ -645,10 +645,10 @@ export async function loadAssets(): Promise<GameAssets> {
   // remain index 0 so the first player always receives the default character.
   const PLAYER_CHARACTERS = [
     { id: 'lenne', displayName: 'Lenne', lyingFrame: 51, squadVariants: SQUAD_COLORS },
-    { id: 'glenn', displayName: 'Glenn', lyingFrame: 55, squadVariants: [] },
-    { id: 'amalia', displayName: 'Amalia', lyingFrame: 48, squadVariants: [] },
-    { id: 'robb', displayName: 'Robb', lyingFrame: 55, squadVariants: [] },
-    { id: 'sienna', displayName: 'Sienna', lyingFrame: 50, squadVariants: [] },
+    { id: 'glenn', displayName: 'Glenn', lyingFrame: 55, squadVariants: SQUAD_COLORS },
+    { id: 'amalia', displayName: 'Amalia', lyingFrame: 48, squadVariants: SQUAD_COLORS },
+    { id: 'robb', displayName: 'Robb', lyingFrame: 55, squadVariants: SQUAD_COLORS },
+    { id: 'sienna', displayName: 'Sienna', lyingFrame: 50, squadVariants: SQUAD_COLORS },
   ] as const;
 
   // The source pack supplies individually cropped frames. Five right-facing
