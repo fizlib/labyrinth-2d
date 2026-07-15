@@ -56,6 +56,8 @@ const PORTAL_SHEET = '/assets/portal_spritesheet.png';
 const PORTAL_FRAME_SIZE = 48;
 const PORTAL_SAMPLE_CELL_X = 8;
 const PORTAL_SAMPLE_CELL_Y = 14;
+const PORTAL_TERRAIN_Z = 1;
+const FOREST_UNDERLAY_Z = 2;
 const PORTAL_PLATFORM_STRUCTURE_Z = 240000;
 const PORTAL_Z = 240002;
 const HUB_TREE = `${FOREST_ROOT}/tree_primary_02.png`;
@@ -338,7 +340,7 @@ function addGroundElements(layout: GeneratedMazeLayout, elements: EditorElement[
         sampleY * TILE,
         TILE,
         TILE,
-        0,
+        forest ? FOREST_UNDERLAY_Z : 0,
       ));
     }
   }
@@ -529,7 +531,7 @@ function addPortalCellElements(
       centerY + spec.y,
       spec.w,
       spec.h,
-      1,
+      PORTAL_TERRAIN_Z,
     ));
   }
 

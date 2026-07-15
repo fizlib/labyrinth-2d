@@ -5,6 +5,7 @@
 // Strategy:
 //   - Background (grass/dirt): baked into 32×32 2D chunks
 //   - Shadow overlays:         baked into 32×32 2D chunks
+//   - Forest underlays:        baked above portal terrain to clip the clearing
 //   - Wall tiles:              baked into 32×1 row chunks (preserves Y-sorting)
 //   - Trees / runestones:      individual sprites (Y-sorted in entity layer)
 //
@@ -315,6 +316,10 @@ export class TilemapRenderer {
   readonly backgroundLayer: Container;
   /** Shadow overlay chunks. Attach after backgroundLayer. */
   readonly shadowLayer: Container;
+  /** Portal clearing terrain. Attach below solid forest underlays. */
+  readonly portalTerrainLayer: Container;
+  /** Solid forest ground. Attach above portal terrain, below authored details. */
+  readonly forestUnderlayLayer: Container;
   /** Authored ground-edge modules. Attach below entities, above terrain. */
   readonly groundDetailLayer: Container;
 
@@ -349,6 +354,9 @@ export class TilemapRenderer {
 
     this.backgroundLayer = new Container();
     this.shadowLayer = new Container();
+    this.portalTerrainLayer = new Container();
+    this.portalTerrainLayer.sortableChildren = true;
+    this.forestUnderlayLayer = new Container();
     this.groundDetailLayer = new Container();
     this.groundDetailLayer.sortableChildren = true;
 
@@ -371,6 +379,9 @@ export class TilemapRenderer {
         let shadowHasContent = false;
         let shadowChunkTopOverflow = 0;
 
+        const forestUnderlayChunk = new Container();
+        let forestUnderlayHasContent = false;
+
         for (let y = startY; y < endY; y++) {
           for (let x = startX; x < endX; x++) {
             const tileId = map.data[y * map.width + x];
@@ -379,6 +390,7 @@ export class TilemapRenderer {
 
             // ── Background tile ──────────────────────────────────
             if (usesGroundBackgroundTile(tileId)) {
+              const forestTile = isForestWallTileId(tileId);
               const underlayAssetId = getForestGroundUnderlayAssetId(x, y, map);
               const underlayTexture = underlayAssetId === null
                 ? undefined
@@ -390,15 +402,35 @@ export class TilemapRenderer {
                 underlay.width = ts;
                 underlay.height = ts;
                 bgChunk.addChild(underlay);
+
+                if (forestTile) {
+                  const forestUnderlay = new Sprite(underlayTexture);
+                  forestUnderlay.x = localX;
+                  forestUnderlay.y = localY;
+                  forestUnderlay.width = ts;
+                  forestUnderlay.height = ts;
+                  forestUnderlayChunk.addChild(forestUnderlay);
+                }
               }
 
-              const sprite = new Sprite(getGroundTexture(x, y, dirtMask, map, assets));
+              const groundTexture = getGroundTexture(x, y, dirtMask, map, assets);
+              const sprite = new Sprite(groundTexture);
               sprite.x = localX;
               sprite.y = localY;
               sprite.width = ts;
               sprite.height = ts;
               bgChunk.addChild(sprite);
               bgHasContent = true;
+
+              if (forestTile) {
+                const forestUnderlay = new Sprite(groundTexture);
+                forestUnderlay.x = localX;
+                forestUnderlay.y = localY;
+                forestUnderlay.width = ts;
+                forestUnderlay.height = ts;
+                forestUnderlayChunk.addChild(forestUnderlay);
+                forestUnderlayHasContent = true;
+              }
             }
 
             // ── Shadow overlay ───────────────────────────────────
@@ -473,6 +505,37 @@ export class TilemapRenderer {
           });
 
           bgChunk.destroy({ children: true }); // Free memory!
+        }
+
+        // Re-bake solid forest ground into its own layer so portal clearing
+        // terrain cannot spill across wall tiles. Authored forest details are
+        // attached later and remain above this occlusion layer.
+        if (forestUnderlayHasContent) {
+          const texture = renderer.generateTexture({
+            target: forestUnderlayChunk,
+            frame: chunkFrame,
+            resolution: 1,
+            antialias: false,
+          });
+          texture.source.style.scaleMode = 'nearest';
+          texture.source.style.update();
+
+          const forestUnderlaySprite = new Sprite(texture);
+          forestUnderlaySprite.x = startX * ts;
+          forestUnderlaySprite.y = startY * ts;
+          this.forestUnderlayLayer.addChild(forestUnderlaySprite);
+          this.allChunks.push({
+            container: forestUnderlaySprite,
+            worldLeft: startX * ts,
+            worldTop: startY * ts,
+            worldRight: endX * ts,
+            worldBottom: endY * ts,
+            isVisible: true,
+          });
+
+          forestUnderlayChunk.destroy({ children: true });
+        } else {
+          forestUnderlayChunk.destroy({ children: true });
         }
 
         // Bake and register shadow chunk
@@ -765,6 +828,8 @@ export class TilemapRenderer {
   destroy(): void {
     this.backgroundLayer.destroy({ children: true });
     this.shadowLayer.destroy({ children: true });
+    this.portalTerrainLayer.destroy({ children: true });
+    this.forestUnderlayLayer.destroy({ children: true });
     this.groundDetailLayer.destroy({ children: true });
 
     for (const chunk of this.wallRowChunks) {

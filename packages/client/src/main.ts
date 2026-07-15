@@ -1180,6 +1180,8 @@ async function main(): Promise<void> {
       worldContainer.removeChild(forestWallLayer);
       worldContainer.addChild(tilemapRenderer.backgroundLayer);
       worldContainer.addChild(tilemapRenderer.shadowLayer);
+      worldContainer.addChild(tilemapRenderer.portalTerrainLayer);
+      worldContainer.addChild(tilemapRenderer.forestUnderlayLayer);
       worldContainer.addChild(tilemapRenderer.groundDetailLayer);
       worldContainer.addChild(entityLayer);
       worldContainer.addChild(forestWallLayer);
@@ -1248,7 +1250,7 @@ async function main(): Promise<void> {
           gameState.portal.x,
           gameState.portal.y,
           assets.portalPlatformTextures,
-          tilemapRenderer.groundDetailLayer,
+          tilemapRenderer.portalTerrainLayer,
           entityLayer,
         );
         portal = new Portal(
@@ -1739,7 +1741,7 @@ async function main(): Promise<void> {
             pendingPortalPos.x,
             pendingPortalPos.y,
             assets.portalPlatformTextures,
-            tilemapRenderer.groundDetailLayer,
+            tilemapRenderer.portalTerrainLayer,
             entityLayer,
           );
         }
