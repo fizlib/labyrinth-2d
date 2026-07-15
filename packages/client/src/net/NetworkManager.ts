@@ -85,7 +85,11 @@ export class NetworkManager {
 
   // ── Connection ──────────────────────────────────────────────────────────
 
-  connect(url: string, roomId: string = DEFAULT_ROOM_ID, displayName: string = 'Player'): void {
+  connect(
+    url: string,
+    roomId: string = DEFAULT_ROOM_ID,
+    displayName: string = 'Player',
+  ): void {
     if (this.ws) {
       console.warn('[Net] Already connected — disconnect first.');
       return;
@@ -301,7 +305,10 @@ export class NetworkManager {
   sendDebugPlayerAction(
     targetPlayerId: string,
     action: DebugPlayerAction,
-    options: Pick<DebugPlayerActionMessage, 'spriteIndex' | 'dead' | 'role'> = {},
+    options: Pick<
+      DebugPlayerActionMessage,
+      'spriteIndex' | 'teamId' | 'dead' | 'role'
+    > = {},
   ): void {
     const msg: DebugPlayerActionMessage = {
       type: MessageType.DebugPlayerAction,

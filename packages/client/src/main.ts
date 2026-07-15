@@ -30,6 +30,7 @@ import {
   GRID_CELLS,
   SPAWN_DISTANCE,
   PLAYER_CHARACTER_NAMES,
+  SQUAD_COLORS,
   FEET_HITBOX_W,
   FEET_HITBOX_H,
   generateMazeLayout,
@@ -426,6 +427,7 @@ interface DebugUiDom {
   playerActionName: HTMLElement;
   playerActionMeta: HTMLSpanElement;
   playerSkinSelect: HTMLSelectElement;
+  playerSquadSelect: HTMLSelectElement;
   playerRoleSelect: HTMLSelectElement;
   teleportToButton: HTMLButtonElement;
   teleportHereButton: HTMLButtonElement;
@@ -447,6 +449,11 @@ function escapeHtml(value: string): string {
     "'": '&#39;',
   };
   return value.replace(/[&<>"']/g, (character) => replacements[character]);
+}
+
+function getSquadDisplayName(teamId: number): string {
+  const color = SQUAD_COLORS[teamId];
+  return color ? `${color[0].toUpperCase()}${color.slice(1)}` : `Squad ${teamId + 1}`;
 }
 
 function createDebugUI(): DebugUiDom {
@@ -496,6 +503,12 @@ function createDebugUI(): DebugUiDom {
             <span>Character skin</span>
             <select id="debug-player-skin-select">
               ${PLAYER_CHARACTER_NAMES.map((name, index) => `<option value="${index}">${name}</option>`).join('')}
+            </select>
+          </label>
+          <label class="debug-player-select-control">
+            <span>Squad</span>
+            <select id="debug-player-squad-select">
+              ${SQUAD_COLORS.map((_, index) => `<option value="${index}">${getSquadDisplayName(index)}</option>`).join('')}
             </select>
           </label>
           <label class="debug-player-select-control">
@@ -554,6 +567,9 @@ function createDebugUI(): DebugUiDom {
   const playerSkinSelect = debugDiv.querySelector<HTMLSelectElement>(
     '#debug-player-skin-select',
   );
+  const playerSquadSelect = debugDiv.querySelector<HTMLSelectElement>(
+    '#debug-player-squad-select',
+  );
   const playerRoleSelect = debugDiv.querySelector<HTMLSelectElement>(
     '#debug-player-role-select',
   );
@@ -574,6 +590,7 @@ function createDebugUI(): DebugUiDom {
     !playerActionName ||
     !playerActionMeta ||
     !playerSkinSelect ||
+    !playerSquadSelect ||
     !playerRoleSelect ||
     !teleportToButton ||
     !teleportHereButton ||
@@ -598,6 +615,7 @@ function createDebugUI(): DebugUiDom {
     playerActionName,
     playerActionMeta,
     playerSkinSelect,
+    playerSquadSelect,
     playerRoleSelect,
     teleportToButton,
     teleportHereButton,
@@ -645,11 +663,13 @@ function renderDebugPlayerActions(
 
   const skinName =
     PLAYER_CHARACTER_NAMES[player.spriteIndex] ?? `Skin ${player.spriteIndex}`;
+  const squadName = getSquadDisplayName(player.teamId);
   const isLocalPlayer = player.id === localPlayerId;
   debugUi.playerActions.hidden = false;
   debugUi.playerActionName.textContent = player.displayName;
-  debugUi.playerActionMeta.textContent = `${skinName} · ${player.isDead ? 'dead' : 'alive'}`;
+  debugUi.playerActionMeta.textContent = `${skinName} · ${squadName} squad · ${player.isDead ? 'dead' : 'alive'}`;
   debugUi.playerSkinSelect.value = String(player.spriteIndex);
+  debugUi.playerSquadSelect.value = String(player.teamId);
   const role = debugPlayerRoles.get(player.id);
   debugUi.playerRoleSelect.value = role ?? '';
   debugUi.playerRoleSelect.disabled = role === undefined;
@@ -724,6 +744,14 @@ function setupDebugPlayerActions(
     }
   });
 
+  debugUi.playerSquadSelect.addEventListener('change', () => {
+    if (!selectedDebugPlayerId) return;
+    const teamId = Number.parseInt(debugUi.playerSquadSelect.value, 10);
+    if (Number.isInteger(teamId) && teamId >= 0 && teamId < SQUAD_COLORS.length) {
+      net.sendDebugPlayerAction(selectedDebugPlayerId, 'set-squad', { teamId });
+    }
+  });
+
   debugUi.playerRoleSelect.addEventListener('change', () => {
     if (!selectedDebugPlayerId) return;
     const role = debugUi.playerRoleSelect.value;
@@ -760,7 +788,8 @@ function updateDebugUI(
       const isSelected = p.id === selectedDebugPlayerId ? ' selected' : '';
       const deadBadge = p.isDead ? '<span class="dead-badge">dead</span>' : '';
       const skinName = PLAYER_CHARACTER_NAMES[p.spriteIndex] ?? `Skin ${p.spriteIndex}`;
-      return `<li><button type="button" class="debug-player-row${isSelected}" data-debug-player-id="${escapeHtml(p.id)}"><span class="player-name">${escapeHtml(p.displayName)}</span><span class="player-pos">${escapeHtml(skinName)} · (${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${deadBadge}${isYou}</button></li>`;
+      const squadName = getSquadDisplayName(p.teamId);
+      return `<li><button type="button" class="debug-player-row${isSelected}" data-debug-player-id="${escapeHtml(p.id)}"><span class="player-name">${escapeHtml(p.displayName)}</span><span class="player-pos">${escapeHtml(skinName)} · ${escapeHtml(squadName)} squad · (${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${deadBadge}${isYou}</button></li>`;
     })
     .join('');
 
@@ -1050,17 +1079,25 @@ async function main(): Promise<void> {
     sprite: AnimatedSprite;
     currentAnimKey: string;
     spriteIndex: number;
+    teamId: number;
   }
 
   const playerSprites: Map<string, PlayerSpriteData> = new Map();
 
   /** Safely resolve animation set for a player sprite, falling back to set 0. */
-  function getAnimSet(spriteIndex: number) {
-    return assets.playerAnimationSets[spriteIndex] ?? assets.playerAnimationSets[0];
+  function getAnimSet(spriteIndex: number, teamId: number) {
+    const variants =
+      assets.playerAnimationSets[spriteIndex] ?? assets.playerAnimationSets[0];
+    const squadColor = SQUAD_COLORS[teamId];
+    return (squadColor ? variants.squads[squadColor] : undefined) ?? variants.default;
   }
 
-  function createPlayerSprite(playerId: string, spriteIndex: number): PlayerSpriteData {
-    const animSet = getAnimSet(spriteIndex);
+  function createPlayerSprite(
+    playerId: string,
+    spriteIndex: number,
+    teamId: number,
+  ): PlayerSpriteData {
+    const animSet = getAnimSet(spriteIndex, teamId);
     const animKey = 'idle-down';
     const frames = animSet.animations[animKey];
     const sprite = new AnimatedSprite(frames);
@@ -1085,16 +1122,22 @@ async function main(): Promise<void> {
       sprite,
       currentAnimKey: animKey,
       spriteIndex,
+      teamId,
     };
     playerSprites.set(playerId, data);
     return data;
   }
 
-  function ensurePlayerSprite(playerId: string, spriteIndex: number): PlayerSpriteData {
+  function ensurePlayerSprite(
+    playerId: string,
+    spriteIndex: number,
+    teamId: number,
+  ): PlayerSpriteData {
     let data = playerSprites.get(playerId);
-    if (!data) data = createPlayerSprite(playerId, spriteIndex);
-    else if (data.spriteIndex !== spriteIndex) {
+    if (!data) data = createPlayerSprite(playerId, spriteIndex, teamId);
+    else if (data.spriteIndex !== spriteIndex || data.teamId !== teamId) {
       data.spriteIndex = spriteIndex;
+      data.teamId = teamId;
       data.currentAnimKey = '';
       setPlayerAnimation(data, 'idle-down');
     }
@@ -1104,7 +1147,7 @@ async function main(): Promise<void> {
   function setPlayerAnimation(data: PlayerSpriteData, animKey: string): void {
     data.shadow.visible = animKey !== 'lying';
     if (data.currentAnimKey === animKey) return;
-    const animSet = getAnimSet(data.spriteIndex);
+    const animSet = getAnimSet(data.spriteIndex, data.teamId);
     const frames = animSet.animations[animKey];
     if (!frames) return;
     data.sprite.textures = frames;
@@ -1340,7 +1383,7 @@ async function main(): Promise<void> {
 
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
-        const data = ensurePlayerSprite(player.id, player.spriteIndex);
+        const data = ensurePlayerSprite(player.id, player.spriteIndex, player.teamId);
         setPlayerAnimation(
           data,
           getAnimationKey(player.facing, player.isMoving, player.isDead),
@@ -1364,7 +1407,11 @@ async function main(): Promise<void> {
 
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
-        const data = ensurePlayerSprite(localPlayerData.id, localPlayerData.spriteIndex);
+        const data = ensurePlayerSprite(
+          localPlayerData.id,
+          localPlayerData.spriteIndex,
+          localPlayerData.teamId,
+        );
 
         if (!debugTeleportActive) {
           // Compute reconciled position from server state + pending input replay
@@ -1411,7 +1458,7 @@ async function main(): Promise<void> {
       for (const player of gameState.players) {
         if (player.id !== localPlayerId) {
           knownRemotePlayers.add(player.id);
-          ensurePlayerSprite(player.id, player.spriteIndex);
+          ensurePlayerSprite(player.id, player.spriteIndex, player.teamId);
         }
       }
 
@@ -1558,10 +1605,15 @@ async function main(): Promise<void> {
 
     if (!localPlayerInitialized || !tilemapRenderer) return;
 
+    const localTeamId = latestServerState?.players.find(
+      (player) => player.id === net.playerId,
+    )?.teamId;
+    if (localTeamId === undefined) return;
+
     const INTERACT_RANGE = 28;
     const INTERACT_RANGE_SQ = INTERACT_RANGE * INTERACT_RANGE;
     for (const rs of tilemapRenderer.runestoneSprites) {
-      if (rs.activated) continue;
+      if (rs.activated || rs.index !== localTeamId) continue;
       const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
       const rsCenterY = (rs.tileY + 1) * TILE_SIZE;
       const dx = localX - rsCenterX;
@@ -1813,9 +1865,12 @@ async function main(): Promise<void> {
       let nearestDistSq = Infinity;
       const INTERACT_RANGE = 28; // ~1.75 tiles in pixels
       const INTERACT_RANGE_SQ = INTERACT_RANGE * INTERACT_RANGE;
+      const localTeamId = latestServerState?.players.find(
+        (player) => player.id === net.playerId,
+      )?.teamId;
 
       for (const rs of tilemapRenderer.runestoneSprites) {
-        if (rs.activated) continue;
+        if (rs.activated || rs.index !== localTeamId) continue;
         const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
         const rsCenterY = (rs.tileY + 1) * TILE_SIZE;
         const dx = localX - rsCenterX;

@@ -88,7 +88,6 @@ export {
   type HubDistanceField,
 } from './navigation.js';
 
-
 // ── Game Constants ──────────────────────────────────────────────────────────
 
 /** Internal rendering resolution width in pixels. */
@@ -103,8 +102,18 @@ export const TILE_SIZE = 16;
 /** Number of players per team. */
 export const PLAYERS_PER_TEAM = 3;
 
-/** Maximum number of teams per room. */
-export const MAX_TEAMS = 3;
+/** Squad colors in team/runestone index order. */
+export const SQUAD_COLORS = ['blue', 'green', 'yellow'] as const;
+
+export type SquadColor = (typeof SQUAD_COLORS)[number];
+
+/** Maximum number of squads per room. */
+export const MAX_TEAMS = SQUAD_COLORS.length;
+
+/** Resolve a public team ID to its assigned squad color. */
+export function getSquadColor(teamId: number): SquadColor | null {
+  return SQUAD_COLORS[teamId] ?? null;
+}
 
 /**
  * Spawn distance from the center hub, measured in maze cell-steps.
@@ -132,7 +141,13 @@ export const DEFAULT_ROOM_ID = 'default';
 export const INITIAL_WISDOM_ORBS = 1;
 
 /** Playable character names in server sprite-index order. */
-export const PLAYER_CHARACTER_NAMES = ['Lenne', 'Glenn', 'Amalia', 'Robb', 'Sienna'] as const;
+export const PLAYER_CHARACTER_NAMES = [
+  'Lenne',
+  'Glenn',
+  'Amalia',
+  'Robb',
+  'Sienna',
+] as const;
 
 /** Number of playable character animation sets. */
 export const PLAYER_CHARACTER_COUNT = PLAYER_CHARACTER_NAMES.length;
@@ -205,6 +220,7 @@ export type DebugPlayerAction =
   | 'teleport-here'
   | 'get-role'
   | 'set-skin'
+  | 'set-squad'
   | 'set-dead'
   | 'set-role';
 
@@ -214,6 +230,8 @@ export interface DebugPlayerActionMessage {
   targetPlayerId: string;
   /** Required for set-skin; ignored by other actions. */
   spriteIndex?: number;
+  /** Required for set-squad; squad/runestone index from 0 through MAX_TEAMS - 1. */
+  teamId?: number;
   /** Required for set-dead; false revives the player. */
   dead?: boolean;
   /** Required for set-role; ignored by other actions. */
@@ -251,6 +269,7 @@ export type PlayerRole = 'survivor' | 'warden';
 export interface PlayerInfo {
   id: string;
   displayName: string;
+  /** Squad index; maps to SQUAD_COLORS and the same-index runestone. */
   teamId: number;
   /** Index into the client's playerAnimationSets array (0-based). */
   spriteIndex: number;
@@ -338,6 +357,8 @@ export interface GateStateChangedMessage {
 export interface RunestoneInfo {
   /** Runestone index (0, 1, or 2). */
   index: number;
+  /** Squad color allowed to activate this runestone. */
+  squadColor: SquadColor;
   /** Tile X coordinate. */
   tileX: number;
   /** Tile Y coordinate. */

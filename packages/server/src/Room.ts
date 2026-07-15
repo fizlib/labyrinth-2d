@@ -16,6 +16,7 @@ import {
   MAX_PLAYERS_PER_ROOM,
   PLAYERS_PER_TEAM,
   MAX_TEAMS,
+  SQUAD_COLORS,
   TILE_SIZE,
   TILE_FLOOR,
   TILE_GATE_HORIZONTAL,
@@ -138,7 +139,13 @@ function findRunestonePositions(map: TileMapData): RunestoneInfo[] {
       const tile = map.data[y * map.width + x];
       const idx = tileTypes.indexOf(tile);
       if (idx !== -1) {
-        runestones.push({ index: idx, tileX: x, tileY: y, activated: false });
+        runestones.push({
+          index: idx,
+          squadColor: SQUAD_COLORS[idx],
+          tileX: x,
+          tileY: y,
+          activated: false,
+        });
       }
     }
   }
@@ -257,9 +264,13 @@ export class Room {
     );
     for (let i = 0; i < this.spawnPoints.length; i++) {
       const sp = this.spawnPoints[i];
-      console.info(`  Team ${i} spawn: tile (${sp.x}, ${sp.y}) → px (${(sp.x + 0.5) * TILE_SIZE}, ${(sp.y + 0.5) * TILE_SIZE})`);
+      console.info(
+        `  ${SQUAD_COLORS[i]} squad spawn: tile (${sp.x}, ${sp.y}) → px (${(sp.x + 0.5) * TILE_SIZE}, ${(sp.y + 0.5) * TILE_SIZE})`,
+      );
     }
-    console.info(`  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}`);
+    console.info(
+      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}`,
+    );
     if (this.portalPosition) {
       console.info(
         `  Portal: (${Math.round(this.portalPosition.x)}, ${Math.round(this.portalPosition.y)})`,
@@ -282,7 +293,7 @@ export class Room {
     const playerId = data.id;
     const displayName = data.displayName;
 
-    // ── Team Assignment ─────────────────────────────────────────────
+    // ── Squad Assignment ────────────────────────────────────────────
     // Fill the first available stable seat so a reconnecting replacement receives
     // the same role as the player who vacated it.
     let assignedTeam = -1;
@@ -303,7 +314,9 @@ export class Room {
 
     // Safety: isFull guards this path before addPlayer is called.
     if (assignedTeam === -1 || assignedTeamSlot === -1) {
-      console.error(`[Room:${this.id}] Could not find an available team seat for ${playerId}`);
+      console.error(
+        `[Room:${this.id}] Could not find an available team seat for ${playerId}`,
+      );
       return;
     }
 
@@ -366,7 +379,7 @@ export class Room {
     this.send(ws, joinMsg);
 
     console.info(
-      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) team ${assignedTeam} seat ${assignedTeamSlot} role ${role} sprite ${spriteIndex} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
+      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) ${SQUAD_COLORS[assignedTeam]} squad seat ${assignedTeamSlot} role ${role} sprite ${spriteIndex} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
     );
 
     if (this.playerCount === 1) {
@@ -417,7 +430,9 @@ export class Room {
     this.clearQueuedInputs(player);
     player.x = msg.x;
     player.y = msg.y;
-    console.info(`[Room:${this.id}] Debug teleport ${playerId} → (${Math.round(msg.x)}, ${Math.round(msg.y)})`);
+    console.info(
+      `[Room:${this.id}] Debug teleport ${playerId} → (${Math.round(msg.x)}, ${Math.round(msg.y)})`,
+    );
   }
 
   /** Debug: apply a player-menu action using authoritative room state. */
@@ -451,13 +466,38 @@ export class Room {
           return;
         }
         target.spriteIndex = msg.spriteIndex;
-        console.info(`[Room:${this.id}] Debug changed ${target.id} skin to ${msg.spriteIndex}`);
+        console.info(
+          `[Room:${this.id}] Debug changed ${target.id} skin to ${msg.spriteIndex}`,
+        );
         break;
+
+      case 'set-squad': {
+        if (
+          typeof msg.teamId !== 'number' ||
+          !Number.isInteger(msg.teamId) ||
+          msg.teamId < 0 ||
+          msg.teamId >= MAX_TEAMS
+        ) {
+          return;
+        }
+
+        const previousTeamId = target.teamId;
+        const swappedPlayer = this.changePlayerSquad(target, msg.teamId);
+        const swapDetail = swappedPlayer
+          ? `; swapped ${swappedPlayer.id} to ${SQUAD_COLORS[previousTeamId]}`
+          : '';
+        console.info(
+          `[Room:${this.id}] Debug changed ${target.id} squad from ${SQUAD_COLORS[previousTeamId]} to ${SQUAD_COLORS[target.teamId]}${swapDetail}`,
+        );
+        break;
+      }
 
       case 'set-dead':
         if (typeof msg.dead !== 'boolean') return;
         target.isDead = msg.dead;
-        console.info(`[Room:${this.id}] Debug marked ${target.id} ${msg.dead ? 'dead' : 'alive'}`);
+        console.info(
+          `[Room:${this.id}] Debug marked ${target.id} ${msg.dead ? 'dead' : 'alive'}`,
+        );
         break;
 
       case 'set-role': {
@@ -479,7 +519,9 @@ export class Room {
 
         this.sendDebugPlayerRole(requester, target);
 
-        console.info(`[Room:${this.id}] Debug changed ${target.id} role to ${target.role}`);
+        console.info(
+          `[Room:${this.id}] Debug changed ${target.id} role to ${target.role}`,
+        );
         break;
       }
     }
@@ -491,11 +533,54 @@ export class Room {
     player.y = y;
   }
 
+  /** Move a player between squads, swapping seats if the destination is full. */
+  private changePlayerSquad(
+    target: RoomPlayerInfo,
+    teamId: number,
+  ): RoomPlayerInfo | null {
+    const previousTeamId = target.teamId;
+    if (previousTeamId === teamId) return null;
+
+    const destinationPlayers = this.state.players.filter(
+      (player) => player.id !== target.id && player.teamId === teamId,
+    );
+    const occupiedSlots = new Set(destinationPlayers.map((player) => player.teamSlot));
+    const availableSlot = Array.from(
+      { length: PLAYERS_PER_TEAM },
+      (_, teamSlot) => teamSlot,
+    ).find((teamSlot) => !occupiedSlots.has(teamSlot));
+
+    if (availableSlot !== undefined) {
+      target.teamId = teamId;
+      target.teamSlot = availableSlot;
+      this.roleSeats[teamId][availableSlot] = target.role;
+      return null;
+    }
+
+    const swappedPlayer =
+      destinationPlayers.find((player) => player.teamSlot === target.teamSlot) ??
+      destinationPlayers[0];
+    if (!swappedPlayer) return null;
+
+    const previousTeamSlot = target.teamSlot;
+    const destinationTeamSlot = swappedPlayer.teamSlot;
+    target.teamId = teamId;
+    target.teamSlot = destinationTeamSlot;
+    swappedPlayer.teamId = previousTeamId;
+    swappedPlayer.teamSlot = previousTeamSlot;
+    this.roleSeats[teamId][destinationTeamSlot] = target.role;
+    this.roleSeats[previousTeamId][previousTeamSlot] = swappedPlayer.role;
+    return swappedPlayer;
+  }
+
   private clearQueuedInputs(player: PlayerInfo): void {
     const queue = this.inputQueues.get(player.id);
     if (queue) {
       for (const input of queue) {
-        player.lastProcessedInput = Math.max(player.lastProcessedInput, input.sequenceNumber);
+        player.lastProcessedInput = Math.max(
+          player.lastProcessedInput,
+          input.sequenceNumber,
+        );
       }
       queue.length = 0;
     }
@@ -524,6 +609,9 @@ export class Room {
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player) return;
 
+    // A runestone belongs to the squad with the matching index/color.
+    if (player.teamId !== rs.index) return;
+
     // Server-side proximity check (anti-cheat)
     const rsPxX = (rs.tileX + 0.5) * TILE_SIZE;
     const rsPxY = (rs.tileY + 1) * TILE_SIZE;
@@ -535,7 +623,7 @@ export class Room {
 
     // Activate!
     rs.activated = true;
-    console.info(`[Room:${this.id}] Runestone ${idx} activated by ${playerId}`);
+    console.info(`[Room:${this.id}] ${rs.squadColor} runestone activated by ${playerId}`);
 
     // Broadcast to all clients immediately
     const activatedMsg: RunestoneActivatedMessage = {
@@ -575,7 +663,9 @@ export class Room {
 
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player) {
-      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: player ${playerId} not found in state (${this.state.players.length} players)`);
+      console.warn(
+        `[Room:${this.id}][WisdomOrb] REJECTED: player ${playerId} not found in state (${this.state.players.length} players)`,
+      );
       return;
     }
     if (player.role === 'warden') {
@@ -583,7 +673,9 @@ export class Room {
       return;
     }
     if (player.wisdomOrbs <= 0) {
-      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: player ${playerId} has 0 orbs remaining`);
+      console.warn(
+        `[Room:${this.id}][WisdomOrb] REJECTED: player ${playerId} has 0 orbs remaining`,
+      );
       return;
     }
 
@@ -592,17 +684,23 @@ export class Room {
       ? this.portalDistanceField
       : this.hubDistanceField;
     if (!activeDistanceField) {
-      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: no distance field available (target=${activeTarget}, portalPos=${JSON.stringify(this.portalPosition)}, portalField=${!!this.portalDistanceField}, hubField=${!!this.hubDistanceField})`);
+      console.warn(
+        `[Room:${this.id}][WisdomOrb] REJECTED: no distance field available (target=${activeTarget}, portalPos=${JSON.stringify(this.portalPosition)}, portalField=${!!this.portalDistanceField}, hubField=${!!this.hubDistanceField})`,
+      );
       return;
     }
 
-    console.info(`[Room:${this.id}][WisdomOrb] Computing direction for player at (${player.x.toFixed(1)}, ${player.y.toFixed(1)}), target=${activeTarget}`);
+    console.info(
+      `[Room:${this.id}][WisdomOrb] Computing direction for player at (${player.x.toFixed(1)}, ${player.y.toFixed(1)}), target=${activeTarget}`,
+    );
     const feetTileX = Math.floor(player.x / this.map.tileSize);
     const feetTileY = Math.floor((player.y - 1) / this.map.tileSize);
     const tileIndex = feetTileY * this.map.width + feetTileX;
     const tileId = this.map.data[tileIndex];
     const tileDist = activeDistanceField.tileDistances[tileIndex];
-    console.info(`[Room:${this.id}][WisdomOrb] Feet tile: (${feetTileX}, ${feetTileY}), tileId=${tileId}, tileDistance=${tileDist}`);
+    console.info(
+      `[Room:${this.id}][WisdomOrb] Feet tile: (${feetTileX}, ${feetTileY}), tileId=${tileId}, tileDistance=${tileDist}`,
+    );
 
     const direction = getNavigationDirectionForPosition(
       player.x,
@@ -611,13 +709,17 @@ export class Room {
       activeDistanceField,
     );
     if (!direction) {
-      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: getNavigationDirectionForPosition returned null for player at (${player.x.toFixed(1)}, ${player.y.toFixed(1)}), tile (${feetTileX}, ${feetTileY}), tileId=${tileId}, tileDistance=${tileDist}`);
+      console.warn(
+        `[Room:${this.id}][WisdomOrb] REJECTED: getNavigationDirectionForPosition returned null for player at (${player.x.toFixed(1)}, ${player.y.toFixed(1)}), tile (${feetTileX}, ${feetTileY}), tileId=${tileId}, tileDistance=${tileDist}`,
+      );
       return;
     }
 
     const ws = this.sockets.get(playerId);
     if (!ws) {
-      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: socket not found for player ${playerId}`);
+      console.warn(
+        `[Room:${this.id}][WisdomOrb] REJECTED: socket not found for player ${playerId}`,
+      );
       return;
     }
 
@@ -684,7 +786,8 @@ export class Room {
 
       // Derive facing & isMoving from the LAST input in the queue
       const lastInput = queue[queue.length - 1];
-      const hasMovement = lastInput.up || lastInput.down || lastInput.left || lastInput.right;
+      const hasMovement =
+        lastInput.up || lastInput.down || lastInput.left || lastInput.right;
       player.isMoving = hasMovement;
 
       if (hasMovement) {
@@ -721,7 +824,15 @@ export class Room {
       const playersOnSpawnPlates = new Set<string>();
       for (const plate of spawnPlates) {
         for (const player of this.state.players) {
-          if (isPlayerOnPlate(player.x, player.y, plate.tileX, plate.tileY, this.map.tileSize)) {
+          if (
+            isPlayerOnPlate(
+              player.x,
+              player.y,
+              plate.tileX,
+              plate.tileY,
+              this.map.tileSize,
+            )
+          ) {
             playersOnSpawnPlates.add(player.id);
           }
         }
@@ -732,7 +843,15 @@ export class Room {
       let hubSideActivated = false;
       for (const plate of hubPlates) {
         for (const player of this.state.players) {
-          if (isPlayerOnPlate(player.x, player.y, plate.tileX, plate.tileY, this.map.tileSize)) {
+          if (
+            isPlayerOnPlate(
+              player.x,
+              player.y,
+              plate.tileX,
+              plate.tileY,
+              this.map.tileSize,
+            )
+          ) {
             hubSideActivated = true;
             break;
           }

@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Assets, Texture, Rectangle } from 'pixi.js';
+import { SQUAD_COLORS, type SquadColor } from '@labyrinth/shared';
 import {
   generateGrassTexture,
   generateDirtTexture,
@@ -91,6 +92,12 @@ export interface PlayerAnimationSet {
   scale: number;
 }
 
+export interface PlayerAnimationVariants {
+  default: PlayerAnimationSet;
+  /** Optional color-specific art, keyed by the player's assigned squad. */
+  squads: Partial<Record<SquadColor, PlayerAnimationSet>>;
+}
+
 function addDiagonalFallbacks(animations: Record<string, Texture[]>): void {
   for (const state of ['idle', 'walk']) {
     animations[`${state}-up-left`] = animations[`${state}-up`];
@@ -158,8 +165,8 @@ export interface GameAssets {
   shadowLeftTexture: Texture;
   /** Shadow overlay for inner corner tiles (below wall AND right of wall). */
   shadowCornerTexture: Texture;
-  /** Per-player animation sets. Index 0 is the default Lenne character. */
-  playerAnimationSets: PlayerAnimationSet[];
+  /** Per-character animation variants. Index 0 is the default Lenne character. */
+  playerAnimationSets: PlayerAnimationVariants[];
   /** Runestone textures: 3 pairs of [inactive, active]. Access via runestoneTextures[index][0|1]. */
   runestoneTextures: [Texture, Texture][];
   /** Portal animation frames (row 1 activation + row 2 active idle, flattened). */
@@ -221,7 +228,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let shadowTopTexture: Texture;
   let shadowLeftTexture: Texture;
   let shadowCornerTexture: Texture;
-  const playerAnimationSets: PlayerAnimationSet[] = [];
+  const playerAnimationSets: PlayerAnimationVariants[] = [];
   let runestoneTextures: [Texture, Texture][] = [];
   let portalFrames: Texture[] = [];
   let portalPlatformTextures = new Map<string, Texture>();
@@ -637,61 +644,76 @@ export async function loadAssets(): Promise<GameAssets> {
   // Keep this order in sync with the server's sprite assignment. Lenne must
   // remain index 0 so the first player always receives the default character.
   const PLAYER_CHARACTERS = [
-    { id: 'lenne', displayName: 'Lenne', lyingFrame: 51 },
-    { id: 'glenn', displayName: 'Glenn', lyingFrame: 55 },
-    { id: 'amalia', displayName: 'Amalia', lyingFrame: 48 },
-    { id: 'robb', displayName: 'Robb', lyingFrame: 55 },
-    { id: 'sienna', displayName: 'Sienna', lyingFrame: 50 },
+    { id: 'lenne', displayName: 'Lenne', lyingFrame: 51, squadVariants: SQUAD_COLORS },
+    { id: 'glenn', displayName: 'Glenn', lyingFrame: 55, squadVariants: [] },
+    { id: 'amalia', displayName: 'Amalia', lyingFrame: 48, squadVariants: [] },
+    { id: 'robb', displayName: 'Robb', lyingFrame: 55, squadVariants: [] },
+    { id: 'sienna', displayName: 'Sienna', lyingFrame: 50, squadVariants: [] },
   ] as const;
 
   // The source pack supplies individually cropped frames. Five right-facing
   // directions cover all eight movement directions by mirroring the left side.
-  for (const character of PLAYER_CHARACTERS) {
-    try {
-      const loadCharacterFrame = async (frame: number): Promise<Texture> => {
-        const texture = await Assets.load<Texture>(
-          `assets/${character.id}/${character.id}_${frame}.png`,
-        );
-        texture.source.scaleMode = 'nearest';
-        return texture;
-      };
+  const loadCharacterAnimationSet = async (
+    character: { id: string; lyingFrame: number },
+    assetDirectory: string,
+  ): Promise<PlayerAnimationSet> => {
+    const loadCharacterFrame = async (frame: number): Promise<Texture> => {
+      const texture = await Assets.load<Texture>(
+        `assets/${assetDirectory}/${character.id}_${frame}.png`,
+      );
+      texture.source.scaleMode = 'nearest';
+      return texture;
+    };
 
-      const [idleFrames, walkFrames, lyingFrame] = await Promise.all([
-        Promise.all([0, 1, 2, 3, 4].map(loadCharacterFrame)),
-        Promise.all(
-          Array.from({ length: 30 }, (_, index) => index + 16).map(loadCharacterFrame),
-        ),
-        loadCharacterFrame(character.lyingFrame),
-      ]);
-      const animations: Record<string, Texture[]> = {
-        'idle-down': [idleFrames[0]],
-        'idle-right': [idleFrames[1]],
-        'idle-up': [idleFrames[2]],
-        'idle-up-right': [idleFrames[3]],
-        'idle-down-right': [idleFrames[4]],
-        'walk-down': walkFrames.slice(0, 6),
-        'walk-right': walkFrames.slice(6, 12),
-        'walk-up': walkFrames.slice(12, 18),
-        'walk-down-right': walkFrames.slice(18, 24),
-        'walk-up-right': walkFrames.slice(24, 30),
-        lying: [lyingFrame],
-      };
-      const mirroredKeys = new Set<string>();
-      for (const state of ['idle', 'walk']) {
-        for (const [leftDirection, rightDirection] of [
-          ['left', 'right'],
-          ['up-left', 'up-right'],
-          ['down-left', 'down-right'],
-        ]) {
-          const leftKey = `${state}-${leftDirection}`;
-          animations[leftKey] = animations[`${state}-${rightDirection}`];
-          mirroredKeys.add(leftKey);
-        }
+    const [idleFrames, walkFrames, lyingFrame] = await Promise.all([
+      Promise.all([0, 1, 2, 3, 4].map(loadCharacterFrame)),
+      Promise.all(
+        Array.from({ length: 30 }, (_, index) => index + 16).map(loadCharacterFrame),
+      ),
+      loadCharacterFrame(character.lyingFrame),
+    ]);
+    const animations: Record<string, Texture[]> = {
+      'idle-down': [idleFrames[0]],
+      'idle-right': [idleFrames[1]],
+      'idle-up': [idleFrames[2]],
+      'idle-up-right': [idleFrames[3]],
+      'idle-down-right': [idleFrames[4]],
+      'walk-down': walkFrames.slice(0, 6),
+      'walk-right': walkFrames.slice(6, 12),
+      'walk-up': walkFrames.slice(12, 18),
+      'walk-down-right': walkFrames.slice(18, 24),
+      'walk-up-right': walkFrames.slice(24, 30),
+      lying: [lyingFrame],
+    };
+    const mirroredKeys = new Set<string>();
+    for (const state of ['idle', 'walk']) {
+      for (const [leftDirection, rightDirection] of [
+        ['left', 'right'],
+        ['up-left', 'up-right'],
+        ['down-left', 'down-right'],
+      ]) {
+        const leftKey = `${state}-${leftDirection}`;
+        animations[leftKey] = animations[`${state}-${rightDirection}`];
+        mirroredKeys.add(leftKey);
       }
+    }
 
-      // The remade source art is roughly 2x the width and height of the game's
-      // legacy frames. Retain its source resolution and render it at half size.
-      playerAnimationSets.push({ animations, mirroredKeys, scale: 0.5 });
+    // The remade source art is roughly 2x the width and height of the game's
+    // legacy frames. Retain its source resolution and render it at half size.
+    return { animations, mirroredKeys, scale: 0.5 };
+  };
+
+  const createFallbackPlayerAnimationSet = (): PlayerAnimationSet => {
+    const { animations } = generatePlayerSpritesheet();
+    addDiagonalFallbacks(animations);
+    animations.lying = [animations['idle-down'][0]];
+    return { animations, mirroredKeys: new Set(), scale: 1 };
+  };
+
+  for (const character of PLAYER_CHARACTERS) {
+    let defaultAnimations: PlayerAnimationSet;
+    try {
+      defaultAnimations = await loadCharacterAnimationSet(character, character.id);
       console.info(
         `[Assets] Loaded ${character.displayName} standing, lying, and eight-way movement animations`,
       );
@@ -699,11 +721,27 @@ export async function loadAssets(): Promise<GameAssets> {
       console.warn(
         `[Assets] ${character.displayName} frames missing — using fallback character`,
       );
-      const { animations } = generatePlayerSpritesheet();
-      addDiagonalFallbacks(animations);
-      animations.lying = [animations['idle-down'][0]];
-      playerAnimationSets.push({ animations, mirroredKeys: new Set(), scale: 1 });
+      defaultAnimations = createFallbackPlayerAnimationSet();
     }
+
+    const squads: Partial<Record<SquadColor, PlayerAnimationSet>> = {};
+    for (const squadColor of character.squadVariants) {
+      try {
+        squads[squadColor] = await loadCharacterAnimationSet(
+          character,
+          `${character.id}/${character.id}_${squadColor}`,
+        );
+        console.info(
+          `[Assets] Loaded ${character.displayName} ${squadColor} squad animations`,
+        );
+      } catch {
+        console.warn(
+          `[Assets] ${character.displayName} ${squadColor} squad frames missing — using default colors`,
+        );
+      }
+    }
+
+    playerAnimationSets.push({ default: defaultAnimations, squads });
   }
 
   // ── Runestone spritesheet (96×32 — 6 cols × 1 row, each frame 16×32) ──────
