@@ -10,10 +10,7 @@
 // centered horizontally at x and extending upward from y.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import {
-  isSolidTileId,
-  type TileMapData,
-} from './maps/level1.js';
+import { isSolidTileId, type TileMapData } from './maps/level1.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -23,15 +20,15 @@ export interface PortalCollider {
   y: number;
 }
 
-/** Portal collision hitbox size (widened to 28px to cover the stone frame). */
-export const PORTAL_HITBOX_W = 28;
+/** Portal collision hitbox size authored around the stone frame. */
+export const PORTAL_HITBOX_W = 26;
 export const PORTAL_HITBOX_H = 16;
+const PORTAL_HITBOX_LEFT_OFFSET = -14;
 
-/** Raised platform sides; the 32px gap between them is the staircase. */
-export const PORTAL_PLATFORM_SIDE_WIDTH = 24;
-export const PORTAL_PLATFORM_STAIR_WIDTH = 32;
-export const PORTAL_PLATFORM_COLLIDER_TOP_OFFSET = 12;
-export const PORTAL_PLATFORM_COLLIDER_HEIGHT = 64;
+/** Four wall tiles opened behind the portal platform's walkable top. */
+export const PORTAL_WALL_OPENING_WIDTH = 64;
+export const PORTAL_WALL_OPENING_HEIGHT = 16;
+export const PORTAL_WALL_OPENING_TOP_OFFSET = -4;
 
 export interface PortalBounds {
   left: number;
@@ -40,12 +37,60 @@ export interface PortalBounds {
   bottom: number;
 }
 
+export interface PortalCollisionBounds extends PortalBounds {
+  shape: 'rectangle' | 'right-triangle';
+  flipX: boolean;
+  flipY: boolean;
+}
+
+interface PortalCollisionSpec {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape: PortalCollisionBounds['shape'];
+  flipX?: boolean;
+  flipY?: boolean;
+}
+
+/** Collider geometry exported from the authored portal-platform sample. */
+const PORTAL_PLATFORM_COLLIDER_SPECS: readonly PortalCollisionSpec[] = [
+  { x: -37, y: 12, width: 5, height: 36, shape: 'rectangle' },
+  { x: -31, y: 31, width: 14, height: 13, shape: 'right-triangle' },
+  {
+    x: -36,
+    y: 49,
+    width: 20,
+    height: 20,
+    shape: 'right-triangle',
+    flipX: true,
+    flipY: true,
+  },
+  { x: 32, y: 12, width: 5, height: 36, shape: 'rectangle' },
+  {
+    x: 17,
+    y: 31,
+    width: 14,
+    height: 13,
+    shape: 'right-triangle',
+    flipX: true,
+  },
+  {
+    x: 16,
+    y: 49,
+    width: 20,
+    height: 20,
+    shape: 'right-triangle',
+    flipY: true,
+  },
+];
+
 export const PLAYER_SPEED = 80;
 export const FEET_HITBOX_W = 8;
 export const FEET_HITBOX_H = 12;
 
 export function getPortalBounds(portal: PortalCollider): PortalBounds {
-  const left = portal.x - PORTAL_HITBOX_W / 2;
+  const left = portal.x + PORTAL_HITBOX_LEFT_OFFSET;
   const top = portal.y - PORTAL_HITBOX_H / 2;
   return {
     left,
@@ -55,24 +100,125 @@ export function getPortalBounds(portal: PortalCollider): PortalBounds {
   };
 }
 
-/** Solid side walls around the portal platform, leaving only the stairs open. */
-export function getPortalPlatformBounds(portal: PortalCollider): PortalBounds[] {
-  const stairLeft = portal.x - PORTAL_PLATFORM_STAIR_WIDTH / 2;
-  const top = portal.y + PORTAL_PLATFORM_COLLIDER_TOP_OFFSET;
-  return [
-    {
-      left: stairLeft - PORTAL_PLATFORM_SIDE_WIDTH,
-      top,
-      right: stairLeft - 1,
-      bottom: top + PORTAL_PLATFORM_COLLIDER_HEIGHT - 1,
-    },
-    {
-      left: stairLeft + PORTAL_PLATFORM_STAIR_WIDTH,
-      top,
-      right: stairLeft + PORTAL_PLATFORM_STAIR_WIDTH + PORTAL_PLATFORM_SIDE_WIDTH - 1,
-      bottom: top + PORTAL_PLATFORM_COLLIDER_HEIGHT - 1,
-    },
+/** Walkable cutout in the otherwise-solid bottom row of the forest wall. */
+export function getPortalWallOpeningBounds(portal: PortalCollider): PortalBounds {
+  const left = portal.x - PORTAL_WALL_OPENING_WIDTH / 2;
+  const top = portal.y + PORTAL_WALL_OPENING_TOP_OFFSET;
+  return {
+    left,
+    top,
+    right: left + PORTAL_WALL_OPENING_WIDTH - 1,
+    bottom: top + PORTAL_WALL_OPENING_HEIGHT - 1,
+  };
+}
+
+/** True when a complete map tile belongs to the portal wall cutout. */
+export function isPortalWallOpeningTile(
+  tileX: number,
+  tileY: number,
+  tileSize: number,
+  portal: PortalCollider,
+): boolean {
+  const opening = getPortalWallOpeningBounds(portal);
+  const left = tileX * tileSize;
+  const top = tileY * tileSize;
+  const right = left + tileSize - 1;
+  const bottom = top + tileSize - 1;
+  return (
+    left >= opening.left &&
+    right <= opening.right &&
+    top >= opening.top &&
+    bottom <= opening.bottom
+  );
+}
+
+/** Authored solid edges around the walkable portal platform and central stairs. */
+export function getPortalPlatformBounds(portal: PortalCollider): PortalCollisionBounds[] {
+  return PORTAL_PLATFORM_COLLIDER_SPECS.map((spec) => ({
+    left: portal.x + spec.x,
+    top: portal.y + spec.y,
+    right: portal.x + spec.x + spec.width - 1,
+    bottom: portal.y + spec.y + spec.height - 1,
+    shape: spec.shape,
+    flipX: spec.flipX ?? false,
+    flipY: spec.flipY ?? false,
+  }));
+}
+
+function intersectsBounds(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+  bounds: PortalBounds,
+): boolean {
+  return (
+    left <= bounds.right &&
+    right >= bounds.left &&
+    top <= bounds.bottom &&
+    bottom >= bounds.top
+  );
+}
+
+function intersectsRightTriangle(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+  bounds: PortalCollisionBounds,
+): boolean {
+  if (!intersectsBounds(left, top, right, bottom, bounds)) return false;
+
+  const point = (xRatio: number, yRatio: number): [number, number] => [
+    bounds.flipX
+      ? bounds.right - xRatio * (bounds.right - bounds.left)
+      : bounds.left + xRatio * (bounds.right - bounds.left),
+    bounds.flipY
+      ? bounds.bottom - yRatio * (bounds.bottom - bounds.top)
+      : bounds.top + yRatio * (bounds.bottom - bounds.top),
   ];
+  const triangle = [point(0, 0), point(0, 1), point(1, 1)];
+  const rectangle: Array<[number, number]> = [
+    [left, top],
+    [right, top],
+    [right, bottom],
+    [left, bottom],
+  ];
+  const axes: Array<[number, number]> = [
+    [1, 0],
+    [0, 1],
+  ];
+
+  for (let index = 0; index < triangle.length; index++) {
+    const start = triangle[index];
+    const end = triangle[(index + 1) % triangle.length];
+    axes.push([-(end[1] - start[1]), end[0] - start[0]]);
+  }
+
+  for (const [axisX, axisY] of axes) {
+    const rectangleProjection = rectangle.map(([x, y]) => x * axisX + y * axisY);
+    const triangleProjection = triangle.map(([x, y]) => x * axisX + y * axisY);
+    if (
+      Math.max(...rectangleProjection) < Math.min(...triangleProjection) ||
+      Math.max(...triangleProjection) < Math.min(...rectangleProjection)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function intersectsPortalCollision(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+  bounds: PortalCollisionBounds,
+): boolean {
+  return bounds.shape === 'right-triangle'
+    ? intersectsRightTriangle(left, top, right, bottom, bounds)
+    : intersectsBounds(left, top, right, bottom, bounds);
 }
 
 export function applyInput(
@@ -120,24 +266,22 @@ export function isPositionValid(
 
   for (let ty = tileTop; ty <= tileBottom; ty++) {
     for (let tx = tileLeft; tx <= tileRight; tx++) {
-      if (isSolidTile(tx, ty, map)) {
+      if (
+        isSolidTile(tx, ty, map) &&
+        !(portal && isPortalWallOpeningTile(tx, ty, ts, portal))
+      ) {
         return false;
       }
     }
   }
 
-  // Check portal and raised-platform collision (dynamic AABB overlap tests)
+  // Check the portal rectangle and authored platform polygons.
   if (portal) {
-    const collisionBounds = [getPortalBounds(portal), ...getPortalPlatformBounds(portal)];
-    for (const bounds of collisionBounds) {
-      if (
-        left <= bounds.right &&
-        right >= bounds.left &&
-        top <= bounds.bottom &&
-        bottom >= bounds.top
-      ) {
-        return false;
-      }
+    if (intersectsBounds(left, top, right, bottom, getPortalBounds(portal))) {
+      return false;
+    }
+    for (const bounds of getPortalPlatformBounds(portal)) {
+      if (intersectsPortalCollision(left, top, right, bottom, bounds)) return false;
     }
   }
 

@@ -61,6 +61,7 @@ import {
 } from './systems/TilemapRenderer';
 import { Portal } from './systems/Portal';
 import { PortalPlatform } from './systems/PortalPlatform';
+import { getPortalPlatformPlayerZFloor } from './systems/PortalPlatformLayout';
 import { WisdomOrbHud } from './systems/WisdomOrbHud';
 import { WisdomArrow } from './systems/WisdomArrow';
 import { IntroDialogueHud } from './systems/IntroDialogueHud';
@@ -1129,6 +1130,27 @@ async function main(): Promise<void> {
   // ── Network Manager ───────────────────────────────────────────────────
 
   let latestServerState: GameState | null = null;
+
+  function setPlayerPosition(
+    data: PlayerSpriteData,
+    x: number,
+    y: number,
+    portalPosition = latestServerState?.portal ?? null,
+  ): void {
+    setRoundedPosition(data.container, x, y, 1);
+    if (!portalPosition) return;
+
+    const zFloor = getPortalPlatformPlayerZFloor(
+      x,
+      y,
+      portalPosition.x,
+      portalPosition.y,
+    );
+    if (zFloor !== null && data.container.zIndex < zFloor) {
+      data.container.zIndex = zFloor;
+    }
+  }
+
   let applyLocalRoleUi: (
     role: PlayerRole,
     wisdomOrbs: number,
@@ -1251,6 +1273,7 @@ async function main(): Promise<void> {
           gameState.portal.y,
           assets.portalPlatformTextures,
           tilemapRenderer.portalTerrainLayer,
+          tilemapRenderer.groundDetailLayer,
           entityLayer,
         );
         portal = new Portal(
@@ -1322,7 +1345,7 @@ async function main(): Promise<void> {
           data,
           getAnimationKey(player.facing, player.isMoving, player.isDead),
         );
-        setRoundedPosition(data.container, player.x, player.y, 1);
+        setPlayerPosition(data, player.x, player.y, gameState.portal);
         if (!isLocal) knownRemotePlayers.add(player.id);
       }
 
@@ -1381,7 +1404,7 @@ async function main(): Promise<void> {
           }
         }
 
-        setRoundedPosition(data.container, localX, localY, 1);
+        setPlayerPosition(data, localX, localY, gameState.portal);
       }
 
       knownRemotePlayers.clear();
@@ -1668,7 +1691,7 @@ async function main(): Promise<void> {
 
     const localData = playerSprites.get(net.playerId);
     if (localData) {
-      setRoundedPosition(localData.container, localX, localY, 1);
+      setPlayerPosition(localData, localX, localY);
 
       const localAnimKey = getAnimationKey(localFacing, isMoving, isLocalDead);
       setPlayerAnimation(localData, localAnimKey);
@@ -1685,7 +1708,7 @@ async function main(): Promise<void> {
 
       const interp = getInterpolatedPlayer(remoteId, interpolationPair, latestSnapshot);
       if (interp) {
-        setRoundedPosition(data.container, interp.x, interp.y, 1);
+        setPlayerPosition(data, interp.x, interp.y);
 
         const remoteAnimKey = getAnimationKey(
           interp.facing,
@@ -1742,6 +1765,7 @@ async function main(): Promise<void> {
             pendingPortalPos.y,
             assets.portalPlatformTextures,
             tilemapRenderer.portalTerrainLayer,
+            tilemapRenderer.groundDetailLayer,
             entityLayer,
           );
         }
@@ -1898,7 +1922,7 @@ async function main(): Promise<void> {
     // Immediately update sprite
     const localData = playerSprites.get(net.playerId!);
     if (localData) {
-      setRoundedPosition(localData.container, localX, localY, 1);
+      setPlayerPosition(localData, localX, localY);
     }
 
     console.info(

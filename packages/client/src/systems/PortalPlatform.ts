@@ -1,6 +1,7 @@
 import { Container, Sprite, Texture } from 'pixi.js';
 import {
   PORTAL_PLATFORM_BASE_Z_OFFSET,
+  PORTAL_PLATFORM_GROUND_DETAIL_SPRITES,
   PORTAL_PLATFORM_GROUND_SPRITES,
   PORTAL_PLATFORM_STRUCTURE_SPRITES,
   getPortalPlatformAssetPath,
@@ -19,10 +20,15 @@ export class PortalPlatform {
     y: number,
     textures: ReadonlyMap<string, Texture>,
     groundParent: Container,
+    groundDetailParent: Container,
     entityParent: Container,
   ) {
     for (const spec of PORTAL_PLATFORM_GROUND_SPRITES) {
       this.addSprite(spec, x, y, textures, groundParent, y + spec.y + spec.h);
+    }
+
+    for (const spec of PORTAL_PLATFORM_GROUND_DETAIL_SPRITES) {
+      this.addSprite(spec, x, y, textures, groundDetailParent, y + spec.y + spec.h);
     }
 
     for (const spec of PORTAL_PLATFORM_STRUCTURE_SPRITES) {

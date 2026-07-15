@@ -3,8 +3,6 @@ import {
   CELL_STEP_X,
   CELL_STEP_Y,
   GRID_CELLS,
-  PORTAL_HITBOX_H,
-  PORTAL_HITBOX_W,
   SPAWN_DISTANCE,
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
@@ -14,10 +12,13 @@ import {
   WALL_WIDTH,
   generateMazeLayout,
   getHubTileBounds,
+  getPortalBounds,
   getPortalPlatformBounds,
+  getPortalWallOpeningBounds,
   isSolidTileId,
   type GeneratedMazeLayout,
   type GatePlacement,
+  type PortalBounds,
   type TileMapData,
 } from '@labyrinth/shared';
 import {
@@ -28,6 +29,7 @@ import {
   type ForestStylePlacementSpec,
 } from '../systems/ForestWallLayout';
 import {
+  PORTAL_PLATFORM_GROUND_DETAIL_SPRITES,
   PORTAL_PLATFORM_GROUND_SPRITES,
   PORTAL_PLATFORM_STRUCTURE_SPRITES,
   PORTAL_VISUAL_OFFSET_X,
@@ -58,6 +60,7 @@ const PORTAL_SAMPLE_CELL_X = 8;
 const PORTAL_SAMPLE_CELL_Y = 14;
 const PORTAL_TERRAIN_Z = 1;
 const FOREST_UNDERLAY_Z = 2;
+const PORTAL_GROUND_DETAIL_Z = 3;
 const PORTAL_PLATFORM_STRUCTURE_Z = 240000;
 const PORTAL_Z = 240002;
 const HUB_TREE = `${FOREST_ROOT}/tree_primary_02.png`;
@@ -535,6 +538,21 @@ function addPortalCellElements(
     ));
   }
 
+  for (const spec of PORTAL_PLATFORM_GROUND_DETAIL_SPRITES) {
+    elements.push(assetElement(
+      `Portal cell · clearing ground detail · ${spec.asset}`,
+      'ground.grass',
+      getPortalPlatformAssetPath(spec.asset),
+      spec.w,
+      spec.h,
+      centerX + spec.x,
+      centerY + spec.y,
+      spec.w,
+      spec.h,
+      PORTAL_GROUND_DETAIL_Z,
+    ));
+  }
+
   for (const spec of PORTAL_PLATFORM_STRUCTURE_SPRITES) {
     elements.push(assetElement(
       `Portal cell · raised platform · ${spec.asset}`,
@@ -566,26 +584,70 @@ function addPortalCellElements(
     { x: 0, y: 0, width: PORTAL_FRAME_SIZE, height: PORTAL_FRAME_SIZE },
   );
   elements.push(portal);
+
+  const wallOpening = getPortalWallOpeningBounds({ x: centerX, y: centerY });
+  splitWallColliderAroundOpening(colliders, wallOpening);
+  const portalBounds = getPortalBounds({ x: centerX, y: centerY });
   colliders.push(collider(
     `Portal cell · escape portal collider · lower cell ${PORTAL_SAMPLE_CELL_X},${PORTAL_SAMPLE_CELL_Y}`,
-    centerX - PORTAL_HITBOX_W / 2,
-    centerY - PORTAL_HITBOX_H / 2,
-    PORTAL_HITBOX_W,
-    PORTAL_HITBOX_H,
+    portalBounds.left,
+    portalBounds.top,
+    portalBounds.right - portalBounds.left + 1,
+    portalBounds.bottom - portalBounds.top + 1,
     'portal',
     portal.id,
   ));
 
-  for (const [sideIndex, bounds] of getPortalPlatformBounds({ x: centerX, y: centerY }).entries()) {
+  const platformColliderNames = [
+    'left upper edge',
+    'left inner slope',
+    'left stair base',
+    'right upper edge',
+    'right inner slope',
+    'right stair base',
+  ] as const;
+  for (const [index, bounds] of getPortalPlatformBounds({ x: centerX, y: centerY }).entries()) {
     colliders.push(collider(
-      `Portal cell · ${sideIndex === 0 ? 'left' : 'right'} platform side · stairs remain open`,
+      `Portal cell · ${platformColliderNames[index]} · stairs remain open`,
       bounds.left,
       bounds.top,
       bounds.right - bounds.left + 1,
       bounds.bottom - bounds.top + 1,
       'portal',
       portal.id,
+      bounds.shape,
+      bounds.flipX,
+      bounds.flipY,
     ));
+  }
+}
+
+function splitWallColliderAroundOpening(
+  colliders: EditorCollider[],
+  opening: PortalBounds,
+): void {
+  for (const existing of colliders) {
+    const right = existing.x + existing.width;
+    const bottom = existing.y + existing.height;
+    const openingRight = opening.right + 1;
+    const openingBottom = opening.bottom + 1;
+    const coversOpening = existing.ownerRole === 'wall.solid' &&
+      existing.shape === 'rectangle' &&
+      existing.x < opening.left && right > openingRight &&
+      existing.y >= opening.top && bottom <= openingBottom;
+    if (!coversOpening) continue;
+
+    existing.width = opening.left - existing.x;
+    colliders.push(collider(
+      existing.name,
+      openingRight,
+      existing.y,
+      right - openingRight,
+      existing.height,
+      existing.ownerRole,
+      existing.ownerId,
+    ));
+    return;
   }
 }
 
@@ -702,7 +764,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
       'Exact crop of generated maze seed 44: map cells (2,5) through (8,14), using the same wall-placement builder and generated obstacle layout as the game.',
       'Connection letters are N/E/S/W openings. This fixture includes both straights, all four turns, every T-junction orientation, a four-way cross, and every dead-end orientation.',
       'The central hub section includes its editable ground tiles, thick side walls, corrected north-west and north-east corner transitions, sacred tree, tree shadow, and three runestones.',
-      'The portal section is anchored between seed-44 cells (8,13) and (8,14), which both have intact north forest walls. It includes the exact editable clearing, raised stone platform, inactive portal frame, portal hitbox, and two platform-side colliders; the 32px central stairway is the only approach.',
+      'The portal section is anchored between seed-44 cells (8,13) and (8,14), which both have intact north forest walls. It includes the exact editable clearing, raised stone platform, inactive portal frame, split wall opening, portal hitbox, and six authored platform-edge colliders; the central stairway remains walkable.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',

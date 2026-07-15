@@ -62,8 +62,8 @@ export class Portal {
     this.sprite.x = x + PORTAL_VISUAL_OFFSET_X;
     this.sprite.y = y;
 
-    // The platform collision keeps player feet at least 20 px below the portal
-    // origin, so this offset sorts the entire arch behind players on the platform.
+    // Players on the upper platform sort behind the arch; players lower on the
+    // stairs sort in front of it.
     this.sprite.zIndex = Math.round(y) + PORTAL_RENDER_Z_OFFSET;
 
     parent.addChild(this.sprite);

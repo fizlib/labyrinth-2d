@@ -124,7 +124,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Both client and server use the same feet-based collision logic.
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
-- Collision respects the portal from the beginning of the match. The raised platform adds solid left and right sides around a 32px central opening, so players can only approach through the stairs.
+- Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
 
 ### Runestones and Portal Flow
 
