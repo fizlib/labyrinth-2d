@@ -40,6 +40,7 @@ export {
   isBridgeTileSafe,
   getBridgeWalkwayTileBounds,
   getBridgeWalkwayTileAtPoint,
+  getBridgeWalkwayTileMaskAtFeetCenter,
   getBridgeRepairCircleBounds,
   getBridgeCollapseMask,
   getBridgeBankReturnPosition,

@@ -88,15 +88,42 @@ export function getBridgeWalkwayTileAtPoint(
       const bounds = getBridgeWalkwayTileBounds(bridge, row, column, tileSize);
       if (
         x >= bounds.left &&
-        x <= bounds.right &&
+        x < bounds.right + 1 &&
         y >= bounds.top &&
-        y <= bounds.bottom
+        y < bounds.bottom + 1
       ) {
         return { row, column };
       }
     }
   }
   return null;
+}
+
+/**
+ * Resolve the stones touched horizontally by a feet hitbox whose center is on
+ * the walkway. This prevents the seam between columns from acting as a third,
+ * unchecked route while retaining feet-center row tracking.
+ */
+export function getBridgeWalkwayTileMaskAtFeetCenter(
+  bridge: Pick<BridgePlacement, 'tileX' | 'tileY'>,
+  x: number,
+  y: number,
+  feetWidth: number,
+  tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
+): number {
+  const centerTile = getBridgeWalkwayTileAtPoint(bridge, x, y, tileSize);
+  if (!centerTile || feetWidth <= 0) return 0;
+
+  const left = x - feetWidth / 2;
+  const right = left + feetWidth - 1;
+  let mask = 0;
+  for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+    const bounds = getBridgeWalkwayTileBounds(bridge, centerTile.row, column, tileSize);
+    if (left <= bounds.right && right >= bounds.left) {
+      mask |= getBridgeTileBit(centerTile.row, column);
+    }
+  }
+  return mask;
 }
 
 /** Authored north/south treasure-circle trigger bounds. */
@@ -121,7 +148,11 @@ export function getBridgeRepairCircleBounds(
   }));
 }
 
-/** Both columns in every row strictly ahead of the failed tile. */
+/**
+ * Both columns in every row strictly ahead of the failed tile. At a terminal
+ * row, where no puzzle stone exists ahead, all other central rows collapse so
+ * the mistake cannot leave the bridge intact.
+ */
 export function getBridgeCollapseMask(
   failedRow: number,
   direction: BridgeTravelDirection,
@@ -133,6 +164,15 @@ export function getBridgeCollapseMask(
   for (let row = start; row < end; row++) {
     for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
       mask |= getBridgeTileBit(row, column);
+    }
+  }
+
+  if (mask === 0 && failedRow >= 0 && failedRow < BRIDGE_WALKWAY_ROWS) {
+    for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
+      if (row === failedRow) continue;
+      for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+        mask |= getBridgeTileBit(row, column);
+      }
     }
   }
   return mask;

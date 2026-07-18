@@ -5,6 +5,7 @@ import {
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_TILE_COUNT,
   BRIDGE_WALKWAY_ROWS,
+  FEET_HITBOX_W,
   FEET_HITBOX_H,
   TILE_FLOOR,
   generateBridgeSafeTileMasks,
@@ -15,6 +16,7 @@ import {
   getBridgeTileBit,
   getBridgeWalkwayTileAtPoint,
   getBridgeWalkwayTileBounds,
+  getBridgeWalkwayTileMaskAtFeetCenter,
   isPositionValid,
 } from '../dist/index.js';
 
@@ -129,6 +131,21 @@ test('collapse masks select both columns strictly ahead', () => {
     expectedSouth |= getBridgeTileBit(row, 0) | getBridgeTileBit(row, 1);
   }
   assert.equal(getBridgeCollapseMask(2, 'south'), expectedSouth);
+
+  let expectedSouthTerminal = 0;
+  for (let row = 0; row < BRIDGE_WALKWAY_ROWS - 1; row++) {
+    expectedSouthTerminal |= getBridgeTileBit(row, 0) | getBridgeTileBit(row, 1);
+  }
+  assert.equal(
+    getBridgeCollapseMask(BRIDGE_WALKWAY_ROWS - 1, 'south'),
+    expectedSouthTerminal,
+  );
+
+  let expectedNorthTerminal = 0;
+  for (let row = 1; row < BRIDGE_WALKWAY_ROWS; row++) {
+    expectedNorthTerminal |= getBridgeTileBit(row, 0) | getBridgeTileBit(row, 1);
+  }
+  assert.equal(getBridgeCollapseMask(0, 'north'), expectedNorthTerminal);
 });
 
 test('walkway, repair-circle, and bank geometry stays aligned to the prefab', () => {
@@ -147,6 +164,46 @@ test('walkway, repair-circle, and bank geometry stays aligned to the prefab', ()
       (rowThree.top + rowThree.bottom) / 2,
     ),
     { row: 3, column: 1 },
+  );
+
+  const firstLeft = getBridgeWalkwayTileBounds(bridge, 0, 0);
+  const firstRight = getBridgeWalkwayTileBounds(bridge, 0, 1);
+  const firstRowY = (firstLeft.top + firstLeft.bottom) / 2;
+  assert.equal(
+    getBridgeWalkwayTileMaskAtFeetCenter(
+      bridge,
+      firstRight.left,
+      firstRowY,
+      FEET_HITBOX_W,
+    ),
+    getBridgeTileBit(0, 0) | getBridgeTileBit(0, 1),
+    'feet centered on the bridge seam must step on both stones',
+  );
+  const subpixelSeamX = firstRight.left - 0.5;
+  assert.notEqual(
+    getBridgeWalkwayTileAtPoint(bridge, subpixelSeamX, firstRowY),
+    null,
+    'floating-point positions between adjacent pixel bounds must still resolve',
+  );
+  assert.equal(
+    getBridgeWalkwayTileMaskAtFeetCenter(
+      bridge,
+      subpixelSeamX,
+      firstRowY,
+      FEET_HITBOX_W,
+    ),
+    getBridgeTileBit(0, 0) | getBridgeTileBit(0, 1),
+    'the subpixel center seam must step on both stones',
+  );
+  assert.equal(
+    getBridgeWalkwayTileMaskAtFeetCenter(
+      bridge,
+      (firstRight.left + firstRight.right) / 2,
+      firstRowY,
+      FEET_HITBOX_W,
+    ),
+    getBridgeTileBit(0, 1),
+    'feet centered within a stone must step on only that stone',
   );
 
   const circles = getBridgeRepairCircleBounds(bridge);

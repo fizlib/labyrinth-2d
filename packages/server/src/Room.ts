@@ -36,9 +36,9 @@ import {
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_ROWS,
   getBridgeTileBit,
-  isBridgeTileSafe,
   getBridgeWalkwayTileBounds,
   getBridgeWalkwayTileAtPoint,
+  getBridgeWalkwayTileMaskAtFeetCenter,
   getBridgeRepairCircleBounds,
   getBridgeCollapseMask,
   getBridgeBankReturnPosition,
@@ -94,7 +94,7 @@ interface QueuedInput {
 interface BridgeTraversalState {
   bridgeIndex: number;
   entrySide: BridgeEntrySide;
-  lastTileBit: number;
+  lastTileMask: number;
   completed: boolean;
 }
 
@@ -946,16 +946,22 @@ export class Room {
       traversal = {
         bridgeIndex: currentBridgeIndex,
         entrySide,
-        lastTileBit: 0,
+        lastTileMask: 0,
         completed: false,
       };
       this.bridgeTraversals.set(player.id, traversal);
     }
 
-    const tileBit = getBridgeTileBit(currentTile.row, currentTile.column);
-    if (tileBit === traversal.lastTileBit) return;
+    const tileMask = getBridgeWalkwayTileMaskAtFeetCenter(
+      bridge,
+      feet.x,
+      feet.y,
+      FEET_HITBOX_W,
+      this.map.tileSize,
+    );
+    if (tileMask === 0 || tileMask === traversal.lastTileMask) return;
 
-    const safe = isBridgeTileSafe(bridge, currentTile.row, currentTile.column);
+    const safe = (tileMask & ~bridge.safeTileMask) === 0;
     const destinationRow = traversal.entrySide === 'north' ? BRIDGE_WALKWAY_ROWS - 1 : 0;
     if (safe && currentTile.row === destinationRow) {
       traversal.completed = true;
@@ -967,7 +973,7 @@ export class Room {
       const direction = traversal.entrySide === 'north' ? 'south' : 'north';
       this.collapseBridge(currentBridgeIndex, currentTile.row, direction, player.id);
     }
-    traversal.lastTileBit = tileBit;
+    traversal.lastTileMask = tileMask;
   }
 
   private collapseBridge(
@@ -978,15 +984,27 @@ export class Room {
   ): void {
     const collapsedTileMask = getBridgeCollapseMask(failedRow, direction);
     if (collapsedTileMask === 0) return;
+    const terminalFailure =
+      (direction === 'north' && failedRow === 0) ||
+      (direction === 'south' && failedRow === BRIDGE_WALKWAY_ROWS - 1);
 
     const bridgeState = this.bridgeStates[bridgeIndex];
     if (!bridgeState || bridgeState.collapsedTileMask !== 0) return;
     bridgeState.collapsedTileMask = collapsedTileMask;
 
     const bridge = this.bridges[bridgeIndex];
+    let triggeringPlayerReturned = false;
     for (const player of this.state.players) {
       if (!this.playerOverlapsBridgeMask(player, bridge, collapsedTileMask)) continue;
       this.returnPlayerToBridgeEntry(player, bridgeIndex);
+      if (player.id === triggeringPlayerId) triggeringPlayerReturned = true;
+    }
+
+    if (terminalFailure && !triggeringPlayerReturned) {
+      const triggeringPlayer = this.state.players.find(
+        (player) => player.id === triggeringPlayerId,
+      );
+      if (triggeringPlayer) this.returnPlayerToBridgeEntry(triggeringPlayer, bridgeIndex);
     }
 
     console.info(
