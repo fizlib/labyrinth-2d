@@ -15,7 +15,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Container, Sprite, Texture, Renderer, Rectangle } from 'pixi.js';
-import type { TileMapData, GatePlacement, PressurePlateInfo, BridgePlacement } from '@labyrinth/shared';
+import type {
+  TileMapData,
+  GatePlacement,
+  PressurePlateInfo,
+  BridgePlacement,
+  BridgeState,
+} from '@labyrinth/shared';
 import {
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
@@ -39,7 +45,7 @@ import {
   getForestGroundZIndex,
   type ForestStylePlacementSpec,
 } from './ForestWallLayout';
-import { addBridgeObstacles } from './BridgeObstacle';
+import { addBridgeObstacles, type BridgeObstacleVisual } from './BridgeObstacle';
 import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
 
 // ── Exported types ──────────────────────────────────────────────────────────
@@ -360,6 +366,8 @@ export class TilemapRenderer {
   readonly runestoneSprites: RunestoneSpriteData[] = [];
   readonly gateSprites: Sprite[] = [];
   readonly pressurePlateSprites: PressurePlateSpriteData[] = [];
+  /** Stateful visual controllers in generated bridge-index order. */
+  readonly bridgeVisuals: BridgeObstacleVisual[];
 
   // ── Internal tracking for culling + cleanup ────────────────────────────
   private allChunks: ChunkMeta[] = [];
@@ -730,7 +738,7 @@ export class TilemapRenderer {
       this.groundDetailLayer.addChild(groundChunk);
     }
 
-    addBridgeObstacles(
+    this.bridgeVisuals = addBridgeObstacles(
       bridges,
       ts,
       assets.bridgeObstacleTextures,
@@ -833,6 +841,23 @@ export class TilemapRenderer {
     }
   }
 
+  /** Apply an authoritative bridge snapshot to walkway visuals. */
+  syncBridgeStates(bridgeStates: readonly BridgeState[], animate: boolean): void {
+    for (let bridgeIndex = 0; bridgeIndex < this.bridgeVisuals.length; bridgeIndex++) {
+      const state = bridgeStates.find(
+        (candidate) => candidate.bridgeIndex === bridgeIndex,
+      );
+      this.bridgeVisuals[bridgeIndex].syncCollapsedTileMask(
+        state?.collapsedTileMask ?? 0,
+        animate,
+      );
+    }
+  }
+
+  updateBridgeAnimations(dt: number): void {
+    for (const bridge of this.bridgeVisuals) bridge.update(dt);
+  }
+
   // ── Per-frame viewport culling ────────────────────────────────────────
 
   /**
@@ -909,6 +934,7 @@ export class TilemapRenderer {
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;
     this.pressurePlateSprites.length = 0;
+    this.bridgeVisuals.length = 0;
     this.allChunks.length = 0;
   }
 }

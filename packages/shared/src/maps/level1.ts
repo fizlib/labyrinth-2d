@@ -22,6 +22,8 @@
 //   - Dirt shadows hugging the bases of the walls
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { generateBridgeSafeTileMasks } from '../bridge.js';
+
 export interface TileMapData {
   width: number;
   height: number;
@@ -73,6 +75,8 @@ export interface BridgePlacement {
   /** Top-left tile of the 6×10 vertical passage occupied by the bridge. */
   tileX: number;
   tileY: number;
+  /** Bit row * 2 + column is set when that hidden-route stone is safe. */
+  safeTileMask: number;
 }
 
 export interface GeneratedMazeLayout {
@@ -888,6 +892,7 @@ function computeBridgePlacements(
   spawnPoints: SpawnPoint[],
   seed: number,
 ): BridgePlacement[] {
+  type BridgeCandidate = Omit<BridgePlacement, 'safeTileMask'>;
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
   const spawnCells = new Set(
@@ -896,7 +901,7 @@ function computeBridgePlacements(
       return `${cell.cx},${cell.cy}`;
     }),
   );
-  const candidates: BridgePlacement[] = [];
+  const candidates: BridgeCandidate[] = [];
 
   for (let northCellY = 0; northCellY < GRID_CELLS - 1; northCellY++) {
     for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
@@ -928,7 +933,7 @@ function computeBridgePlacements(
     Math.max(minimum, Math.round(candidates.length * BRIDGE_DENSITY)),
   );
   const occupiedCells = new Set<string>();
-  const bridges: BridgePlacement[] = [];
+  const bridges: BridgeCandidate[] = [];
 
   for (const candidate of candidates) {
     if (bridges.length >= desiredCount) break;
@@ -941,7 +946,12 @@ function computeBridgePlacements(
     bridges.push(candidate);
   }
 
-  return bridges.sort((a, b) => a.northCellY - b.northCellY || a.cellX - b.cellX);
+  bridges.sort((a, b) => a.northCellY - b.northCellY || a.cellX - b.cellX);
+  const safeTileMasks = generateBridgeSafeTileMasks(bridges.length, seed);
+  return bridges.map((bridge, bridgeIndex) => ({
+    ...bridge,
+    safeTileMask: safeTileMasks[bridgeIndex],
+  }));
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────────

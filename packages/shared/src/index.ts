@@ -7,6 +7,7 @@
 
 // ── Re-export physics module ────────────────────────────────────────────────
 import type { HubDirection } from './navigation.js';
+import type { BridgeState } from './bridge.js';
 
 export {
   PLAYER_SPEED,
@@ -29,6 +30,26 @@ export {
   type PortalCollisionBounds,
   type PortalCollider,
 } from './physics.js';
+
+export {
+  BRIDGE_WALKWAY_ROWS,
+  BRIDGE_WALKWAY_COLUMNS,
+  BRIDGE_WALKWAY_TILE_COUNT,
+  BRIDGE_WALKWAY_ROW_Y,
+  getBridgeTileBit,
+  isBridgeTileSafe,
+  getBridgeWalkwayTileBounds,
+  getBridgeWalkwayTileAtPoint,
+  getBridgeRepairCircleBounds,
+  getBridgeCollapseMask,
+  getBridgeBankReturnPosition,
+  generateBridgeSafeTileMasks,
+  type BridgeEntrySide,
+  type BridgeTravelDirection,
+  type BridgeTileCoordinate,
+  type BridgeState,
+  type BridgeRepairCircleBounds,
+} from './bridge.js';
 
 // ── Re-export map data ──────────────────────────────────────────────────────
 export {
@@ -385,6 +406,8 @@ export interface GameState {
   portal: { x: number; y: number } | null;
   /** Per-gate open/closed state. */
   gateStates: GateState[];
+  /** Per-bridge collapsed walkway state shared by the whole room. */
+  bridgeStates: BridgeState[];
 }
 
 // ── Union Types ─────────────────────────────────────────────────────────────

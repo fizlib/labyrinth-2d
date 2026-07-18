@@ -1235,6 +1235,7 @@ async function main(): Promise<void> {
         assets,
         app.renderer,
       );
+      tilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
       if (cellBoundaryOverlay?.parent === worldContainer) {
         worldContainer.removeChild(cellBoundaryOverlay);
       }
@@ -1405,6 +1406,7 @@ async function main(): Promise<void> {
     onTickUpdate: (gameState) => {
       const localPlayerId = net.playerId;
       snapshotBuffer.push(gameState);
+      tilemapRenderer?.syncBridgeStates(gameState.bridgeStates, true);
 
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
@@ -1432,6 +1434,7 @@ async function main(): Promise<void> {
               currentMap!,
               latestServerState?.portal,
               currentLayout?.bridges,
+              gameState.bridgeStates,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -1728,6 +1731,7 @@ async function main(): Promise<void> {
         currentMap!,
         latestServerState?.portal,
         currentLayout?.bridges,
+        latestServerState?.bridgeStates,
       );
       localX = result.x;
       localY = result.y;
@@ -1791,6 +1795,7 @@ async function main(): Promise<void> {
     // ── 3b. Viewport culling — hide off-screen tilemap chunks ────────
     if (tilemapRenderer) {
       tilemapRenderer.updateVisibility(worldContainer.x, worldContainer.y, zoomLevel);
+      tilemapRenderer.updateBridgeAnimations(dtSeconds);
     }
     if (cellBoundaryOverlay) {
       cellBoundaryOverlay.visible = DebugSettings.isEnabled('cellBoundaries');

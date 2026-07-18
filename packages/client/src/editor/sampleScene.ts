@@ -417,6 +417,7 @@ function addBridgeObstacleElements(
     northCellY: BRIDGE_SAMPLE_NORTH_CELL_Y,
     tileX,
     tileY: northCellTileY + CELL_SIZE,
+    safeTileMask: 0x0fff,
   };
   const localX = (bridge.tileX - CROP_TILE_X) * TILE;
   const localY = (bridge.tileY - CROP_TILE_Y) * TILE;

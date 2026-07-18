@@ -33,6 +33,15 @@ import {
   computeHubDistanceField,
   computePortalDistanceField,
   getNavigationDirectionForPosition,
+  BRIDGE_WALKWAY_COLUMNS,
+  BRIDGE_WALKWAY_ROWS,
+  getBridgeTileBit,
+  isBridgeTileSafe,
+  getBridgeWalkwayTileBounds,
+  getBridgeWalkwayTileAtPoint,
+  getBridgeRepairCircleBounds,
+  getBridgeCollapseMask,
+  getBridgeBankReturnPosition,
   deriveFacingDirection,
   applyInputWithCollision,
   generateMazeLayout,
@@ -42,7 +51,8 @@ import {
   type GatePlacement,
   type PressurePlateInfo,
   type BridgePlacement,
-  type GateState,
+  type BridgeEntrySide,
+  type BridgeState,
   type GameState,
   type PlayerInfo,
   type PlayerRole,
@@ -79,6 +89,13 @@ interface QueuedInput {
   left: boolean;
   right: boolean;
   dt: number;
+}
+
+interface BridgeTraversalState {
+  bridgeIndex: number;
+  entrySide: BridgeEntrySide;
+  lastTileBit: number;
+  completed: boolean;
 }
 
 interface RoomPlayerInfo extends PlayerInfo {
@@ -218,6 +235,15 @@ export class Room {
   /** Authored bridge obstacles from deterministic map generation. */
   private readonly bridges: BridgePlacement[];
 
+  /** Shared, server-authoritative missing-stone masks. */
+  private readonly bridgeStates: BridgeState[];
+
+  /** Current bridge attempt for each player. */
+  private readonly bridgeTraversals = new Map<string, BridgeTraversalState>();
+
+  /** Current treasure-circle occupancy, used to require a fresh step-on edge. */
+  private readonly bridgeRepairOccupancy = new Map<string, string>();
+
   /** Per-gate open/closed state (true = open/passable). */
   private gateOpenStates: boolean[];
 
@@ -237,6 +263,10 @@ export class Room {
     this.gates = layout.gates;
     this.pressurePlates = layout.pressurePlates;
     this.bridges = layout.bridges;
+    this.bridgeStates = this.bridges.map((_, bridgeIndex) => ({
+      bridgeIndex,
+      collapsedTileMask: 0,
+    }));
     this.gateOpenStates = new Array(this.gates.length).fill(false);
     this.hubDistanceField = computeHubDistanceField(this.map);
     this.runestones = findRunestonePositions(this.map);
@@ -263,6 +293,7 @@ export class Room {
       runestones: this.runestones,
       portal: this.portalPosition,
       gateStates: this.gates.map((_, i) => ({ gateIndex: i, open: false })),
+      bridgeStates: this.bridgeStates,
     };
     console.info(
       `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
@@ -395,6 +426,8 @@ export class Room {
   removePlayer(playerId: string): void {
     this.sockets.delete(playerId);
     this.inputQueues.delete(playerId);
+    this.bridgeTraversals.delete(playerId);
+    this.bridgeRepairOccupancy.delete(playerId);
     this.state.players = this.state.players.filter((p) => p.id !== playerId);
 
     const leftMsg: PlayerLeftMessage = {
@@ -433,6 +466,8 @@ export class Room {
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player) return;
     this.clearQueuedInputs(player);
+    this.bridgeTraversals.delete(playerId);
+    this.bridgeRepairOccupancy.delete(playerId);
     player.x = msg.x;
     player.y = msg.y;
     console.info(
@@ -534,6 +569,8 @@ export class Room {
 
   private teleportPlayer(player: PlayerInfo, x: number, y: number): void {
     this.clearQueuedInputs(player);
+    this.bridgeTraversals.delete(player.id);
+    this.bridgeRepairOccupancy.delete(player.id);
     player.x = x;
     player.y = y;
   }
@@ -771,6 +808,8 @@ export class Room {
       }
 
       for (const input of queue) {
+        const previousX = player.x;
+        const previousY = player.y;
         // Use client-provided dt, clamped for anti-cheat safety
         const dt = Math.min(Math.max(input.dt, 0), 0.1);
         const result = applyInputWithCollision(
@@ -781,9 +820,11 @@ export class Room {
           this.map,
           this.portalPosition,
           this.bridges,
+          this.bridgeStates,
         );
         player.x = result.x;
         player.y = result.y;
+        this.updateBridgeInteractions(player, previousX, previousY);
 
         if (input.sequenceNumber > player.lastProcessedInput) {
           player.lastProcessedInput = input.sequenceNumber;
@@ -792,6 +833,10 @@ export class Room {
 
       // Derive facing & isMoving from the LAST input in the queue
       const lastInput = queue[queue.length - 1];
+      if (!lastInput) {
+        player.isMoving = false;
+        continue;
+      }
       const hasMovement =
         lastInput.up || lastInput.down || lastInput.left || lastInput.right;
       player.isMoving = hasMovement;
@@ -811,6 +856,219 @@ export class Room {
       gameState: this.cloneState(),
     };
     this.broadcast(update);
+  }
+
+  private getPlayerFeetCenter(player: Pick<PlayerInfo, 'x' | 'y'>): {
+    x: number;
+    y: number;
+  } {
+    return { x: player.x, y: player.y - FEET_HITBOX_H / 2 };
+  }
+
+  private updateBridgeInteractions(
+    player: RoomPlayerInfo,
+    previousX: number,
+    previousY: number,
+  ): void {
+    const feet = this.getPlayerFeetCenter(player);
+    let repairKey: string | null = null;
+
+    for (let bridgeIndex = 0; bridgeIndex < this.bridges.length; bridgeIndex++) {
+      const bridge = this.bridges[bridgeIndex];
+      const circle = getBridgeRepairCircleBounds(bridge, this.map.tileSize).find(
+        (bounds) =>
+          feet.x >= bounds.left &&
+          feet.x <= bounds.right &&
+          feet.y >= bounds.top &&
+          feet.y <= bounds.bottom,
+      );
+      if (!circle) continue;
+
+      repairKey = `${bridgeIndex}:${circle.side}`;
+      if (
+        this.bridgeRepairOccupancy.get(player.id) !== repairKey &&
+        this.bridgeStates[bridgeIndex].collapsedTileMask !== 0
+      ) {
+        this.repairBridge(bridgeIndex, player.id);
+      }
+      break;
+    }
+
+    if (repairKey === null) {
+      this.bridgeRepairOccupancy.delete(player.id);
+    } else {
+      this.bridgeRepairOccupancy.set(player.id, repairKey);
+    }
+
+    let currentBridgeIndex = -1;
+    let currentTile: ReturnType<typeof getBridgeWalkwayTileAtPoint> = null;
+    for (let bridgeIndex = 0; bridgeIndex < this.bridges.length; bridgeIndex++) {
+      const tile = getBridgeWalkwayTileAtPoint(
+        this.bridges[bridgeIndex],
+        feet.x,
+        feet.y,
+        this.map.tileSize,
+      );
+      if (!tile) continue;
+      currentBridgeIndex = bridgeIndex;
+      currentTile = tile;
+      break;
+    }
+
+    if (currentBridgeIndex < 0 || !currentTile) {
+      this.bridgeTraversals.delete(player.id);
+      return;
+    }
+
+    const bridge = this.bridges[currentBridgeIndex];
+    let traversal = this.bridgeTraversals.get(player.id);
+    if (!traversal || traversal.bridgeIndex !== currentBridgeIndex) {
+      const firstRow = getBridgeWalkwayTileBounds(bridge, 0, 0, this.map.tileSize);
+      const lastRow = getBridgeWalkwayTileBounds(
+        bridge,
+        BRIDGE_WALKWAY_ROWS - 1,
+        0,
+        this.map.tileSize,
+      );
+      const previousFeetY = previousY - FEET_HITBOX_H / 2;
+      let entrySide: BridgeEntrySide;
+      if (previousFeetY < firstRow.top) {
+        entrySide = 'north';
+      } else if (previousFeetY > lastRow.bottom) {
+        entrySide = 'south';
+      } else if (player.y < previousY) {
+        entrySide = 'south';
+      } else if (player.y > previousY) {
+        entrySide = 'north';
+      } else {
+        entrySide = currentTile.row < BRIDGE_WALKWAY_ROWS / 2 ? 'north' : 'south';
+      }
+      traversal = {
+        bridgeIndex: currentBridgeIndex,
+        entrySide,
+        lastTileBit: 0,
+        completed: false,
+      };
+      this.bridgeTraversals.set(player.id, traversal);
+    }
+
+    const tileBit = getBridgeTileBit(currentTile.row, currentTile.column);
+    if (tileBit === traversal.lastTileBit) return;
+
+    const safe = isBridgeTileSafe(bridge, currentTile.row, currentTile.column);
+    const destinationRow = traversal.entrySide === 'north' ? BRIDGE_WALKWAY_ROWS - 1 : 0;
+    if (safe && currentTile.row === destinationRow) {
+      traversal.completed = true;
+    } else if (
+      !safe &&
+      !traversal.completed &&
+      this.bridgeStates[currentBridgeIndex].collapsedTileMask === 0
+    ) {
+      const direction = traversal.entrySide === 'north' ? 'south' : 'north';
+      this.collapseBridge(currentBridgeIndex, currentTile.row, direction, player.id);
+    }
+    traversal.lastTileBit = tileBit;
+  }
+
+  private collapseBridge(
+    bridgeIndex: number,
+    failedRow: number,
+    direction: 'north' | 'south',
+    triggeringPlayerId: string,
+  ): void {
+    const collapsedTileMask = getBridgeCollapseMask(failedRow, direction);
+    if (collapsedTileMask === 0) return;
+
+    const bridgeState = this.bridgeStates[bridgeIndex];
+    if (!bridgeState || bridgeState.collapsedTileMask !== 0) return;
+    bridgeState.collapsedTileMask = collapsedTileMask;
+
+    const bridge = this.bridges[bridgeIndex];
+    for (const player of this.state.players) {
+      if (!this.playerOverlapsBridgeMask(player, bridge, collapsedTileMask)) continue;
+      this.returnPlayerToBridgeEntry(player, bridgeIndex);
+    }
+
+    console.info(
+      `[Room:${this.id}] Bridge ${bridgeIndex} collapsed ${direction} of row ${failedRow} after ${triggeringPlayerId} stepped off-path`,
+    );
+  }
+
+  private repairBridge(bridgeIndex: number, repairingPlayerId: string): void {
+    const bridgeState = this.bridgeStates[bridgeIndex];
+    if (!bridgeState || bridgeState.collapsedTileMask === 0) return;
+    bridgeState.collapsedTileMask = 0;
+
+    const bridge = this.bridges[bridgeIndex];
+    for (const player of this.state.players) {
+      const feet = this.getPlayerFeetCenter(player);
+      if (getBridgeWalkwayTileAtPoint(bridge, feet.x, feet.y, this.map.tileSize)) {
+        this.returnPlayerToBridgeEntry(player, bridgeIndex);
+      }
+    }
+
+    for (const [playerId, traversal] of this.bridgeTraversals) {
+      if (traversal.bridgeIndex === bridgeIndex) this.bridgeTraversals.delete(playerId);
+    }
+
+    console.info(
+      `[Room:${this.id}] Bridge ${bridgeIndex} repaired by ${repairingPlayerId}`,
+    );
+  }
+
+  private playerOverlapsBridgeMask(
+    player: PlayerInfo,
+    bridge: BridgePlacement,
+    mask: number,
+  ): boolean {
+    const left = player.x - FEET_HITBOX_W / 2;
+    const top = player.y - FEET_HITBOX_H;
+    const right = left + FEET_HITBOX_W - 1;
+    const bottom = player.y - 1;
+
+    for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
+      for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+        if ((mask & getBridgeTileBit(row, column)) === 0) continue;
+        const tile = getBridgeWalkwayTileBounds(bridge, row, column, this.map.tileSize);
+        if (
+          left <= tile.right &&
+          right >= tile.left &&
+          top <= tile.bottom &&
+          bottom >= tile.top
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private returnPlayerToBridgeEntry(player: RoomPlayerInfo, bridgeIndex: number): void {
+    const bridge = this.bridges[bridgeIndex];
+    const traversal = this.bridgeTraversals.get(player.id);
+    let entrySide = traversal?.bridgeIndex === bridgeIndex ? traversal.entrySide : null;
+    if (!entrySide) {
+      const first = getBridgeWalkwayTileBounds(bridge, 0, 0, this.map.tileSize);
+      const last = getBridgeWalkwayTileBounds(
+        bridge,
+        BRIDGE_WALKWAY_ROWS - 1,
+        0,
+        this.map.tileSize,
+      );
+      const midpoint = (first.top + last.bottom) / 2;
+      entrySide = this.getPlayerFeetCenter(player).y <= midpoint ? 'north' : 'south';
+    }
+
+    const returnPosition = getBridgeBankReturnPosition(
+      bridge,
+      entrySide,
+      this.map.tileSize,
+    );
+    this.clearQueuedInputs(player);
+    player.x = returnPosition.x;
+    player.y = returnPosition.y;
+    this.bridgeTraversals.delete(player.id);
+    this.bridgeRepairOccupancy.delete(player.id);
   }
 
   /**
@@ -914,6 +1172,7 @@ export class Room {
       runestones: this.runestones.map((r) => ({ ...r })),
       portal: this.portalPosition ? { ...this.portalPosition } : null,
       gateStates: this.state.gateStates.map((g) => ({ ...g })),
+      bridgeStates: this.bridgeStates.map((bridgeState) => ({ ...bridgeState })),
     };
   }
 
@@ -921,6 +1180,8 @@ export class Room {
     this.stopLoop();
     this.sockets.clear();
     this.inputQueues.clear();
+    this.bridgeTraversals.clear();
+    this.bridgeRepairOccupancy.clear();
     this.state.players = [];
   }
 }

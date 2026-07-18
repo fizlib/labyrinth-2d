@@ -115,6 +115,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | `players` | `PlayerInfo[]` | All connected players in the room |
 | `runestones` | `RunestoneInfo[]` | Three runestones with activation state |
 | `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
+| `bridgeStates` | `BridgeState[]` | Authoritative missing-stone mask for every generated bridge |
 
 ## Shared Gameplay Systems
 
@@ -124,7 +125,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Both client and server use the same feet-based collision logic.
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
-- Bridge obstacles use the same six authored rectangle/right-triangle colliders on the client and server, leaving a two-tile-wide walkable stone span between their forest banks.
+- Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
 
 ### Runestones and Portal Flow
@@ -156,7 +157,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 
 Map generation lives in `packages/shared/src/maps/level1.ts`.
 
-`generateMazeLayout()` returns the tile map, spawn points, gate placements, and a visual-only `dirtMask` used by the client ground renderer and minimap.
+`generateMazeLayout()` returns the tile map, spawn points, gate and bridge placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable collapsed masks live in `GameState`.
 
 ### Core Layout
 
@@ -181,6 +182,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 8. Compute spawn points from the ungated maze, then stamp one closed gate cell per team along the chosen spawn-to-hub routes when a qualifying vertical (north-south) corridor cell exists. Horizontal passages never receive gates.
 9. Stamp a visual-only dirt mask around each closed gate so the client can render short dirt approaches that transition back into grass.
 10. Select up to 12 bridge passages across the whole maze, independently of spawn-to-hub routes. Each bridge connects two empty 6×6 cells, retains forest walls along its west and east banks, excludes spawn/hub/gate cells, and never shares either adjacent cell with another bridge.
+11. Assign every bridge a distinct deterministic hidden route through its 2×6 central-stone walkway. The permanent stair tiles at both ends are outside the puzzle. Routes have one safe tile at each endpoint and one or two non-adjacent rows where the route crosses between columns.
 
 ### Spawns and Objective Placement
 
@@ -190,6 +192,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 - Closed gates are chosen from vertical (north-south) corridor cells on spawn-to-hub paths and are rendered as one-tile-thick horizontal barriers through the middle of those cells.
 - Each gate also produces a short rectangular dirt band in shared layout data. The dirt mask is visual-only and does not affect collision or navigation.
 - Bridge selection is deterministic per maze seed and is intentionally global rather than restricted to squad routes.
+- Bridge puzzle state is shared by the room. A wrong step removes both columns strictly ahead of the player, and entering either authored treasure circle restores the original route.
 - Portal placement is also BFS-driven, prefers cells deeper in the maze than player spawns, and excludes both cells reserved by every bridge.
 
 ### Tile IDs

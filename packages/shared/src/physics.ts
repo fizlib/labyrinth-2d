@@ -11,6 +11,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { isSolidTileId, type BridgePlacement, type TileMapData } from './maps/level1.js';
+import {
+  BRIDGE_WALKWAY_COLUMNS,
+  BRIDGE_WALKWAY_ROWS,
+  getBridgeTileBit,
+  getBridgeWalkwayTileBounds,
+  type BridgeState,
+} from './bridge.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -292,6 +299,7 @@ export function isPositionValid(
   map: TileMapData,
   portal?: PortalCollider | null,
   bridges: readonly BridgePlacement[] = [],
+  bridgeStates: readonly BridgeState[] = [],
 ): boolean {
   const ts = map.tileSize;
 
@@ -332,6 +340,30 @@ export function isPositionValid(
     }
   }
 
+  for (const bridgeState of bridgeStates) {
+    if (bridgeState.collapsedTileMask === 0) continue;
+    const bridge = bridges[bridgeState.bridgeIndex];
+    if (!bridge) continue;
+
+    for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
+      for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+        const bit = getBridgeTileBit(row, column);
+        if ((bridgeState.collapsedTileMask & bit) === 0) continue;
+        if (
+          intersectsBounds(
+            left,
+            top,
+            right,
+            bottom,
+            getBridgeWalkwayTileBounds(bridge, row, column, ts),
+          )
+        ) {
+          return false;
+        }
+      }
+    }
+  }
+
   return true;
 }
 
@@ -343,6 +375,7 @@ export function applyInputWithCollision(
   map: TileMapData,
   portal?: PortalCollider | null,
   bridges: readonly BridgePlacement[] = [],
+  bridgeStates: readonly BridgeState[] = [],
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
@@ -356,14 +389,14 @@ export function applyInputWithCollision(
 
   if (dx !== 0) {
     const candidateX = x + dx;
-    if (isPositionValid(candidateX, y, map, portal, bridges)) {
+    if (isPositionValid(candidateX, y, map, portal, bridges, bridgeStates)) {
       newX = candidateX;
     }
   }
 
   if (dy !== 0) {
     const candidateY = y + dy;
-    if (isPositionValid(newX, candidateY, map, portal, bridges)) {
+    if (isPositionValid(newX, candidateY, map, portal, bridges, bridgeStates)) {
       newY = candidateY;
     }
   }

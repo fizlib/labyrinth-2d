@@ -1,3 +1,5 @@
+import { BRIDGE_WALKWAY_ROW_Y } from '@labyrinth/shared';
+
 export interface BridgeObstacleSpriteSpec {
   asset: BridgeObstacleAsset;
   x: number;
@@ -227,6 +229,15 @@ export const BRIDGE_OBSTACLE_TERRAIN_SPRITES: readonly BridgeObstacleSpriteSpec[
 
 export function getBridgeObstacleAssetPath(asset: BridgeObstacleAsset): string {
   return BRIDGE_OBSTACLE_ASSET_PATH_BY_ID[asset];
+}
+
+/** Resolve sprite pieces that belong to one of the central puzzle stones. */
+export function getBridgeWalkwayTileForSpec(
+  spec: BridgeObstacleSpriteSpec,
+): { row: number; column: number } | null {
+  if (spec.x !== 32 && spec.x !== 48) return null;
+  const row = BRIDGE_WALKWAY_ROW_Y.findIndex((rowY) => rowY === spec.y);
+  return row < 0 ? null : { row, column: spec.x === 32 ? 0 : 1 };
 }
 
 export const BRIDGE_OBSTACLE_ASSET_PATHS = [
