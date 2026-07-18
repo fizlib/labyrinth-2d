@@ -5,6 +5,8 @@ import {
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_TILE_COUNT,
   BRIDGE_WALKWAY_ROWS,
+  BRIDGE_REPAIR_DURATION_MS,
+  BRIDGE_TILE_RESTORE_DURATION_MS,
   FEET_HITBOX_W,
   FEET_HITBOX_H,
   TILE_FLOOR,
@@ -13,6 +15,8 @@ import {
   getBridgeBankReturnPosition,
   getBridgeCollapseMask,
   getBridgeRepairCircleBounds,
+  getBridgeRepairCollapsedMask,
+  getBridgeRepairTileOrder,
   getBridgeTileBit,
   getBridgeWalkwayTileAtPoint,
   getBridgeWalkwayTileBounds,
@@ -148,6 +152,46 @@ test('collapse masks select both columns strictly ahead', () => {
   assert.equal(getBridgeCollapseMask(0, 'north'), expectedNorthTerminal);
 });
 
+test('bridge repairs restore one tile at a time across a fixed ten seconds', () => {
+  const mask =
+    getBridgeTileBit(1, 0) |
+    getBridgeTileBit(1, 1) |
+    getBridgeTileBit(3, 0) |
+    getBridgeTileBit(4, 1);
+  assert.deepEqual(getBridgeRepairTileOrder(mask, 'north'), [
+    getBridgeTileBit(1, 0),
+    getBridgeTileBit(1, 1),
+    getBridgeTileBit(3, 0),
+    getBridgeTileBit(4, 1),
+  ]);
+  assert.deepEqual(getBridgeRepairTileOrder(mask, 'south'), [
+    getBridgeTileBit(4, 1),
+    getBridgeTileBit(3, 0),
+    getBridgeTileBit(1, 1),
+    getBridgeTileBit(1, 0),
+  ]);
+
+  const restoreWindow = BRIDGE_REPAIR_DURATION_MS - BRIDGE_TILE_RESTORE_DURATION_MS;
+  assert.equal(
+    getBridgeRepairCollapsedMask(mask, 'north', 0),
+    mask & ~getBridgeTileBit(1, 0),
+  );
+  assert.equal(
+    getBridgeRepairCollapsedMask(mask, 'north', restoreWindow - 1),
+    getBridgeTileBit(4, 1),
+  );
+  assert.equal(getBridgeRepairCollapsedMask(mask, 'north', restoreWindow), 0);
+  assert.equal(getBridgeRepairCollapsedMask(mask, 'north', BRIDGE_REPAIR_DURATION_MS), 0);
+
+  const singleTileMask = getBridgeTileBit(2, 0);
+  assert.equal(getBridgeRepairCollapsedMask(singleTileMask, 'south', 0), singleTileMask);
+  assert.equal(
+    getBridgeRepairCollapsedMask(singleTileMask, 'south', restoreWindow - 1),
+    singleTileMask,
+  );
+  assert.equal(getBridgeRepairCollapsedMask(singleTileMask, 'south', restoreWindow), 0);
+});
+
 test('walkway, repair-circle, and bank geometry stays aligned to the prefab', () => {
   const bridge = {
     cellX: 0,
@@ -267,5 +311,51 @@ test('collapsed stones become solid water gaps while intact stones stay walkable
       ],
     ),
     false,
+  );
+  assert.equal(
+    isPositionValid(
+      playerX,
+      playerY,
+      map,
+      null,
+      [bridge],
+      [
+        {
+          bridgeIndex: 0,
+          collapsedTileMask: 0,
+          repairingSide: 'north',
+          repairActive: true,
+          repairStartedTick: 10,
+          repairInitialCollapsedTileMask: getBridgeTileBit(4, 0),
+        },
+      ],
+    ),
+    false,
+    'restored stones must remain blocked until the whole repair completes',
+  );
+
+  const intactBounds = getBridgeWalkwayTileBounds(bridge, 3, 0, map.tileSize);
+  const intactPlayerX = (intactBounds.left + intactBounds.right) / 2;
+  const intactPlayerY = intactBounds.top + FEET_HITBOX_H;
+  assert.equal(
+    isPositionValid(
+      intactPlayerX,
+      intactPlayerY,
+      map,
+      null,
+      [bridge],
+      [
+        {
+          bridgeIndex: 0,
+          collapsedTileMask: 0,
+          repairingSide: 'south',
+          repairActive: false,
+          repairStartedTick: 10,
+          repairInitialCollapsedTileMask: getBridgeTileBit(4, 0),
+        },
+      ],
+    ),
+    true,
+    'stones that never fell must remain walkable during repair',
   );
 });

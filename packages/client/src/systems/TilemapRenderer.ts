@@ -851,6 +851,11 @@ export class TilemapRenderer {
         state?.collapsedTileMask ?? 0,
         animate,
       );
+      this.bridgeVisuals[bridgeIndex].syncRepairState(
+        state?.repairingSide ?? null,
+        state?.repairActive ?? false,
+        state?.repairInitialCollapsedTileMask ?? 0,
+      );
     }
   }
 

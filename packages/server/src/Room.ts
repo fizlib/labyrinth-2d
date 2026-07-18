@@ -35,12 +35,14 @@ import {
   getNavigationDirectionForPosition,
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_ROWS,
+  BRIDGE_REPAIR_DURATION_MS,
   getBridgeTileBit,
   getBridgeWalkwayTileBounds,
   getBridgeWalkwayTileAtPoint,
   getBridgeWalkwayTileMaskAtFeetCenter,
   getBridgeRepairCircleBounds,
   getBridgeCollapseMask,
+  getBridgeRepairCollapsedMask,
   getBridgeBankReturnPosition,
   deriveFacingDirection,
   applyInputWithCollision,
@@ -96,6 +98,17 @@ interface BridgeTraversalState {
   entrySide: BridgeEntrySide;
   lastTileMask: number;
   completed: boolean;
+}
+
+interface BridgeRepairProgress {
+  startedTick: number;
+  activeElapsedMs: number;
+  lastUpdatedAtMs: number;
+  initialCollapsedTileMask: number;
+  orderSide: BridgeEntrySide;
+  channelSide: BridgeEntrySide;
+  repairingPlayerId: string | null;
+  startedByPlayerId: string;
 }
 
 interface RoomPlayerInfo extends PlayerInfo {
@@ -244,6 +257,9 @@ export class Room {
   /** Current treasure-circle occupancy, used to require a fresh step-on edge. */
   private readonly bridgeRepairOccupancy = new Map<string, string>();
 
+  /** Fixed-duration repairs currently progressing across bridge stones. */
+  private readonly bridgeRepairs = new Map<number, BridgeRepairProgress>();
+
   /** Per-gate open/closed state (true = open/passable). */
   private gateOpenStates: boolean[];
 
@@ -266,6 +282,10 @@ export class Room {
     this.bridgeStates = this.bridges.map((_, bridgeIndex) => ({
       bridgeIndex,
       collapsedTileMask: 0,
+      repairingSide: null,
+      repairActive: false,
+      repairStartedTick: null,
+      repairInitialCollapsedTileMask: 0,
     }));
     this.gateOpenStates = new Array(this.gates.length).fill(false);
     this.hubDistanceField = computeHubDistanceField(this.map);
@@ -848,6 +868,8 @@ export class Room {
       queue.length = 0;
     }
 
+    this.advanceBridgeRepairs();
+
     // ── Pressure plate / gate logic ──────────────────────────────────────
     this.updateGateStates();
 
@@ -885,11 +907,13 @@ export class Room {
       if (!circle) continue;
 
       repairKey = `${bridgeIndex}:${circle.side}`;
-      if (
-        this.bridgeRepairOccupancy.get(player.id) !== repairKey &&
-        this.bridgeStates[bridgeIndex].collapsedTileMask !== 0
-      ) {
-        this.repairBridge(bridgeIndex, player.id);
+      if (this.bridgeRepairOccupancy.get(player.id) !== repairKey) {
+        const bridgeState = this.bridgeStates[bridgeIndex];
+        if (bridgeState.repairingSide === null && bridgeState.collapsedTileMask !== 0) {
+          this.startBridgeRepair(bridgeIndex, circle.side, player.id);
+        } else if (bridgeState.repairingSide !== null && !bridgeState.repairActive) {
+          this.resumeBridgeRepair(bridgeIndex, circle.side, player.id);
+        }
       }
       break;
     }
@@ -916,6 +940,11 @@ export class Room {
     }
 
     if (currentBridgeIndex < 0 || !currentTile) {
+      this.bridgeTraversals.delete(player.id);
+      return;
+    }
+
+    if (this.bridgeStates[currentBridgeIndex].repairingSide !== null) {
       this.bridgeTraversals.delete(player.id);
       return;
     }
@@ -991,6 +1020,11 @@ export class Room {
     const bridgeState = this.bridgeStates[bridgeIndex];
     if (!bridgeState || bridgeState.collapsedTileMask !== 0) return;
     bridgeState.collapsedTileMask = collapsedTileMask;
+    bridgeState.repairingSide = null;
+    bridgeState.repairActive = false;
+    bridgeState.repairStartedTick = null;
+    bridgeState.repairInitialCollapsedTileMask = 0;
+    this.bridgeRepairs.delete(bridgeIndex);
 
     const bridge = this.bridges[bridgeIndex];
     let triggeringPlayerReturned = false;
@@ -1012,10 +1046,40 @@ export class Room {
     );
   }
 
-  private repairBridge(bridgeIndex: number, repairingPlayerId: string): void {
+  private startBridgeRepair(
+    bridgeIndex: number,
+    side: BridgeEntrySide,
+    repairingPlayerId: string,
+  ): void {
     const bridgeState = this.bridgeStates[bridgeIndex];
-    if (!bridgeState || bridgeState.collapsedTileMask === 0) return;
-    bridgeState.collapsedTileMask = 0;
+    if (
+      !bridgeState ||
+      bridgeState.collapsedTileMask === 0 ||
+      bridgeState.repairingSide !== null
+    ) {
+      return;
+    }
+
+    const repair: BridgeRepairProgress = {
+      startedTick: this.state.tick,
+      activeElapsedMs: 0,
+      lastUpdatedAtMs: Date.now(),
+      initialCollapsedTileMask: bridgeState.collapsedTileMask,
+      orderSide: side,
+      channelSide: side,
+      repairingPlayerId,
+      startedByPlayerId: repairingPlayerId,
+    };
+    this.bridgeRepairs.set(bridgeIndex, repair);
+    bridgeState.repairingSide = side;
+    bridgeState.repairActive = true;
+    bridgeState.repairStartedTick = repair.startedTick;
+    bridgeState.repairInitialCollapsedTileMask = repair.initialCollapsedTileMask;
+    bridgeState.collapsedTileMask = getBridgeRepairCollapsedMask(
+      repair.initialCollapsedTileMask,
+      repair.orderSide,
+      0,
+    );
 
     const bridge = this.bridges[bridgeIndex];
     for (const player of this.state.players) {
@@ -1030,7 +1094,107 @@ export class Room {
     }
 
     console.info(
-      `[Room:${this.id}] Bridge ${bridgeIndex} repaired by ${repairingPlayerId}`,
+      `[Room:${this.id}] Bridge ${bridgeIndex} repair started from ${side} by ${repairingPlayerId}`,
+    );
+  }
+
+  private resumeBridgeRepair(
+    bridgeIndex: number,
+    side: BridgeEntrySide,
+    repairingPlayerId: string,
+  ): void {
+    const bridgeState = this.bridgeStates[bridgeIndex];
+    const repair = this.bridgeRepairs.get(bridgeIndex);
+    if (!bridgeState || !repair || bridgeState.repairActive) return;
+
+    repair.repairingPlayerId = repairingPlayerId;
+    repair.channelSide = side;
+    repair.lastUpdatedAtMs = Date.now();
+    bridgeState.repairingSide = side;
+    bridgeState.repairActive = true;
+    console.info(
+      `[Room:${this.id}] Bridge ${bridgeIndex} repair resumed from ${side} by ${repairingPlayerId}`,
+    );
+  }
+
+  private advanceBridgeRepairs(): void {
+    for (const [bridgeIndex, repair] of this.bridgeRepairs) {
+      const bridgeState = this.bridgeStates[bridgeIndex];
+      if (!bridgeState) {
+        this.bridgeRepairs.delete(bridgeIndex);
+        continue;
+      }
+
+      const now = Date.now();
+      const repairingPlayer = repair.repairingPlayerId
+        ? this.state.players.find((player) => player.id === repair.repairingPlayerId)
+        : null;
+      if (
+        bridgeState.repairActive &&
+        (!repairingPlayer ||
+          !this.isPlayerOnBridgeRepairCircle(
+            repairingPlayer,
+            bridgeIndex,
+            repair.channelSide,
+          ))
+      ) {
+        bridgeState.repairActive = false;
+        repair.repairingPlayerId = null;
+        console.info(`[Room:${this.id}] Bridge ${bridgeIndex} repair paused`);
+      } else if (bridgeState.repairActive) {
+        repair.activeElapsedMs += Math.max(0, now - repair.lastUpdatedAtMs);
+      }
+      repair.lastUpdatedAtMs = now;
+
+      bridgeState.collapsedTileMask = getBridgeRepairCollapsedMask(
+        repair.initialCollapsedTileMask,
+        repair.orderSide,
+        repair.activeElapsedMs,
+      );
+      if (repair.activeElapsedMs < BRIDGE_REPAIR_DURATION_MS) continue;
+
+      bridgeState.collapsedTileMask = 0;
+      bridgeState.repairingSide = null;
+      bridgeState.repairActive = false;
+      bridgeState.repairStartedTick = null;
+      bridgeState.repairInitialCollapsedTileMask = 0;
+      this.bridgeRepairs.delete(bridgeIndex);
+
+      const bridge = this.bridges[bridgeIndex];
+      for (const player of this.state.players) {
+        const feet = this.getPlayerFeetCenter(player);
+        if (getBridgeWalkwayTileAtPoint(bridge, feet.x, feet.y, this.map.tileSize)) {
+          this.returnPlayerToBridgeEntry(player, bridgeIndex);
+        }
+      }
+      for (const [playerId, traversal] of this.bridgeTraversals) {
+        if (traversal.bridgeIndex === bridgeIndex) this.bridgeTraversals.delete(playerId);
+      }
+
+      console.info(
+        `[Room:${this.id}] Bridge ${bridgeIndex} repair completed after ${BRIDGE_REPAIR_DURATION_MS}ms of channeling (started by ${repair.startedByPlayerId})`,
+      );
+    }
+  }
+
+  private isPlayerOnBridgeRepairCircle(
+    player: PlayerInfo,
+    bridgeIndex: number,
+    side: BridgeEntrySide,
+  ): boolean {
+    const bridge = this.bridges[bridgeIndex];
+    if (!bridge) return false;
+    const bounds = getBridgeRepairCircleBounds(bridge, this.map.tileSize).find(
+      (circle) => circle.side === side,
+    );
+    if (!bounds) return false;
+
+    const feet = this.getPlayerFeetCenter(player);
+    return (
+      feet.x >= bounds.left &&
+      feet.x <= bounds.right &&
+      feet.y >= bounds.top &&
+      feet.y <= bounds.bottom
     );
   }
 

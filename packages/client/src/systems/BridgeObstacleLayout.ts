@@ -1,4 +1,4 @@
-import { BRIDGE_WALKWAY_ROW_Y } from '@labyrinth/shared';
+import { BRIDGE_WALKWAY_ROW_Y, type BridgeEntrySide } from '@labyrinth/shared';
 
 export interface BridgeObstacleSpriteSpec {
   asset: BridgeObstacleAsset;
@@ -238,6 +238,15 @@ export function getBridgeWalkwayTileForSpec(
   if (spec.x !== 32 && spec.x !== 48) return null;
   const row = BRIDGE_WALKWAY_ROW_Y.findIndex((rowY) => rowY === spec.y);
   return row < 0 ? null : { row, column: spec.x === 32 ? 0 : 1 };
+}
+
+export function getBridgeRepairCircleSideForSpec(
+  spec: BridgeObstacleSpriteSpec,
+): BridgeEntrySide | null {
+  if (spec.asset !== 'buried') return null;
+  if (spec.x === 16 && spec.y === 10) return 'north';
+  if (spec.x === 64 && spec.y === 144) return 'south';
+  return null;
 }
 
 export const BRIDGE_OBSTACLE_ASSET_PATHS = [

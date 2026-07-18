@@ -11,6 +11,8 @@ const BRIDGE_WALKWAY_TILE_HEIGHT = 15;
 export const BRIDGE_WALKWAY_ROWS = 6;
 export const BRIDGE_WALKWAY_COLUMNS = 2;
 export const BRIDGE_WALKWAY_TILE_COUNT = BRIDGE_WALKWAY_ROWS * BRIDGE_WALKWAY_COLUMNS;
+export const BRIDGE_REPAIR_DURATION_MS = 10_000;
+export const BRIDGE_TILE_RESTORE_DURATION_MS = 250;
 
 export type BridgeEntrySide = 'north' | 'south';
 export type BridgeTravelDirection = 'north' | 'south';
@@ -26,6 +28,14 @@ export interface BridgeState {
   bridgeIndex: number;
   /** Bit row * 2 + column is set when that walkway stone is missing. */
   collapsedTileMask: number;
+  /** Circle currently channeling a repair, or null while idle. */
+  repairingSide: BridgeEntrySide | null;
+  /** Whether a player is currently holding the repair circle. */
+  repairActive: boolean;
+  /** Authoritative tick on which the current repair began. */
+  repairStartedTick: number | null;
+  /** Missing stones captured when this repair began. */
+  repairInitialCollapsedTileMask: number;
 }
 
 export interface BridgeRepairCircleBounds extends PortalBounds {
@@ -174,6 +184,59 @@ export function getBridgeCollapseMask(
         mask |= getBridgeTileBit(row, column);
       }
     }
+  }
+  return mask;
+}
+
+/** Missing-tile bits ordered outward from the circle that began the repair. */
+export function getBridgeRepairTileOrder(
+  collapsedTileMask: number,
+  side: BridgeEntrySide,
+): number[] {
+  const rows = Array.from({ length: BRIDGE_WALKWAY_ROWS }, (_, row) => row);
+  if (side === 'south') rows.reverse();
+  const columns = side === 'north' ? [0, 1] : [1, 0];
+  const bits: number[] = [];
+
+  for (const row of rows) {
+    for (const column of columns) {
+      const bit = getBridgeTileBit(row, column);
+      if ((collapsedTileMask & bit) !== 0) bits.push(bit);
+    }
+  }
+  return bits;
+}
+
+/**
+ * Remaining collapsed mask at an elapsed repair time. Tile rise animations
+ * are distributed across the fixed ten-second channel and finish at its end.
+ */
+export function getBridgeRepairCollapsedMask(
+  initialCollapsedTileMask: number,
+  side: BridgeEntrySide,
+  elapsedMs: number,
+): number {
+  const orderedBits = getBridgeRepairTileOrder(initialCollapsedTileMask, side);
+  if (orderedBits.length === 0) return 0;
+
+  const restoreWindowMs = BRIDGE_REPAIR_DURATION_MS - BRIDGE_TILE_RESTORE_DURATION_MS;
+  const clampedElapsedMs = Math.max(0, Math.min(elapsedMs, restoreWindowMs));
+  const restoredCount =
+    orderedBits.length === 1
+      ? clampedElapsedMs >= restoreWindowMs
+        ? 1
+        : 0
+      : Math.min(
+          orderedBits.length,
+          1 +
+            Math.floor(
+              (clampedElapsedMs * (orderedBits.length - 1)) / restoreWindowMs,
+            ),
+        );
+
+  let mask = initialCollapsedTileMask;
+  for (let index = 0; index < restoredCount; index++) {
+    mask &= ~orderedBits[index];
   }
   return mask;
 }

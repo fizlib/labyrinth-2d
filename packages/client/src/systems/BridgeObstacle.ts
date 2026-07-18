@@ -1,22 +1,27 @@
-import { Container, Sprite, Texture } from 'pixi.js';
+import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import {
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_ROWS,
+  BRIDGE_TILE_RESTORE_DURATION_MS,
   getBridgeTileBit,
+  type BridgeEntrySide,
   type BridgePlacement,
 } from '@labyrinth/shared';
 import {
   BRIDGE_OBSTACLE_SPRITES,
   BRIDGE_OBSTACLE_TERRAIN_SPRITES,
   getBridgeObstacleAssetPath,
+  getBridgeRepairCircleSideForSpec,
   getBridgeWalkwayTileForSpec,
   type BridgeObstacleSpriteSpec,
 } from './BridgeObstacleLayout';
 
 const AUTHORING_TILE_SIZE = 16;
 const BRIDGE_TILE_FALL_DURATION = 0.25;
+const BRIDGE_TILE_RISE_DURATION = BRIDGE_TILE_RESTORE_DURATION_MS / 1000;
 const BRIDGE_TILE_FALL_STAGGER = 0.05;
 const BRIDGE_TILE_FALL_DISTANCE = 8;
+const BRIDGE_REPAIR_PARTICLE_COUNT = 6;
 
 interface TrackedBridgeSprite {
   sprite: Sprite;
@@ -31,6 +36,15 @@ interface BridgeTileAnimation {
   tileIndex: number;
   delay: number;
   elapsed: number;
+  mode: 'fall' | 'rise';
+}
+
+interface BridgeRepairMagicVisual {
+  circleSprite: Sprite;
+  effect: Container;
+  aura: Graphics;
+  particles: Graphics[];
+  elapsed: number;
 }
 
 /** Mutable visual controller for one bridge's 12 central puzzle stones. */
@@ -40,13 +54,73 @@ export class BridgeObstacleVisual {
     () => ({ sprites: [] }),
   );
   private readonly animations = new Map<number, BridgeTileAnimation>();
+  private readonly repairMagic = new Map<BridgeEntrySide, BridgeRepairMagicVisual>();
   private collapsedTileMask = 0;
+  private repairingSide: BridgeEntrySide | null = null;
+  private repairActive = false;
+  private magicalTileMask = 0;
+  private animationElapsed = 0;
 
   constructor(private readonly scale: number) {}
 
   addSprite(row: number, column: number, sprite: Sprite): void {
     const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
     this.tiles[tileIndex]?.sprites.push({ sprite, originalY: sprite.y });
+  }
+
+  addRepairCircle(side: BridgeEntrySide, circleSprite: Sprite, parent: Container): void {
+    const effect = new Container();
+    effect.x = circleSprite.x + circleSprite.width / 2;
+    effect.y = circleSprite.y + circleSprite.height / 2;
+    effect.zIndex = circleSprite.zIndex + 1;
+    effect.visible = false;
+
+    const aura = new Graphics()
+      .circle(0, 0, 7 * this.scale)
+      .stroke({ color: 0x72f1ff, alpha: 0.8, width: Math.max(1, this.scale) });
+    effect.addChild(aura);
+
+    const particles: Graphics[] = [];
+    for (let index = 0; index < BRIDGE_REPAIR_PARTICLE_COUNT; index++) {
+      const color = index % 2 === 0 ? 0x9ffcff : 0xffe88a;
+      const particle = new Graphics()
+        .rect(-this.scale, -this.scale, 2 * this.scale, 2 * this.scale)
+        .fill({ color });
+      particles.push(particle);
+      effect.addChild(particle);
+    }
+
+    parent.addChild(effect);
+    this.repairMagic.set(side, {
+      circleSprite,
+      effect,
+      aura,
+      particles,
+      elapsed: 0,
+    });
+  }
+
+  syncRepairState(
+    side: BridgeEntrySide | null,
+    active: boolean,
+    initialCollapsedTileMask: number,
+  ): void {
+    const nextMagicalTileMask = side
+      ? initialCollapsedTileMask & ~this.collapsedTileMask
+      : 0;
+    this.resetMagicalTiles(this.magicalTileMask & ~nextMagicalTileMask);
+    this.magicalTileMask = nextMagicalTileMask;
+
+    if (side === this.repairingSide && active === this.repairActive) return;
+    this.deactivateRepairMagic();
+    this.repairingSide = side;
+    this.repairActive = active;
+    if (!side || !active) return;
+
+    const magic = this.repairMagic.get(side);
+    if (!magic) return;
+    magic.elapsed = 0;
+    magic.effect.visible = true;
   }
 
   syncCollapsedTileMask(mask: number, animate: boolean): void {
@@ -56,7 +130,9 @@ export class BridgeObstacleVisual {
     for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
       for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
         const bit = getBridgeTileBit(row, column);
-        if ((restoredMask & bit) !== 0) this.restoreTile(row, column);
+        if ((restoredMask & bit) === 0) continue;
+        if (animate) this.animateRestoreTile(row, column);
+        else this.restoreTile(row, column);
       }
     }
 
@@ -99,30 +175,68 @@ export class BridgeObstacleVisual {
           tileIndex,
           delay: rowOrder * BRIDGE_TILE_FALL_STAGGER,
           elapsed: 0,
+          mode: 'fall',
         });
       }
     }
   }
 
   update(dt: number): void {
+    this.animationElapsed += dt;
     for (const [tileIndex, animation] of this.animations) {
       animation.elapsed += dt;
+      const duration =
+        animation.mode === 'fall' ? BRIDGE_TILE_FALL_DURATION : BRIDGE_TILE_RISE_DURATION;
       const progress = Math.max(
         0,
-        Math.min(1, (animation.elapsed - animation.delay) / BRIDGE_TILE_FALL_DURATION),
+        Math.min(1, (animation.elapsed - animation.delay) / duration),
       );
       if (progress <= 0) continue;
 
-      const easedProgress = progress * progress;
-      for (const tracked of this.tiles[animation.tileIndex].sprites) {
-        tracked.sprite.y =
-          tracked.originalY +
-          Math.round(BRIDGE_TILE_FALL_DISTANCE * this.scale * easedProgress);
-        tracked.sprite.alpha = 1 - progress;
-        if (progress >= 1) tracked.sprite.visible = false;
+      if (animation.mode === 'fall') {
+        const easedProgress = progress * progress;
+        for (const tracked of this.tiles[animation.tileIndex].sprites) {
+          tracked.sprite.y =
+            tracked.originalY +
+            Math.round(BRIDGE_TILE_FALL_DISTANCE * this.scale * easedProgress);
+          tracked.sprite.alpha = 1 - progress;
+          if (progress >= 1) tracked.sprite.visible = false;
+        }
+      } else {
+        const easedProgress = 1 - (1 - progress) * (1 - progress);
+        for (const tracked of this.tiles[animation.tileIndex].sprites) {
+          tracked.sprite.y =
+            tracked.originalY +
+            Math.round(BRIDGE_TILE_FALL_DISTANCE * this.scale * (1 - easedProgress));
+          tracked.sprite.alpha = progress;
+          tracked.sprite.visible = true;
+          if (progress >= 1) {
+            tracked.sprite.y = tracked.originalY;
+            tracked.sprite.alpha = 1;
+          }
+        }
       }
       if (progress >= 1) this.animations.delete(tileIndex);
     }
+
+    this.updateRepairMagic(dt);
+    this.updateMagicalTiles();
+  }
+
+  private animateRestoreTile(row: number, column: number): void {
+    const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
+    this.animations.delete(tileIndex);
+    for (const tracked of this.tiles[tileIndex].sprites) {
+      tracked.sprite.y = tracked.originalY + BRIDGE_TILE_FALL_DISTANCE * this.scale;
+      tracked.sprite.alpha = 0;
+      tracked.sprite.visible = true;
+    }
+    this.animations.set(tileIndex, {
+      tileIndex,
+      delay: 0,
+      elapsed: 0,
+      mode: 'rise',
+    });
   }
 
   private restoreTile(row: number, column: number): void {
@@ -142,6 +256,74 @@ export class BridgeObstacleVisual {
       tracked.sprite.y = tracked.originalY;
       tracked.sprite.alpha = 0;
       tracked.sprite.visible = false;
+    }
+  }
+
+  private deactivateRepairMagic(): void {
+    for (const magic of this.repairMagic.values()) {
+      magic.effect.visible = false;
+      magic.circleSprite.alpha = 1;
+      magic.circleSprite.tint = 0xffffff;
+    }
+  }
+
+  private updateRepairMagic(dt: number): void {
+    if (!this.repairingSide || !this.repairActive) return;
+    const magic = this.repairMagic.get(this.repairingSide);
+    if (!magic) return;
+
+    magic.elapsed += dt;
+    magic.effect.visible = true;
+    magic.circleSprite.tint = 0xb9fbff;
+    magic.circleSprite.alpha = 0.82 + Math.sin(magic.elapsed * 6) * 0.18;
+
+    const auraPulse = 0.9 + Math.sin(magic.elapsed * 4) * 0.12;
+    magic.aura.scale.set(auraPulse);
+    magic.aura.alpha = 0.45 + Math.sin(magic.elapsed * 5) * 0.25;
+
+    for (let index = 0; index < magic.particles.length; index++) {
+      const particle = magic.particles[index];
+      const angle = magic.elapsed * 2.8 + (index / magic.particles.length) * Math.PI * 2;
+      const radius = (9 + Math.sin(magic.elapsed * 3 + index) * 2) * this.scale;
+      particle.x = Math.round(Math.cos(angle) * radius);
+      particle.y = Math.round(Math.sin(angle) * radius);
+      particle.alpha = 0.45 + (Math.sin(magic.elapsed * 7 + index) + 1) * 0.25;
+      const particlePulse = 0.7 + (Math.sin(magic.elapsed * 5 + index) + 1) * 0.2;
+      particle.scale.set(particlePulse);
+    }
+  }
+
+  private updateMagicalTiles(): void {
+    for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
+      for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+        const bit = getBridgeTileBit(row, column);
+        if ((this.magicalTileMask & bit) === 0) continue;
+        const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
+        if (this.animations.has(tileIndex)) continue;
+        const hoverOffset = Math.round(
+          Math.sin(this.animationElapsed * 4 + tileIndex * 0.35) * 1.5 * this.scale,
+        );
+        for (const tracked of this.tiles[tileIndex].sprites) {
+          tracked.sprite.y = tracked.originalY + hoverOffset;
+          tracked.sprite.tint = 0xffffff;
+          tracked.sprite.alpha = 1;
+        }
+      }
+    }
+  }
+
+  private resetMagicalTiles(mask: number): void {
+    for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
+      for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+        const bit = getBridgeTileBit(row, column);
+        if ((mask & bit) === 0) continue;
+        const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
+        for (const tracked of this.tiles[tileIndex].sprites) {
+          if (!this.animations.has(tileIndex)) tracked.sprite.y = tracked.originalY;
+          tracked.sprite.tint = 0xffffff;
+          if (!this.animations.has(tileIndex)) tracked.sprite.alpha = 1;
+        }
+      }
     }
   }
 }
@@ -197,6 +379,8 @@ export function addBridgeObstacles(
         if (walkwayTile) {
           visual.addSprite(walkwayTile.row, walkwayTile.column, sprite);
         }
+        const repairSide = getBridgeRepairCircleSideForSpec(spec);
+        if (repairSide) visual.addRepairCircle(repairSide, sprite, container);
       }
 
       parent.addChild(container);

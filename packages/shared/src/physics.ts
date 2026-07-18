@@ -341,14 +341,19 @@ export function isPositionValid(
   }
 
   for (const bridgeState of bridgeStates) {
-    if (bridgeState.collapsedTileMask === 0) continue;
+    const repairInProgress =
+      bridgeState.repairingSide === 'north' || bridgeState.repairingSide === 'south';
+    const blockedTileMask =
+      bridgeState.collapsedTileMask |
+      (repairInProgress ? (bridgeState.repairInitialCollapsedTileMask ?? 0) : 0);
+    if (blockedTileMask === 0) continue;
     const bridge = bridges[bridgeState.bridgeIndex];
     if (!bridge) continue;
 
     for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
       for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
         const bit = getBridgeTileBit(row, column);
-        if ((bridgeState.collapsedTileMask & bit) === 0) continue;
+        if ((blockedTileMask & bit) === 0) continue;
         if (
           intersectsBounds(
             left,
