@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Container, Sprite, Texture, Graphics, Rectangle } from 'pixi.js';
-import type { TileMapData } from '@labyrinth/shared';
+import type { BridgePlacement, TileMapData } from '@labyrinth/shared';
 import {
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
@@ -38,8 +38,8 @@ const MINIMAP_PADDING = 5;
 /** Distance from the screen edge */
 const MINIMAP_MARGIN = 8;
 
-/** Outer screen margin and frame padding for the fitted whole-maze view. */
-const EXPANDED_MARGIN = 16;
+/** Keep the whole-maze texture at 1:1 scale while fitting its frame on screen. */
+const EXPANDED_MARGIN = 5;
 const EXPANDED_PADDING = 5;
 
 /** Warden-only map toggle styled after the wooden HUD frame. */
@@ -54,6 +54,8 @@ const REVEAL_RADIUS = 7;
 const COL_FLOOR: readonly number[] = [107, 166, 61, 255]; // vibrant grass green
 const COL_DIRT: readonly number[] = [142, 110, 78, 255]; // muted dirt brown
 const COL_WALL: readonly number[] = [89, 73, 58, 255]; // dark wood/stone wall
+const COL_BRIDGE_WATER: readonly number[] = [47, 105, 125, 255]; // deep blue-green water
+const COL_BRIDGE_STONE: readonly number[] = [188, 157, 103, 255]; // pale ancient stone
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
 const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot center
@@ -62,6 +64,7 @@ const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot ce
 
 export interface MinimapOptions {
   isWarden?: boolean;
+  bridges?: readonly BridgePlacement[];
   expandButtonTexture?: Texture | null;
   contractButtonTexture?: Texture | null;
   onExpandedChange?: (expanded: boolean) => void;
@@ -95,6 +98,7 @@ export class Minimap {
   // ── Map / fog state ────────────────────────────────────────────────────
   private mapData: TileMapData;
   private dirtMask: Uint8Array;
+  private bridgeMask: Uint8Array;
   private fog: Uint8Array;
 
   // ── Tracking for incremental updates ───────────────────────────────────
@@ -124,6 +128,7 @@ export class Minimap {
   ) {
     this.mapData = mapData;
     this.dirtMask = dirtMask;
+    this.bridgeMask = this.createBridgeMask(options.bridges ?? []);
     this.isWarden = options.isWarden ?? false;
     this.expandButtonTexture = options.expandButtonTexture ?? null;
     this.contractButtonTexture = options.contractButtonTexture ?? null;
@@ -342,6 +347,39 @@ export class Minimap {
   }
 
   // ── Canvas rendering ──────────────────────────────────────────────────
+
+  /**
+   * Stamp the authored water channel and central stone walkway into a
+   * tile-sized lookup shared by the compact and expanded map renderers.
+   */
+  private createBridgeMask(bridges: readonly BridgePlacement[]): Uint8Array {
+    const mask = new Uint8Array(this.mapData.width * this.mapData.height);
+
+    const stampRect = (
+      startX: number,
+      startY: number,
+      width: number,
+      height: number,
+      value: number,
+    ): void => {
+      for (let y = startY; y < startY + height; y++) {
+        if (y < 0 || y >= this.mapData.height) continue;
+        for (let x = startX; x < startX + width; x++) {
+          if (x < 0 || x >= this.mapData.width) continue;
+          mask[y * this.mapData.width + x] = value;
+        }
+      }
+    };
+
+    for (const bridge of bridges) {
+      // The prefab's water spans x=0..5 and y=3..8 relative to its anchor.
+      stampRect(bridge.tileX, bridge.tileY + 3, 6, 6, 1);
+      // Its two-column stone path spans x=2..3 and intersects tile rows 2..8.
+      stampRect(bridge.tileX + 2, bridge.tileY + 2, 2, 7, 2);
+    }
+
+    return mask;
+  }
 
   /** Build a screen-fitted, non-player-centered view of the complete maze. */
   private createExpandedOverlay(
@@ -669,6 +707,9 @@ export class Minimap {
 
   /** Get the minimap colour for a given tile ID. */
   private tileColor(tileIndex: number, id: number): readonly number[] {
+    if (this.bridgeMask[tileIndex] === 2) return COL_BRIDGE_STONE;
+    if (this.bridgeMask[tileIndex] === 1) return COL_BRIDGE_WATER;
+
     const isGroundTile =
       id === TILE_FLOOR ||
       id === TILE_FLOOR_SHADOW ||

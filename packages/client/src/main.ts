@@ -1657,6 +1657,7 @@ async function main(): Promise<void> {
       INTERNAL_HEIGHT,
       {
         isWarden: role === 'warden',
+        bridges: currentLayout.bridges,
         expandButtonTexture: assets.expandMapButtonTexture,
         contractButtonTexture: assets.contractMapButtonTexture,
       },
