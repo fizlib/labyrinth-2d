@@ -1230,6 +1230,7 @@ async function main(): Promise<void> {
         currentMap,
         layout.gates,
         layout.pressurePlates,
+        layout.bridges,
         layout.dirtMask,
         assets,
         app.renderer,
@@ -1430,6 +1431,7 @@ async function main(): Promise<void> {
               input.dt,
               currentMap!,
               latestServerState?.portal,
+              currentLayout?.bridges,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -1725,6 +1727,7 @@ async function main(): Promise<void> {
         dtSeconds,
         currentMap!,
         latestServerState?.portal,
+        currentLayout?.bridges,
       );
       localX = result.x;
       localY = result.y;

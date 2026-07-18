@@ -64,12 +64,25 @@ export interface PressurePlateInfo {
   side: 'spawn' | 'hub';
 }
 
+/** Authored bridge obstacle spanning the wall opening between two cells. */
+export interface BridgePlacement {
+  /** Shared cell column. */
+  cellX: number;
+  /** Row of the cell north of the bridge. */
+  northCellY: number;
+  /** Top-left tile of the 6×10 vertical passage occupied by the bridge. */
+  tileX: number;
+  tileY: number;
+}
+
 export interface GeneratedMazeLayout {
   map: TileMapData;
   spawnPoints: SpawnPoint[];
   gates: GatePlacement[];
   /** Pressure plate positions for gate activation. */
   pressurePlates: PressurePlateInfo[];
+  /** Decorative, collidable bridges placed in qualifying vertical passages. */
+  bridges: BridgePlacement[];
   /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
   dirtMask: Uint8Array;
 }
@@ -570,6 +583,10 @@ interface CellCoord {
 const DEFAULT_LAYOUT_SPAWN_DISTANCE = 10;
 const DEFAULT_LAYOUT_TEAM_COUNT = 3;
 const GATE_MIDPOINT_OFFSET = Math.floor(CELL_SIZE / 2);
+const BRIDGE_DENSITY = 0.16;
+const MIN_BRIDGES = 4;
+const MAX_BRIDGES = 12;
+const BRIDGE_RANDOM_SALT = 0x5f3759df;
 
 function isWalkableTileId(tile: number): boolean {
   return tile === TILE_FLOOR || tile === TILE_FLOOR_SHADOW;
@@ -833,6 +850,100 @@ function computePressurePlates(gates: GatePlacement[]): PressurePlateInfo[] {
   return plates;
 }
 
+function isEmptyBridgeCell(data: number[], cx: number, cy: number): boolean {
+  const { tx, ty } = cellToTile(cx, cy);
+  for (let dy = 0; dy < CELL_SIZE; dy++) {
+    for (let dx = 0; dx < CELL_SIZE; dx++) {
+      if (!isWalkableTileId(data[(ty + dy) * MAP_WIDTH + (tx + dx)])) return false;
+    }
+  }
+  return true;
+}
+
+function isForestWallTileId(tile: number): boolean {
+  return tile >= TILE_WALL_FACE && tile <= TILE_WALL_TOP_EDGE;
+}
+
+function supportsBridge(data: number[], cx: number, northCy: number): boolean {
+  const { tx, ty } = cellToTile(cx, northCy);
+  const passageY = ty + CELL_SIZE;
+
+  // The authored layout fills a complete 6×10 north-south opening.
+  for (let dy = 0; dy < WALL_HEIGHT; dy++) {
+    for (let dx = 0; dx < CELL_SIZE; dx++) {
+      if (!isWalkableTileId(data[(passageY + dy) * MAP_WIDTH + (tx + dx)])) return false;
+    }
+
+    // Preserve the forest banks visible along both sides of the bridge.
+    if (!isForestWallTileId(data[(passageY + dy) * MAP_WIDTH + tx - 1])) return false;
+    if (!isForestWallTileId(data[(passageY + dy) * MAP_WIDTH + tx + CELL_SIZE]))
+      return false;
+  }
+
+  return true;
+}
+
+function computeBridgePlacements(
+  data: number[],
+  spawnPoints: SpawnPoint[],
+  seed: number,
+): BridgePlacement[] {
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
+  const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+  const spawnCells = new Set(
+    spawnPoints.map((spawnPoint) => {
+      const cell = spawnPointToCell(spawnPoint);
+      return `${cell.cx},${cell.cy}`;
+    }),
+  );
+  const candidates: BridgePlacement[] = [];
+
+  for (let northCellY = 0; northCellY < GRID_CELLS - 1; northCellY++) {
+    for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
+      const northKey = `${cellX},${northCellY}`;
+      const southKey = `${cellX},${northCellY + 1}`;
+      if (hubCells.has(northKey) || hubCells.has(southKey)) continue;
+      if (spawnCells.has(northKey) || spawnCells.has(southKey)) continue;
+      if (!isEmptyBridgeCell(data, cellX, northCellY)) continue;
+      if (!isEmptyBridgeCell(data, cellX, northCellY + 1)) continue;
+      if (!areCellsConnected(data, cellX, northCellY, cellX, northCellY + 1)) continue;
+      if (!supportsBridge(data, cellX, northCellY)) continue;
+
+      const { tx, ty } = cellToTile(cellX, northCellY);
+      candidates.push({
+        cellX,
+        northCellY,
+        tileX: tx,
+        tileY: ty + CELL_SIZE,
+      });
+    }
+  }
+
+  const rand = mulberry32(seed ^ BRIDGE_RANDOM_SALT);
+  shuffle(candidates, rand);
+  const minimum = Math.min(MIN_BRIDGES, candidates.length);
+  const desiredCount = Math.min(
+    MAX_BRIDGES,
+    candidates.length,
+    Math.max(minimum, Math.round(candidates.length * BRIDGE_DENSITY)),
+  );
+  const occupiedCells = new Set<string>();
+  const bridges: BridgePlacement[] = [];
+
+  for (const candidate of candidates) {
+    if (bridges.length >= desiredCount) break;
+    const northKey = `${candidate.cellX},${candidate.northCellY}`;
+    const southKey = `${candidate.cellX},${candidate.northCellY + 1}`;
+    if (occupiedCells.has(northKey) || occupiedCells.has(southKey)) continue;
+
+    occupiedCells.add(northKey);
+    occupiedCells.add(southKey);
+    bridges.push(candidate);
+  }
+
+  return bridges.sort((a, b) => a.northCellY - b.northCellY || a.cellX - b.cellX);
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 export const MAZE_WIDTH = MAP_WIDTH;
@@ -863,6 +974,8 @@ export function generateMazeLayout(
     }
   }
 
+  const bridges = computeBridgePlacements(gatedData, spawnPoints, seed);
+
   const safeSpawnPoints = spawnPoints.map((spawnPoint) =>
     findSafeSpawnPoint(gatedData, spawnPoint));
 
@@ -876,6 +989,7 @@ export function generateMazeLayout(
     spawnPoints: safeSpawnPoints,
     gates,
     pressurePlates,
+    bridges,
     dirtMask,
   };
 }
@@ -1083,14 +1197,23 @@ export function computeSpawnPoints(
  *
  * @param data           Flat tile array from generateMaze
  * @param spawnDistance   The spawn distance used for teams (to ensure portal is farther)
+ * @param bridges         Bridge cells to exclude from portal platform placement
  * @returns              Tile-space coordinates of the portal center, or null if none found
  */
 export function computePortalPosition(
   data: number[],
   spawnDistance: number,
+  bridges: readonly BridgePlacement[] = [],
 ): SpawnPoint | null {
+  const bridgeCells = new Set<string>();
+  for (const bridge of bridges) {
+    bridgeCells.add(`${bridge.cellX},${bridge.northCellY}`);
+    bridgeCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
+  }
+
   const supportsPortalPlatform = (cx: number, cy: number): boolean => {
     if (cy < 2) return false;
+    if (bridgeCells.has(`${cx},${cy}`) || bridgeCells.has(`${cx},${cy - 1}`)) return false;
     const lowerNorthWall = !areCellsConnected(data, cx, cy, cx, cy - 1);
     const upperNorthWall = !areCellsConnected(data, cx, cy - 1, cx, cy - 2);
     return lowerNorthWall && upperNorthWall;

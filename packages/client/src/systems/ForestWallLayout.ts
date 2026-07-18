@@ -214,11 +214,22 @@ function isBottomLeftForestCorner(x: number, y: number, map: TileMapData): boole
 }
 
 function getBottomLeftCornerGroundAssetId(x: number, y: number, map: TileMapData): number | null {
+  const distanceToCorner = getBottomLeftCornerGroundDistance(x, y, map);
+  return distanceToCorner === null
+    ? null
+    : SOUTH_WEST_SOLID_COLUMN_GROUND_IDS[distanceToCorner];
+}
+
+function getBottomLeftCornerGroundDistance(
+  x: number,
+  y: number,
+  map: TileMapData,
+): number | null {
   for (let distanceToCorner = 0;
     distanceToCorner < SOUTH_WEST_SOLID_COLUMN_GROUND_IDS.length;
     distanceToCorner++) {
     if (isBottomLeftForestCorner(x + 1, y + distanceToCorner, map)) {
-      return SOUTH_WEST_SOLID_COLUMN_GROUND_IDS[distanceToCorner];
+      return distanceToCorner;
     }
   }
   return null;
@@ -233,12 +244,25 @@ function getBottomLeftCornerRootGroundAssetId(x: number, y: number, map: TileMap
   return null;
 }
 
-/** Extra grass fill drawn below the existing ground tile in the root column. */
+/** Extra grass fill retained beneath the authored root-column ground tiles. */
 export function getForestGroundUnderlayAssetId(x: number, y: number, map: TileMapData): number | null {
-  for (let distanceToCorner = 0; distanceToCorner <= 4; distanceToCorner++) {
-    if (isBottomLeftForestCorner(x + 1, y + distanceToCorner, map)) return 102;
-  }
-  return null;
+  const distanceToCorner = getBottomLeftCornerGroundDistance(x, y, map);
+  // Distances 2 and 3 already use asset 102 as their ground tile. Adding the
+  // same texture beneath them produced the duplicate tiles removed in export
+  // (15); the other three rows retain their authored grass base.
+  return distanceToCorner === 0 || distanceToCorner === 1 || distanceToCorner === 4
+    ? 102
+    : null;
+}
+
+/** Editor/render layer for the solid forest ground tile at a map coordinate. */
+export function getForestGroundZIndex(x: number, y: number, map: TileMapData): 0 | 2 {
+  const distanceToCorner = getBottomLeftCornerGroundDistance(x, y, map);
+  // The upper three root-column tiles sit below the z=1 corner details. All
+  // other forest ground remains in the z=2 occlusion layer.
+  return distanceToCorner !== null && distanceToCorner >= 2 && distanceToCorner <= 4
+    ? 0
+    : 2;
 }
 
 /** Ground tile used beneath the authored forest modules at a map coordinate. */

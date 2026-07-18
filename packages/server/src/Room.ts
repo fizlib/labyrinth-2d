@@ -41,6 +41,7 @@ import {
   type SpawnPoint,
   type GatePlacement,
   type PressurePlateInfo,
+  type BridgePlacement,
   type GateState,
   type GameState,
   type PlayerInfo,
@@ -214,6 +215,9 @@ export class Room {
   /** Pressure plates from map generation. */
   private readonly pressurePlates: PressurePlateInfo[];
 
+  /** Authored bridge obstacles from deterministic map generation. */
+  private readonly bridges: BridgePlacement[];
+
   /** Per-gate open/closed state (true = open/passable). */
   private gateOpenStates: boolean[];
 
@@ -232,11 +236,12 @@ export class Room {
     this.spawnPoints = layout.spawnPoints;
     this.gates = layout.gates;
     this.pressurePlates = layout.pressurePlates;
+    this.bridges = layout.bridges;
     this.gateOpenStates = new Array(this.gates.length).fill(false);
     this.hubDistanceField = computeHubDistanceField(this.map);
     this.runestones = findRunestonePositions(this.map);
 
-    const portalTile = computePortalPosition(this.map.data, SPAWN_DISTANCE);
+    const portalTile = computePortalPosition(this.map.data, SPAWN_DISTANCE, this.bridges);
     if (portalTile) {
       this.portalPosition = {
         x: portalTile.x * TILE_SIZE,
@@ -269,7 +274,7 @@ export class Room {
       );
     }
     console.info(
-      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}`,
+      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Bridges: ${this.bridges.length}`,
     );
     if (this.portalPosition) {
       console.info(
@@ -775,6 +780,7 @@ export class Room {
           dt,
           this.map,
           this.portalPosition,
+          this.bridges,
         );
         player.x = result.x;
         player.y = result.y;

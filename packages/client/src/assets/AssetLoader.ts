@@ -32,6 +32,7 @@ import {
   generatePressurePlateTexture,
 } from './FallbackTextures';
 import { PORTAL_PLATFORM_ASSET_PATHS } from '../systems/PortalPlatformLayout';
+import { BRIDGE_OBSTACLE_ASSET_PATHS } from '../systems/BridgeObstacleLayout';
 
 export interface FrontGateTextures {
   topLeft: Texture;
@@ -173,6 +174,8 @@ export interface GameAssets {
   portalFrames: Texture[];
   /** Authored ground and masonry modules used by the raised portal platform. */
   portalPlatformTextures: ReadonlyMap<string, Texture>;
+  /** Authored ground, masonry, and decoration modules used by bridge obstacles. */
+  bridgeObstacleTextures: ReadonlyMap<string, Texture>;
   /** Number of activation frames (the rest are active idle frames). */
   portalActivationCount: number;
   /** Wisdom orb HUD texture. */
@@ -232,6 +235,7 @@ export async function loadAssets(): Promise<GameAssets> {
   let runestoneTextures: [Texture, Texture][] = [];
   let portalFrames: Texture[] = [];
   let portalPlatformTextures = new Map<string, Texture>();
+  let bridgeObstacleTextures = new Map<string, Texture>();
   let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
   let expandMapButtonTexture: Texture | null = null;
@@ -871,6 +875,25 @@ export async function loadAssets(): Promise<GameAssets> {
     console.warn('[Assets] Portal platform modules unavailable', error);
   }
 
+  // ── Authored bridge obstacle modules ─────────────────────────────────────
+  try {
+    bridgeObstacleTextures = new Map(
+      await Promise.all(
+        BRIDGE_OBSTACLE_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded bridge obstacles (${bridgeObstacleTextures.size} source modules)`,
+    );
+  } catch (error) {
+    bridgeObstacleTextures.clear();
+    console.warn('[Assets] Bridge obstacle modules unavailable', error);
+  }
+
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
   try {
     wisdomOrbTexture = await Assets.load<Texture>('assets/wisdom_orb.png');
@@ -987,6 +1010,7 @@ export async function loadAssets(): Promise<GameAssets> {
     runestoneTextures,
     portalFrames,
     portalPlatformTextures,
+    bridgeObstacleTextures,
     portalActivationCount,
     wisdomOrbTexture,
     expandMapButtonTexture,

@@ -15,7 +15,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Container, Sprite, Texture, Renderer, Rectangle } from 'pixi.js';
-import type { TileMapData, GatePlacement, PressurePlateInfo } from '@labyrinth/shared';
+import type { TileMapData, GatePlacement, PressurePlateInfo, BridgePlacement } from '@labyrinth/shared';
 import {
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
@@ -36,7 +36,11 @@ import {
   buildForestStylePlacementRows,
   getForestGroundAssetId,
   getForestGroundUnderlayAssetId,
+  getForestGroundZIndex,
+  type ForestStylePlacementSpec,
 } from './ForestWallLayout';
+import { addBridgeObstacles } from './BridgeObstacle';
+import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -80,6 +84,28 @@ const BG_CHUNK_SIZE = 32;
 const FOREST_CHUNK_WIDTH = 64;
 const FOREST_CANOPY_OVERFLOW = 16;
 const FOREST_SIDE_OVERFLOW = 16;
+
+function bridgeHidesForestPlacement(
+  placement: ForestStylePlacementSpec,
+  bridges: readonly BridgePlacement[],
+  tileSize: number,
+): boolean {
+  const scale = tileSize / 16;
+  return bridges.some((bridge) => {
+    const anchorX = bridge.tileX * tileSize;
+    const anchorY = bridge.tileY * tileSize;
+    return BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES.some((hidden) =>
+      placement.assetId === hidden.assetId &&
+      placement.x === anchorX + hidden.x * scale &&
+      placement.y === anchorY + hidden.y * scale &&
+      placement.width === hidden.w * scale &&
+      placement.height === hidden.h * scale &&
+      placement.zIndex === hidden.z &&
+      placement.direction === hidden.direction &&
+      placement.flipX === hidden.flipX &&
+      placement.flipY === hidden.flipY);
+  });
+}
 
 // ── Internal chunk metadata ─────────────────────────────────────────────────
 
@@ -344,6 +370,7 @@ export class TilemapRenderer {
     map: TileMapData,
     gates: GatePlacement[],
     pressurePlates: PressurePlateInfo[],
+    bridges: BridgePlacement[],
     dirtMask: Uint8Array,
     assets: GameAssets,
     renderer: Renderer,
@@ -357,6 +384,7 @@ export class TilemapRenderer {
     this.portalTerrainLayer = new Container();
     this.portalTerrainLayer.sortableChildren = true;
     this.forestUnderlayLayer = new Container();
+    this.forestUnderlayLayer.sortableChildren = true;
     this.groundDetailLayer = new Container();
     this.groundDetailLayer.sortableChildren = true;
 
@@ -391,6 +419,8 @@ export class TilemapRenderer {
             // ── Background tile ──────────────────────────────────
             if (usesGroundBackgroundTile(tileId)) {
               const forestTile = isForestWallTileId(tileId);
+              const forestGroundInUnderlayLayer = forestTile &&
+                getForestGroundZIndex(x, y, map) > 0;
               const underlayAssetId = getForestGroundUnderlayAssetId(x, y, map);
               const underlayTexture = underlayAssetId === null
                 ? undefined
@@ -403,7 +433,7 @@ export class TilemapRenderer {
                 underlay.height = ts;
                 bgChunk.addChild(underlay);
 
-                if (forestTile) {
+                if (forestGroundInUnderlayLayer) {
                   const forestUnderlay = new Sprite(underlayTexture);
                   forestUnderlay.x = localX;
                   forestUnderlay.y = localY;
@@ -422,7 +452,7 @@ export class TilemapRenderer {
               bgChunk.addChild(sprite);
               bgHasContent = true;
 
-              if (forestTile) {
+              if (forestGroundInUnderlayLayer) {
                 const forestUnderlay = new Sprite(groundTexture);
                 forestUnderlay.x = localX;
                 forestUnderlay.y = localY;
@@ -485,7 +515,7 @@ export class TilemapRenderer {
             target: bgChunk,
             frame: chunkFrame, // <-- Force exact dimensions
             resolution: 1,
-            antialias: false
+            antialias: false,
           });
           tex.source.style.scaleMode = 'nearest';
           tex.source.style.update(); // Force the GPU to apply the nearest filter
@@ -515,7 +545,7 @@ export class TilemapRenderer {
             target: forestUnderlayChunk,
             frame: chunkFrame,
             resolution: 1,
-            antialias: false,
+            antialias: false
           });
           texture.source.style.scaleMode = 'nearest';
           texture.source.style.update();
@@ -617,6 +647,8 @@ export class TilemapRenderer {
 
         // Add this row's exact template pieces, preserving the JSON z-order.
         for (const placement of forestStyleRows.get(y) ?? []) {
+          if (bridgeHidesForestPlacement(placement, bridges, ts)) continue;
+
           const chunkLeft = startX * ts;
           const chunkRight = endX * ts;
           if (placement.x < chunkLeft || placement.x >= chunkRight) continue;
@@ -697,6 +729,14 @@ export class TilemapRenderer {
     for (const groundChunk of this.groundDetailRowChunks) {
       this.groundDetailLayer.addChild(groundChunk);
     }
+
+    addBridgeObstacles(
+      bridges,
+      ts,
+      assets.bridgeObstacleTextures,
+      this.forestUnderlayLayer,
+      this.groundDetailLayer,
+    );
 
     // ── Step 3: Extract Special Entities ──────────────────────────────
 

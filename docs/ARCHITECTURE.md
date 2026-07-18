@@ -124,6 +124,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Both client and server use the same feet-based collision logic.
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
+- Bridge obstacles use the same six authored rectangle/right-triangle colliders on the client and server, leaving a two-tile-wide walkable stone span between their forest banks.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
 
 ### Runestones and Portal Flow
@@ -179,6 +180,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 7. Place the hub tree and the three runestones.
 8. Compute spawn points from the ungated maze, then stamp one closed gate cell per team along the chosen spawn-to-hub routes when a qualifying vertical (north-south) corridor cell exists. Horizontal passages never receive gates.
 9. Stamp a visual-only dirt mask around each closed gate so the client can render short dirt approaches that transition back into grass.
+10. Select up to 12 bridge passages across the whole maze, independently of spawn-to-hub routes. Each bridge connects two empty 6×6 cells, retains forest walls along its west and east banks, excludes spawn/hub/gate cells, and never shares either adjacent cell with another bridge.
 
 ### Spawns and Objective Placement
 
@@ -187,7 +189,8 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 - Spawn selection prefers angular separation around the map so teams begin in different sectors.
 - Closed gates are chosen from vertical (north-south) corridor cells on spawn-to-hub paths and are rendered as one-tile-thick horizontal barriers through the middle of those cells.
 - Each gate also produces a short rectangular dirt band in shared layout data. The dirt mask is visual-only and does not affect collision or navigation.
-- Portal placement is also BFS-driven and prefers cells deeper in the maze than player spawns.
+- Bridge selection is deterministic per maze seed and is intentionally global rather than restricted to squad routes.
+- Portal placement is also BFS-driven, prefers cells deeper in the maze than player spawns, and excludes both cells reserved by every bridge.
 
 ### Tile IDs
 

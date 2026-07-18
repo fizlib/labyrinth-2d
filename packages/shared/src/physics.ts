@@ -10,7 +10,7 @@
 // centered horizontally at x and extending upward from y.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { isSolidTileId, type TileMapData } from './maps/level1.js';
+import { isSolidTileId, type BridgePlacement, type TileMapData } from './maps/level1.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -52,6 +52,26 @@ interface PortalCollisionSpec {
   flipX?: boolean;
   flipY?: boolean;
 }
+
+const BRIDGE_AUTHORING_TILE_SIZE = 16;
+
+/** Collider geometry exported from the authored bridge-obstacle sample. */
+const BRIDGE_COLLIDER_SPECS: readonly PortalCollisionSpec[] = [
+  { x: 0, y: 28, width: 32, height: 104, shape: 'rectangle' },
+  { x: 64, y: 29, width: 32, height: 104, shape: 'rectangle' },
+  { x: 1, y: 11, width: 16, height: 16, shape: 'right-triangle' },
+  { x: 79, y: 12, width: 16, height: 16, shape: 'right-triangle', flipX: true },
+  { x: 1, y: 133, width: 29, height: 25, shape: 'right-triangle', flipY: true },
+  {
+    x: 66,
+    y: 134,
+    width: 29,
+    height: 25,
+    shape: 'right-triangle',
+    flipX: true,
+    flipY: true,
+  },
+];
 
 /** Collider geometry exported from the authored portal-platform sample. */
 const PORTAL_PLATFORM_COLLIDER_SPECS: readonly PortalCollisionSpec[] = [
@@ -145,6 +165,26 @@ export function getPortalPlatformBounds(portal: PortalCollider): PortalCollision
   }));
 }
 
+/** Authored solid banks around a bridge's central two-tile walkway. */
+export function getBridgeBounds(
+  bridge: BridgePlacement,
+  tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
+): PortalCollisionBounds[] {
+  const scale = tileSize / BRIDGE_AUTHORING_TILE_SIZE;
+  const anchorX = bridge.tileX * tileSize;
+  const anchorY = bridge.tileY * tileSize;
+
+  return BRIDGE_COLLIDER_SPECS.map((spec) => ({
+    left: anchorX + spec.x * scale,
+    top: anchorY + spec.y * scale,
+    right: anchorX + (spec.x + spec.width) * scale - 1,
+    bottom: anchorY + (spec.y + spec.height) * scale - 1,
+    shape: spec.shape,
+    flipX: spec.flipX ?? false,
+    flipY: spec.flipY ?? false,
+  }));
+}
+
 function intersectsBounds(
   left: number,
   top: number,
@@ -209,7 +249,7 @@ function intersectsRightTriangle(
   return true;
 }
 
-function intersectsPortalCollision(
+function intersectsAuthoredCollision(
   left: number,
   top: number,
   right: number,
@@ -251,6 +291,7 @@ export function isPositionValid(
   y: number,
   map: TileMapData,
   portal?: PortalCollider | null,
+  bridges: readonly BridgePlacement[] = [],
 ): boolean {
   const ts = map.tileSize;
 
@@ -281,7 +322,13 @@ export function isPositionValid(
       return false;
     }
     for (const bounds of getPortalPlatformBounds(portal)) {
-      if (intersectsPortalCollision(left, top, right, bottom, bounds)) return false;
+      if (intersectsAuthoredCollision(left, top, right, bottom, bounds)) return false;
+    }
+  }
+
+  for (const bridge of bridges) {
+    for (const bounds of getBridgeBounds(bridge, ts)) {
+      if (intersectsAuthoredCollision(left, top, right, bottom, bounds)) return false;
     }
   }
 
@@ -295,6 +342,7 @@ export function applyInputWithCollision(
   dt: number,
   map: TileMapData,
   portal?: PortalCollider | null,
+  bridges: readonly BridgePlacement[] = [],
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
@@ -308,14 +356,14 @@ export function applyInputWithCollision(
 
   if (dx !== 0) {
     const candidateX = x + dx;
-    if (isPositionValid(candidateX, y, map, portal)) {
+    if (isPositionValid(candidateX, y, map, portal, bridges)) {
       newX = candidateX;
     }
   }
 
   if (dy !== 0) {
     const candidateY = y + dy;
-    if (isPositionValid(newX, candidateY, map, portal)) {
+    if (isPositionValid(newX, candidateY, map, portal, bridges)) {
       newY = candidateY;
     }
   }

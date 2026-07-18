@@ -11,6 +11,7 @@ import {
   WALL_HEIGHT,
   WALL_WIDTH,
   generateMazeLayout,
+  getBridgeBounds,
   getHubTileBounds,
   getPortalBounds,
   getPortalPlatformBounds,
@@ -18,13 +19,22 @@ import {
   isSolidTileId,
   type GeneratedMazeLayout,
   type GatePlacement,
+  type BridgePlacement,
   type PortalBounds,
   type TileMapData,
 } from '@labyrinth/shared';
 import {
+  BRIDGE_OBSTACLE_SPRITES,
+  BRIDGE_OBSTACLE_TERRAIN_SPRITES,
+  BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES,
+  getBridgeObstacleAssetPath,
+  type BridgeObstacleAsset,
+} from '../systems/BridgeObstacleLayout';
+import {
   buildForestStylePlacementRows,
   getForestGroundAssetId,
   getForestGroundUnderlayAssetId,
+  getForestGroundZIndex,
   isForestWallTileId,
   type ForestStylePlacementSpec,
 } from '../systems/ForestWallLayout';
@@ -56,16 +66,30 @@ const PLATE_SHEET = '/assets/plate_spritesheet.png';
 const RUNESTONE_SHEET = '/assets/runestones.png';
 const PORTAL_SHEET = '/assets/portal_spritesheet.png';
 const PORTAL_FRAME_SIZE = 48;
+const BRIDGE_SAMPLE_CELL_X = 5;
+const BRIDGE_SAMPLE_NORTH_CELL_Y = 11;
 const PORTAL_SAMPLE_CELL_X = 8;
 const PORTAL_SAMPLE_CELL_Y = 14;
 const PORTAL_TERRAIN_Z = 1;
-const FOREST_UNDERLAY_Z = 2;
 const PORTAL_GROUND_DETAIL_Z = 3;
 const PORTAL_PLATFORM_STRUCTURE_Z = 240000;
 const PORTAL_Z = 240002;
 const HUB_TREE = `${FOREST_ROOT}/tree_primary_02.png`;
 const HUB_TREE_SHADOW = `${FOREST_ROOT}/tree_shadow.png`;
 const GRASS_IDS = [102, 105, 108, 154] as const;
+const BRIDGE_NATIVE_SIZE_BY_ASSET: Partial<
+  Record<BridgeObstacleAsset, readonly [number, number]>
+> = {
+  f1437: [32, 26],
+  f1443: [32, 26],
+  f1446: [32, 26],
+  f1447: [32, 25],
+  f1537: [18, 15],
+  f1542: [18, 15],
+  f1591: [32, 13],
+  watergrass3: [31, 32],
+  watergrass6: [25, 23],
+};
 let sequence = 0;
 
 const DIRECTIONS = [
@@ -82,6 +106,39 @@ function id(prefix: string): string {
 
 function fiorwoodsAsset(assetId: number): string {
   return `${FIORWOODS_ROOT}/Sprite_Fiorwoods_${assetId}.png`;
+}
+
+function bridgeAssetName(asset: BridgeObstacleAsset): string {
+  if (asset.startsWith('f')) return `Sprite_Fiorwoods_${asset.slice(1)}`;
+  if (asset.startsWith('a')) return `Sprite_Ancient Ruins_${asset.slice(1)}`;
+  if (asset === 'buried') return 'burriedTreasureCircle';
+  return asset === 'watergrass3' ? 'watergrass_3' : 'watergrass_6';
+}
+
+function bridgeAssetRole(asset: BridgeObstacleAsset, zIndex: number): SemanticRole {
+  if (zIndex < 500) return 'ground.grass';
+  return asset === 'watergrass3' || asset === 'watergrass6' ? 'bush' : 'decoration';
+}
+
+function bridgeNativeSize(asset: BridgeObstacleAsset): readonly [number, number] {
+  return BRIDGE_NATIVE_SIZE_BY_ASSET[asset] ?? [32, 32];
+}
+
+function bridgeHidesSampleForestPlacement(placement: ForestStylePlacementSpec): boolean {
+  const tileX = WALL_WIDTH + BRIDGE_SAMPLE_CELL_X * CELL_STEP_X;
+  const northCellTileY = WALL_HEIGHT + BRIDGE_SAMPLE_NORTH_CELL_Y * CELL_STEP_Y;
+  const anchorX = tileX * TILE;
+  const anchorY = (northCellTileY + CELL_SIZE) * TILE;
+  return BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES.some((hidden) =>
+    placement.assetId === hidden.assetId &&
+    placement.x === anchorX + hidden.x &&
+    placement.y === anchorY + hidden.y &&
+    placement.width === hidden.w &&
+    placement.height === hidden.h &&
+    placement.zIndex === hidden.z &&
+    placement.direction === hidden.direction &&
+    placement.flipX === hidden.flipX &&
+    placement.flipY === hidden.flipY);
 }
 
 function assetElement(
@@ -343,9 +400,89 @@ function addGroundElements(layout: GeneratedMazeLayout, elements: EditorElement[
         sampleY * TILE,
         TILE,
         TILE,
-        forest ? FOREST_UNDERLAY_Z : 0,
+        forest ? getForestGroundZIndex(mapX, mapY, map) : 0,
       ));
     }
+  }
+}
+
+function addBridgeObstacleElements(
+  elements: EditorElement[],
+  colliders: EditorCollider[],
+): void {
+  const tileX = WALL_WIDTH + BRIDGE_SAMPLE_CELL_X * CELL_STEP_X;
+  const northCellTileY = WALL_HEIGHT + BRIDGE_SAMPLE_NORTH_CELL_Y * CELL_STEP_Y;
+  const bridge: BridgePlacement = {
+    cellX: BRIDGE_SAMPLE_CELL_X,
+    northCellY: BRIDGE_SAMPLE_NORTH_CELL_Y,
+    tileX,
+    tileY: northCellTileY + CELL_SIZE,
+  };
+  const localX = (bridge.tileX - CROP_TILE_X) * TILE;
+  const localY = (bridge.tileY - CROP_TILE_Y) * TILE;
+
+  // These are repaints of the atlas's existing ground elements, not added
+  // overlays. Keeping their element IDs preserves the editor export's z=0
+  // ordering after the two authored UUID-style background sprites.
+  for (const spec of BRIDGE_OBSTACLE_TERRAIN_SPRITES) {
+    const x = localX + spec.x;
+    const y = localY + spec.y;
+    const terrain = elements.find((candidate) =>
+      candidate.x === x && candidate.y === y &&
+      candidate.width === spec.w && candidate.height === spec.h &&
+      candidate.zIndex === spec.z && candidate.role.startsWith('ground.'));
+    if (!terrain) {
+      throw new Error(`Bridge obstacle terrain is missing at sample pixel ${x},${y}`);
+    }
+
+    terrain.name = spec.x < 0 || spec.x >= CELL_SIZE * TILE
+      ? bridgeAssetName(spec.asset)
+      : `Bridge obstacle · terrain · ${bridgeAssetName(spec.asset)}`;
+    terrain.assetPath = getBridgeObstacleAssetPath(spec.asset);
+    [terrain.nativeWidth, terrain.nativeHeight] = bridgeNativeSize(spec.asset);
+  }
+
+  for (const [index, spec] of BRIDGE_OBSTACLE_SPRITES.entries()) {
+    const [nativeWidth, nativeHeight] = bridgeNativeSize(spec.asset);
+    const bridgeElement = assetElement(
+      `Bridge obstacle · ${bridgeAssetName(spec.asset)}`,
+      bridgeAssetRole(spec.asset, spec.z),
+      getBridgeObstacleAssetPath(spec.asset),
+      nativeWidth,
+      nativeHeight,
+      localX + spec.x,
+      localY + spec.y,
+      spec.w,
+      spec.h,
+      spec.z,
+    );
+    // The source export's added elements sort before the atlas's element-* IDs
+    // at equal z, which is significant for the two z=0 background sprites.
+    bridgeElement.id = `bridge-added-${String(index + 1).padStart(2, '0')}`;
+    elements.push(bridgeElement);
+  }
+
+  const colliderNames = [
+    'west water bank',
+    'east water bank',
+    'north-west bank slope',
+    'north-east bank slope',
+    'south-west bank slope',
+    'south-east bank slope',
+  ] as const;
+  for (const [index, bounds] of getBridgeBounds(bridge, TILE).entries()) {
+    colliders.push(collider(
+      `Bridge obstacle · ${colliderNames[index]}`,
+      bounds.left - CROP_TILE_X * TILE,
+      bounds.top - CROP_TILE_Y * TILE,
+      bounds.right - bounds.left + 1,
+      bounds.bottom - bounds.top + 1,
+      'freeform',
+      null,
+      bounds.shape,
+      bounds.flipX,
+      bounds.flipY,
+    ));
   }
 }
 
@@ -667,7 +804,7 @@ function addWallElements(map: TileMapData, elements: EditorElement[]): void {
       const centerTileY = Math.floor((placement.y + placement.height / 2) / TILE);
       const role = placementRole(placement);
       const usesRenderRowLayer = placement.direction === 'ground' || !role.startsWith('ground.');
-      elements.push(element(
+      const wallElement = element(
         `${placement.name} · ${placementCellReference(map, placement)} · map tile ${centerTileX},${centerTileY}`,
         role,
         placement.assetId,
@@ -678,7 +815,8 @@ function addWallElements(map: TileMapData, elements: EditorElement[]): void {
         usesRenderRowLayer ? 1000 + renderRow * 1000 + placement.zIndex : placement.zIndex,
         placement.flipX,
         placement.flipY,
-      ));
+      );
+      if (!bridgeHidesSampleForestPlacement(placement)) elements.push(wallElement);
     }
   }
 }
@@ -736,6 +874,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
   }
 
   addGroundElements(layout, elements);
+  addBridgeObstacleElements(elements, colliders);
   addWallElements(map, elements);
   addWallColliders(map, colliders);
   addGateObstacleElements(layout, elements, colliders);
@@ -765,6 +904,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
       'Connection letters are N/E/S/W openings. This fixture includes both straights, all four turns, every T-junction orientation, a four-way cross, and every dead-end orientation.',
       'The central hub section includes its editable ground tiles, thick side walls, corrected north-west and north-east corner transitions, sacred tree, tree shadow, and three runestones.',
       'The portal section is anchored between seed-44 cells (8,13) and (8,14), which both have intact north forest walls. It includes the exact editable clearing, raised stone platform, inactive portal frame, split wall opening, portal hitbox, and six authored platform-edge colliders; the central stairway remains walkable.',
+      'The bridge obstacle is anchored between seed-44 cells (5,11) and (5,12), with forest banks on both sides and open north/south cells. It includes the exact water repaint, stone walkway, bank decorations, and six authored colliders.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',
