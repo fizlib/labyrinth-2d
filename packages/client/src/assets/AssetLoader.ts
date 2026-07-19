@@ -660,11 +660,41 @@ export async function loadAssets(
   // Keep this order in sync with the server's sprite assignment. Lenne must
   // remain index 0 so the first player always receives the default character.
   const PLAYER_CHARACTERS = [
-    { id: 'lenne', displayName: 'Lenne', lyingFrame: 51, squadVariants: SQUAD_COLORS },
-    { id: 'glenn', displayName: 'Glenn', lyingFrame: 55, squadVariants: SQUAD_COLORS },
-    { id: 'amalia', displayName: 'Amalia', lyingFrame: 48, squadVariants: SQUAD_COLORS },
-    { id: 'robb', displayName: 'Robb', lyingFrame: 55, squadVariants: SQUAD_COLORS },
-    { id: 'sienna', displayName: 'Sienna', lyingFrame: 50, squadVariants: SQUAD_COLORS },
+    {
+      id: 'lenne',
+      displayName: 'Lenne',
+      lyingFrame: 51,
+      hasDefaultAssets: false,
+      squadVariants: SQUAD_COLORS,
+    },
+    {
+      id: 'glenn',
+      displayName: 'Glenn',
+      lyingFrame: 55,
+      hasDefaultAssets: false,
+      squadVariants: SQUAD_COLORS,
+    },
+    {
+      id: 'amalia',
+      displayName: 'Amalia',
+      lyingFrame: 48,
+      hasDefaultAssets: false,
+      squadVariants: SQUAD_COLORS,
+    },
+    {
+      id: 'robb',
+      displayName: 'Robb',
+      lyingFrame: 55,
+      hasDefaultAssets: true,
+      squadVariants: SQUAD_COLORS,
+    },
+    {
+      id: 'sienna',
+      displayName: 'Sienna',
+      lyingFrame: 50,
+      hasDefaultAssets: true,
+      squadVariants: SQUAD_COLORS,
+    },
   ] as const;
   const playerLoadStart = 0.44;
   const playerLoadEnd = 0.78;
@@ -744,16 +774,20 @@ export async function loadAssets(
   for (const character of PLAYER_CHARACTERS) {
     reportPlayerProgress(character.displayName);
     let defaultAnimations: PlayerAnimationSet;
-    try {
-      defaultAnimations = await loadCharacterAnimationSet(character, character.id);
-      console.info(
-        `[Assets] Loaded ${character.displayName} standing, lying, and eight-way movement animations`,
-      );
-    } catch {
-      console.warn(
-        `[Assets] ${character.displayName} frames missing — using fallback character`,
-      );
+    if (!character.hasDefaultAssets) {
       defaultAnimations = createFallbackPlayerAnimationSet();
+    } else {
+      try {
+        defaultAnimations = await loadCharacterAnimationSet(character, character.id);
+        console.info(
+          `[Assets] Loaded ${character.displayName} standing, lying, and eight-way movement animations`,
+        );
+      } catch {
+        console.warn(
+          `[Assets] ${character.displayName} frames missing — using fallback character`,
+        );
+        defaultAnimations = createFallbackPlayerAnimationSet();
+      }
     }
     loadedPlayerVariants++;
     reportPlayerProgress(character.displayName);

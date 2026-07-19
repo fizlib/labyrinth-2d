@@ -172,14 +172,6 @@ body {
   animation: loading-rune 1.5s steps(4, end) infinite;
 }
 
-.loading-screen__eyebrow {
-  margin-bottom: 8px;
-  color: #a89b69;
-  font-size: 0.75rem;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-}
-
 .loading-screen__title {
   color: #f4ecd1;
   font-size: clamp(2.25rem, 9vw, 4rem);
