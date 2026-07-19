@@ -741,6 +741,15 @@ canvas {
   --mobile-button-size: clamp(3rem, 12vw, 4.5rem);
   --mobile-gap: clamp(0.35rem, 1.5vw, 0.65rem);
   --mobile-action-width: clamp(3.5rem, 22vw, 8rem);
+  --mobile-frame-padding: clamp(0.75rem, 2.5vw, 1rem);
+  --mobile-frame-action-size: clamp(
+    2.5rem,
+    calc(
+      var(--mobile-bottom-frame-height, 6rem) - var(--mobile-frame-padding) -
+        max(0.5rem, env(safe-area-inset-bottom))
+    ),
+    var(--mobile-button-size)
+  );
   --joystick-base-size: clamp(7.5rem, min(30vw, 32vh), 10rem);
   --joystick-knob-size: clamp(3rem, min(12vw, 14vh), 4rem);
   display: none;
@@ -757,18 +766,19 @@ canvas {
 .mobile-controls__joystick-region {
   position: absolute;
   z-index: 1;
-  left: max(0.75rem, env(safe-area-inset-left));
-  bottom: max(0.75rem, env(safe-area-inset-bottom));
-  width: calc(50% - max(0.75rem, env(safe-area-inset-left)) - var(--mobile-gap));
-  height: clamp(8rem, 38vh, 17rem);
+  inset: 0;
   overflow: hidden;
-  border-radius: clamp(1rem, 5vw, 2.5rem);
-  pointer-events: auto;
-  touch-action: none;
+  pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-controls__joystick-zone {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
   cursor: crosshair;
 }
 
@@ -821,12 +831,13 @@ canvas {
 .mobile-controls__actions {
   position: absolute;
   z-index: 2;
-  right: max(1rem, env(safe-area-inset-right));
-  bottom: max(1rem, env(safe-area-inset-bottom));
+  top: calc(var(--mobile-canvas-bottom, 50%) + var(--mobile-frame-padding));
+  left: 50%;
   display: flex;
   gap: var(--mobile-gap);
   opacity: 0.5;
   pointer-events: auto;
+  transform: translateX(-50%);
   transition: opacity 0.2s ease;
 }
 
@@ -872,6 +883,8 @@ canvas {
 .mobile-controls__button--interact,
 .mobile-controls__button--wisdom {
   min-width: var(--mobile-action-width);
+  min-height: var(--mobile-frame-action-size);
+  height: var(--mobile-frame-action-size);
   padding: 0 1rem;
   font-size: clamp(0.9rem, 3.5vw, 1.25rem);
   letter-spacing: 0.1em;

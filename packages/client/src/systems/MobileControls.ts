@@ -1,3 +1,6 @@
+import { MINIMAP_HUD_EXCLUSION } from './Minimap';
+import { WISDOM_ORB_HUD_EXCLUSION } from './WisdomOrbHud';
+
 export type MobileControlDirection = 'up' | 'down' | 'left' | 'right';
 
 type MobileControlHandler = (direction: MobileControlDirection, pressed: boolean) => void;
@@ -19,10 +22,18 @@ interface MobileControlsOptions {
   joystick?: FloatingJoystickConfig;
 }
 
+interface ControlRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 const MOBILE_CONTROLS_QUERY = '(hover: none) and (pointer: coarse)';
 const MOVE_DIRECTIONS: readonly MobileControlDirection[] = ['up', 'down', 'left', 'right'];
 const DEFAULT_DEAD_ZONE = 14;
 const DEFAULT_HYSTERESIS_DEGREES = 7.5;
+const JOYSTICK_EXCLUSION_PADDING = 6;
 const SECTOR_ANGLE_RADIANS = Math.PI / 4;
 const HALF_SECTOR_ANGLE_RADIANS = SECTOR_ANGLE_RADIANS / 2;
 const FULL_CIRCLE_RADIANS = Math.PI * 2;
@@ -53,6 +64,8 @@ export class MobileControls {
   private readonly joystickRegion: HTMLDivElement;
   private readonly joystickVisual: HTMLDivElement;
   private readonly joystickKnob: HTMLDivElement;
+  private readonly joystickZones: HTMLDivElement[] = [];
+  private readonly actions: HTMLDivElement;
   private readonly joystickDirections: Record<MobileControlDirection, boolean> = {
     up: false,
     down: false,
@@ -69,6 +82,7 @@ export class MobileControls {
   private joystickCenterX = 0;
   private joystickCenterY = 0;
   private joystickSector: number | null = null;
+  private activeJoystickCaptureTarget: HTMLElement | null = null;
   private wisdomAvailable = true;
 
   constructor(private readonly options: MobileControlsOptions) {
@@ -106,13 +120,13 @@ export class MobileControls {
       () => this.options.onUseWisdom(),
     );
 
-    const actions = document.createElement('div');
-    actions.className = 'mobile-controls__actions';
-    actions.appendChild(this.interactButton);
-    actions.appendChild(this.wisdomButton);
+    this.actions = document.createElement('div');
+    this.actions.className = 'mobile-controls__actions';
+    this.actions.appendChild(this.interactButton);
+    this.actions.appendChild(this.wisdomButton);
 
     this.root.appendChild(this.joystickRegion);
-    this.root.appendChild(actions);
+    this.root.appendChild(this.actions);
     this.options.parent.appendChild(this.root);
 
     this.addDisposable(this.joystickRegion, 'pointerdown', this.handleJoystickPointerDown);
@@ -127,12 +141,15 @@ export class MobileControls {
     this.addDisposable(window, 'blur', this.handleBlur);
     this.addDisposable(document, 'visibilitychange', this.handleVisibilityChange);
     this.addMediaQueryListener();
-    this.addParentResizeObserver();
+    this.addLayoutResizeObserver();
     this.updateVisibility();
   }
 
   /** Hide the wisdom action entirely for roles that do not own an orb. */
   setWisdomAvailable(available: boolean): void {
+    if (this.wisdomAvailable !== available) {
+      this.releaseJoystick();
+    }
     this.wisdomAvailable = available;
     this.wisdomButton.hidden = !available;
     this.wisdomButton.disabled = !available;
@@ -140,6 +157,7 @@ export class MobileControls {
       this.wisdomPointers.clear();
       this.syncActionButtonState(this.wisdomButton, this.wisdomPointers);
     }
+    this.updateJoystickZones();
   }
 
   destroy(): void {
@@ -185,20 +203,36 @@ export class MobileControls {
     this.disposers.push(() => this.mediaQuery.removeEventListener('change', listener));
   }
 
-  private addParentResizeObserver(): void {
+  private addLayoutResizeObserver(): void {
     if (typeof ResizeObserver === 'undefined') return;
 
+    const canvas = this.options.parent.querySelector('canvas');
     let previousWidth = this.options.parent.clientWidth;
     let previousHeight = this.options.parent.clientHeight;
+    let previousCanvasWidth = canvas?.clientWidth ?? 0;
+    let previousCanvasHeight = canvas?.clientHeight ?? 0;
     const observer = new ResizeObserver(() => {
       const width = this.options.parent.clientWidth;
       const height = this.options.parent.clientHeight;
-      if (width === previousWidth && height === previousHeight) return;
+      const canvasWidth = canvas?.clientWidth ?? 0;
+      const canvasHeight = canvas?.clientHeight ?? 0;
+      if (
+        width === previousWidth &&
+        height === previousHeight &&
+        canvasWidth === previousCanvasWidth &&
+        canvasHeight === previousCanvasHeight
+      ) {
+        return;
+      }
       previousWidth = width;
       previousHeight = height;
+      previousCanvasWidth = canvasWidth;
+      previousCanvasHeight = canvasHeight;
       this.releaseJoystick();
+      this.updateControlLayout();
     });
     observer.observe(this.options.parent);
+    if (canvas) observer.observe(canvas);
     this.disposers.push(() => observer.disconnect());
   }
 
@@ -230,10 +264,137 @@ export class MobileControls {
     const visible = this.mediaQuery.matches;
     this.root.classList.toggle('mobile-controls--visible', visible);
     this.root.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    this.updateControlLayout();
     if (!visible) {
       this.releaseAllInputs();
     }
   };
+
+  private updateControlLayout(): void {
+    const canvas = this.options.parent.querySelector('canvas');
+    if (!canvas) {
+      this.root.style.removeProperty('--mobile-canvas-bottom');
+      this.root.style.removeProperty('--mobile-bottom-frame-height');
+      this.updateJoystickZones();
+      return;
+    }
+
+    const parentRect = this.options.parent.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    const canvasBottom = Math.min(
+      parentRect.height,
+      Math.max(0, canvasRect.bottom - parentRect.top),
+    );
+    const bottomFrameHeight = Math.max(0, parentRect.bottom - canvasRect.bottom);
+    this.root.style.setProperty('--mobile-canvas-bottom', `${canvasBottom}px`);
+    this.root.style.setProperty('--mobile-bottom-frame-height', `${bottomFrameHeight}px`);
+    this.updateJoystickZones(parentRect, canvasRect, canvas);
+  }
+
+  private updateJoystickZones(
+    parentRect = this.options.parent.getBoundingClientRect(),
+    canvasRect: DOMRect | null = null,
+    canvas: HTMLCanvasElement | null = null,
+  ): void {
+    for (const zone of this.joystickZones.splice(0)) {
+      zone.remove();
+    }
+
+    if (parentRect.width <= 0 || parentRect.height <= 0) return;
+
+    const exclusions: ControlRect[] = [];
+    const addExclusion = (rect: ControlRect): void => {
+      const clamped = {
+        left: Math.max(0, rect.left - JOYSTICK_EXCLUSION_PADDING),
+        top: Math.max(0, rect.top - JOYSTICK_EXCLUSION_PADDING),
+        right: Math.min(parentRect.width, rect.right + JOYSTICK_EXCLUSION_PADDING),
+        bottom: Math.min(parentRect.height, rect.bottom + JOYSTICK_EXCLUSION_PADDING),
+      };
+      if (clamped.right > clamped.left && clamped.bottom > clamped.top) {
+        exclusions.push(clamped);
+      }
+    };
+
+    const actionsRect = this.actions.getBoundingClientRect();
+    if (actionsRect.width > 0 && actionsRect.height > 0) {
+      addExclusion({
+        left: actionsRect.left - parentRect.left,
+        top: actionsRect.top - parentRect.top,
+        right: actionsRect.right - parentRect.left,
+        bottom: actionsRect.bottom - parentRect.top,
+      });
+    }
+
+    if (canvas && canvasRect && canvas.width > 0 && canvas.height > 0) {
+      const scaleX = canvasRect.width / canvas.width;
+      const scaleY = canvasRect.height / canvas.height;
+      const canvasLeft = canvasRect.left - parentRect.left;
+      const canvasTop = canvasRect.top - parentRect.top;
+
+      if (this.wisdomAvailable) {
+        addExclusion({
+          left: canvasLeft + WISDOM_ORB_HUD_EXCLUSION.left * scaleX,
+          top: canvasTop + WISDOM_ORB_HUD_EXCLUSION.top * scaleY,
+          right:
+            canvasLeft +
+            (WISDOM_ORB_HUD_EXCLUSION.left + WISDOM_ORB_HUD_EXCLUSION.width) * scaleX,
+          bottom:
+            canvasTop +
+            (WISDOM_ORB_HUD_EXCLUSION.top + WISDOM_ORB_HUD_EXCLUSION.height) * scaleY,
+        });
+      }
+
+      const minimapRight =
+        canvasLeft + (canvas.width - MINIMAP_HUD_EXCLUSION.edgeInset) * scaleX;
+      const minimapBottom =
+        canvasTop + (canvas.height - MINIMAP_HUD_EXCLUSION.edgeInset) * scaleY;
+      addExclusion({
+        left: minimapRight - MINIMAP_HUD_EXCLUSION.size * scaleX,
+        top: minimapBottom - MINIMAP_HUD_EXCLUSION.size * scaleY,
+        right: minimapRight,
+        bottom: minimapBottom,
+      });
+    }
+
+    const xBoundaries = new Set<number>([0, parentRect.width]);
+    const yBoundaries = new Set<number>([0, parentRect.height]);
+    for (const exclusion of exclusions) {
+      xBoundaries.add(exclusion.left);
+      xBoundaries.add(exclusion.right);
+      yBoundaries.add(exclusion.top);
+      yBoundaries.add(exclusion.bottom);
+    }
+
+    const xs = [...xBoundaries].sort((first, second) => first - second);
+    const ys = [...yBoundaries].sort((first, second) => first - second);
+    for (let xIndex = 0; xIndex < xs.length - 1; xIndex++) {
+      for (let yIndex = 0; yIndex < ys.length - 1; yIndex++) {
+        const left = xs[xIndex];
+        const right = xs[xIndex + 1];
+        const top = ys[yIndex];
+        const bottom = ys[yIndex + 1];
+        const centerX = (left + right) / 2;
+        const centerY = (top + bottom) / 2;
+        const excluded = exclusions.some(
+          (rect) =>
+            centerX >= rect.left &&
+            centerX <= rect.right &&
+            centerY >= rect.top &&
+            centerY <= rect.bottom,
+        );
+        if (excluded || right <= left || bottom <= top) continue;
+
+        const zone = document.createElement('div');
+        zone.className = 'mobile-controls__joystick-zone';
+        zone.style.left = `${left}px`;
+        zone.style.top = `${top}px`;
+        zone.style.width = `${right - left}px`;
+        zone.style.height = `${bottom - top}px`;
+        this.joystickRegion.insertBefore(zone, this.joystickVisual);
+        this.joystickZones.push(zone);
+      }
+    }
+  }
 
   private handleJoystickPointerDown = (event: PointerEvent): void => {
     if (this.activeJoystickPointerId !== null) {
@@ -243,7 +404,15 @@ export class MobileControls {
     }
 
     event.preventDefault();
+    const captureTarget =
+      event.target instanceof HTMLElement &&
+      event.target.classList.contains('mobile-controls__joystick-zone')
+        ? event.target
+        : null;
+    if (!captureTarget) return;
+
     this.activeJoystickPointerId = event.pointerId;
+    this.activeJoystickCaptureTarget = captureTarget;
     this.joystickCenterX = event.clientX;
     this.joystickCenterY = event.clientY;
     this.joystickSector = null;
@@ -255,7 +424,7 @@ export class MobileControls {
     this.joystickVisual.classList.add('is-active');
 
     try {
-      this.joystickRegion.setPointerCapture(event.pointerId);
+      captureTarget.setPointerCapture(event.pointerId);
     } catch {
       // Window-level pointer listeners still provide a safe fallback for mouse testing.
     }
@@ -365,7 +534,9 @@ export class MobileControls {
 
   private releaseJoystick(releaseCapture = true): void {
     const pointerId = this.activeJoystickPointerId;
+    const captureTarget = this.activeJoystickCaptureTarget;
     this.activeJoystickPointerId = null;
+    this.activeJoystickCaptureTarget = null;
     this.joystickSector = null;
     this.setJoystickDirections([]);
     this.joystickVisual.classList.remove('is-active');
@@ -373,9 +544,9 @@ export class MobileControls {
     if (
       releaseCapture &&
       pointerId !== null &&
-      this.joystickRegion.hasPointerCapture(pointerId)
+      captureTarget?.hasPointerCapture(pointerId)
     ) {
-      this.joystickRegion.releasePointerCapture(pointerId);
+      captureTarget.releasePointerCapture(pointerId);
     }
   }
 

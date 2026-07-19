@@ -8,6 +8,14 @@ const PANEL_HEIGHT = 30;
 const ORB_SIZE = 16;
 const ORB_GAP = 4;
 
+/** Internal-canvas bounds reserved for wisdom HUD pointer interaction. */
+export const WISDOM_ORB_HUD_EXCLUSION = Object.freeze({
+  left: MARGIN,
+  top: MARGIN,
+  width: PANEL_WIDTH + 2,
+  height: PANEL_HEIGHT + 2,
+});
+
 export class WisdomOrbHud {
   private readonly container: Container;
   private readonly orbSprites: Sprite[] = [];

@@ -46,6 +46,14 @@ const EXPANDED_PADDING = 5;
 const MAP_TOGGLE_SIZE = 18;
 const MAP_TOGGLE_OVERLAP = 5;
 
+const MINIMAP_TOTAL_SIZE = MINIMAP_SIZE + MINIMAP_PADDING * 2;
+
+/** Size and edge inset of the largest compact minimap pointer target. */
+export const MINIMAP_HUD_EXCLUSION = Object.freeze({
+  size: MINIMAP_TOTAL_SIZE + MAP_TOGGLE_OVERLAP * 2,
+  edgeInset: MINIMAP_MARGIN - MAP_TOGGLE_OVERLAP,
+});
+
 /** Circular reveal radius in tiles around the player */
 const REVEAL_RADIUS = 7;
 
@@ -168,7 +176,7 @@ export class Minimap {
     // Keep the warden's red frame vivid; survivor maps remain slightly translucent.
     this.compactContainer.alpha = this.isWarden ? 1 : 0.85;
 
-    const totalSize = MINIMAP_SIZE + MINIMAP_PADDING * 2;
+    const totalSize = MINIMAP_TOTAL_SIZE;
 
     // Wooden background & frame
     const bg = new Graphics();
