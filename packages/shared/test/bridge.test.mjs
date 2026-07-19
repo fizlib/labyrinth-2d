@@ -10,6 +10,7 @@ import {
   FEET_HITBOX_W,
   FEET_HITBOX_H,
   TILE_FLOOR,
+  findBridgeWisdomHintTarget,
   generateBridgeSafeTileMasks,
   generateMazeLayout,
   getBridgeBankReturnPosition,
@@ -17,6 +18,7 @@ import {
   getBridgeRepairCircleBounds,
   getBridgeRepairCollapsedMask,
   getBridgeRepairTileOrder,
+  getBridgeSafeTileOrder,
   getBridgeTileBit,
   getBridgeWalkwayTileAtPoint,
   getBridgeWalkwayTileBounds,
@@ -91,6 +93,70 @@ test('bridge path selection is deterministic, unique, and connected', () => {
     assert.ok(mask < 1 << BRIDGE_WALKWAY_TILE_COUNT);
     assertConnectedUnbranchedPath(mask);
   }
+});
+
+test('wisdom hints traverse every safe tile from the activating player bank', () => {
+  for (const mask of generateBridgeSafeTileMasks(12, 9981)) {
+    const northOrder = getBridgeSafeTileOrder(mask, 'north');
+    const southOrder = getBridgeSafeTileOrder(mask, 'south');
+
+    assert.deepEqual(southOrder, [...northOrder].reverse());
+    assert.deepEqual(
+      new Set(northOrder.map(({ row, column }) => `${row}:${column}`)),
+      new Set(safeTiles(mask).map(({ row, column }) => `${row}:${column}`)),
+    );
+    assert.equal(northOrder[0].row, 0);
+    assert.equal(southOrder[0].row, BRIDGE_WALKWAY_ROWS - 1);
+
+    for (let index = 1; index < northOrder.length; index++) {
+      const previous = northOrder[index - 1];
+      const current = northOrder[index];
+      assert.equal(
+        Math.abs(previous.row - current.row) + Math.abs(previous.column - current.column),
+        1,
+        'successive sparkles must follow adjacent stones',
+      );
+    }
+  }
+});
+
+test('wisdom bridge targeting selects only a nearby player-side bank', () => {
+  const bridge = {
+    tileX: 10,
+    tileY: 20,
+    safeTileMask: getBridgeTileBit(0, 0) | getBridgeTileBit(5, 1),
+  };
+  const northBank = getBridgeBankReturnPosition(bridge, 'north');
+  const southBank = getBridgeBankReturnPosition(bridge, 'south');
+  const [northRepairCircle, southRepairCircle] = getBridgeRepairCircleBounds(bridge);
+
+  assert.deepEqual(findBridgeWisdomHintTarget([bridge], northBank.x, northBank.y), {
+    bridgeIndex: 0,
+    entrySide: 'north',
+  });
+  assert.deepEqual(findBridgeWisdomHintTarget([bridge], southBank.x, southBank.y), {
+    bridgeIndex: 0,
+    entrySide: 'south',
+  });
+  assert.deepEqual(
+    findBridgeWisdomHintTarget(
+      [bridge],
+      northRepairCircle.left,
+      northRepairCircle.top + FEET_HITBOX_H / 2,
+    ),
+    { bridgeIndex: 0, entrySide: 'north' },
+    'the full north repair circle must remain eligible after a repair',
+  );
+  assert.deepEqual(
+    findBridgeWisdomHintTarget(
+      [bridge],
+      southRepairCircle.right,
+      southRepairCircle.bottom + FEET_HITBOX_H / 2,
+    ),
+    { bridgeIndex: 0, entrySide: 'south' },
+    'the full south repair circle must remain eligible after a repair',
+  );
+  assert.equal(findBridgeWisdomHintTarget([bridge], northBank.x, northBank.y - 41), null);
 });
 
 test('generated layouts assign a distinct hidden path to each bridge', () => {

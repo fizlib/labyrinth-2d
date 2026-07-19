@@ -7,7 +7,7 @@
 
 // ── Re-export physics module ────────────────────────────────────────────────
 import type { HubDirection } from './navigation.js';
-import type { BridgeState } from './bridge.js';
+import type { BridgeEntrySide, BridgeState } from './bridge.js';
 
 export {
   PLAYER_SPEED,
@@ -44,6 +44,8 @@ export {
   getBridgeWalkwayTileAtPoint,
   getBridgeWalkwayTileMaskAtFeetCenter,
   getBridgeRepairCircleBounds,
+  getBridgeSafeTileOrder,
+  findBridgeWisdomHintTarget,
   getBridgeCollapseMask,
   getBridgeRepairTileOrder,
   getBridgeRepairCollapsedMask,
@@ -52,6 +54,7 @@ export {
   type BridgeEntrySide,
   type BridgeTravelDirection,
   type BridgeTileCoordinate,
+  type BridgeWisdomHintTarget,
   type BridgeState,
   type BridgeRepairCircleBounds,
 } from './bridge.js';
@@ -348,9 +351,22 @@ export interface AllRunestonesActivatedMessage {
 
 export interface WisdomOrbUsedMessage {
   type: MessageType.WisdomOrbUsed;
-  direction: HubDirection;
+  hint: WisdomOrbHint;
   remainingWisdomOrbs: number;
 }
+
+/** Private result of consuming a wisdom orb. */
+export type WisdomOrbHint =
+  | {
+      kind: 'direction';
+      direction: HubDirection;
+    }
+  | {
+      kind: 'bridge';
+      bridgeIndex: number;
+      entrySide: BridgeEntrySide;
+      safeTileMask: number;
+    };
 
 /** Private notification sent only to a player whose role changed through debug tools. */
 export interface PlayerRoleChangedMessage {

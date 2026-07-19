@@ -4,6 +4,7 @@ import {
   BRIDGE_WALKWAY_ROWS,
   BRIDGE_TILE_RESTORE_DURATION_MS,
   getBridgeTileBit,
+  getBridgeSafeTileOrder,
   type BridgeEntrySide,
   type BridgePlacement,
 } from '@labyrinth/shared';
@@ -22,6 +23,8 @@ const BRIDGE_TILE_RISE_DURATION = BRIDGE_TILE_RESTORE_DURATION_MS / 1000;
 const BRIDGE_TILE_FALL_STAGGER = 0.05;
 const BRIDGE_TILE_FALL_DISTANCE = 8;
 const BRIDGE_REPAIR_PARTICLE_COUNT = 6;
+const BRIDGE_WISDOM_HINT_STEP_DURATION = 0.14;
+const BRIDGE_WISDOM_HINT_SPARKLE_LIFETIME = 0.8;
 
 interface TrackedBridgeSprite {
   sprite: Sprite;
@@ -30,6 +33,7 @@ interface TrackedBridgeSprite {
 
 interface BridgeTileVisual {
   sprites: TrackedBridgeSprite[];
+  wisdomSparkle: Container | null;
 }
 
 interface BridgeTileAnimation {
@@ -47,11 +51,18 @@ interface BridgeRepairMagicVisual {
   elapsed: number;
 }
 
+interface BridgeWisdomHintVisual {
+  tileIndices: number[];
+  elapsed: number;
+  currentStep: number;
+  sparkleAges: Map<number, number>;
+}
+
 /** Mutable visual controller for one bridge's 12 central puzzle stones. */
 export class BridgeObstacleVisual {
   private readonly tiles: BridgeTileVisual[] = Array.from(
     { length: BRIDGE_WALKWAY_ROWS * BRIDGE_WALKWAY_COLUMNS },
-    () => ({ sprites: [] }),
+    () => ({ sprites: [], wisdomSparkle: null }),
   );
   private readonly animations = new Map<number, BridgeTileAnimation>();
   private readonly repairMagic = new Map<BridgeEntrySide, BridgeRepairMagicVisual>();
@@ -60,12 +71,40 @@ export class BridgeObstacleVisual {
   private repairActive = false;
   private magicalTileMask = 0;
   private animationElapsed = 0;
+  private wisdomHint: BridgeWisdomHintVisual | null = null;
+  private wisdomHintSuppressed = false;
 
   constructor(private readonly scale: number) {}
 
   addSprite(row: number, column: number, sprite: Sprite): void {
     const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
-    this.tiles[tileIndex]?.sprites.push({ sprite, originalY: sprite.y });
+    const tile = this.tiles[tileIndex];
+    if (!tile) return;
+    tile.sprites.push({ sprite, originalY: sprite.y });
+
+    if (tile.wisdomSparkle || !sprite.parent) return;
+    const sparkle = this.createWisdomSparkle();
+    sparkle.x = sprite.x + sprite.width / 2;
+    sparkle.y = sprite.y + sprite.height / 2;
+    sparkle.zIndex = sprite.zIndex + 1_000;
+    sprite.parent.addChild(sparkle);
+    tile.wisdomSparkle = sparkle;
+  }
+
+  /** Begin a local-only, bank-to-bank reveal of the safe bridge route. */
+  showWisdomHint(safeTileMask: number, entrySide: BridgeEntrySide): void {
+    this.clearWisdomHint();
+    const tileIndices = getBridgeSafeTileOrder(safeTileMask, entrySide).map(
+      ({ row, column }) => row * BRIDGE_WALKWAY_COLUMNS + column,
+    );
+    if (tileIndices.length === 0) return;
+    this.wisdomHint = {
+      tileIndices,
+      elapsed: 0,
+      currentStep: -1,
+      sparkleAges: new Map(),
+    };
+    this.updateWisdomHint(0);
   }
 
   addRepairCircle(side: BridgeEntrySide, circleSprite: Sprite, parent: Container): void {
@@ -115,6 +154,7 @@ export class BridgeObstacleVisual {
     this.deactivateRepairMagic();
     this.repairingSide = side;
     this.repairActive = active;
+    this.syncWisdomHintSuppression();
     if (!side || !active) return;
 
     const magic = this.repairMagic.get(side);
@@ -138,6 +178,7 @@ export class BridgeObstacleVisual {
 
     const newlyCollapsedMask = mask & ~this.collapsedTileMask;
     this.collapsedTileMask = mask;
+    this.syncWisdomHintSuppression();
     if (newlyCollapsedMask === 0) return;
 
     if (!animate) {
@@ -221,6 +262,141 @@ export class BridgeObstacleVisual {
 
     this.updateRepairMagic(dt);
     this.updateMagicalTiles();
+    this.updateWisdomHint(dt);
+  }
+
+  private createWisdomSparkle(): Container {
+    const sparkle = new Container();
+    sparkle.visible = false;
+
+    const outer = new Graphics()
+      .poly([
+        0,
+        -4.5 * this.scale,
+        0.7 * this.scale,
+        -0.7 * this.scale,
+        4.5 * this.scale,
+        0,
+        0.7 * this.scale,
+        0.7 * this.scale,
+        0,
+        4.5 * this.scale,
+        -0.7 * this.scale,
+        0.7 * this.scale,
+        -4.5 * this.scale,
+        0,
+        -0.7 * this.scale,
+        -0.7 * this.scale,
+      ])
+      .fill({ color: 0xffdd72, alpha: 0.65 });
+    sparkle.addChild(outer);
+
+    const core = new Graphics()
+      .poly([
+        0,
+        -1.8 * this.scale,
+        0.55 * this.scale,
+        -0.55 * this.scale,
+        1.8 * this.scale,
+        0,
+        0.55 * this.scale,
+        0.55 * this.scale,
+        0,
+        1.8 * this.scale,
+        -0.55 * this.scale,
+        0.55 * this.scale,
+        -1.8 * this.scale,
+        0,
+        -0.55 * this.scale,
+        -0.55 * this.scale,
+      ])
+      .fill({ color: 0xfffbea, alpha: 0.9 });
+    sparkle.addChild(core);
+    return sparkle;
+  }
+
+  private updateWisdomHint(dt: number): void {
+    const hint = this.wisdomHint;
+    if (!hint || this.wisdomHintSuppressed) return;
+
+    for (const [tileIndex, age] of hint.sparkleAges) {
+      const nextAge = age + dt;
+      if (nextAge >= BRIDGE_WISDOM_HINT_SPARKLE_LIFETIME) {
+        hint.sparkleAges.delete(tileIndex);
+        this.setWisdomHintTileActive(tileIndex, false);
+      } else {
+        hint.sparkleAges.set(tileIndex, nextAge);
+        this.updateWisdomHintTile(tileIndex, nextAge);
+      }
+    }
+
+    const cycleDuration = hint.tileIndices.length * BRIDGE_WISDOM_HINT_STEP_DURATION;
+    hint.elapsed = (hint.elapsed + dt) % cycleDuration;
+
+    const step = Math.floor(hint.elapsed / BRIDGE_WISDOM_HINT_STEP_DURATION);
+    if (hint.currentStep !== step) {
+      hint.currentStep = step;
+      const tileIndex = hint.tileIndices[step];
+      hint.sparkleAges.set(tileIndex, 0);
+      this.setWisdomHintTileActive(tileIndex, true);
+      this.updateWisdomHintTile(tileIndex, 0);
+    }
+  }
+
+  private updateWisdomHintTile(tileIndex: number, age: number): void {
+    const sparkle = this.tiles[tileIndex]?.wisdomSparkle;
+    if (!sparkle) return;
+    const lifetimeProgress = age / BRIDGE_WISDOM_HINT_SPARKLE_LIFETIME;
+    const fadeIn = Math.min(1, age / 0.06);
+    const fadeOut = Math.pow(Math.max(0, 1 - lifetimeProgress), 0.75);
+    const strength = fadeIn * fadeOut;
+    sparkle.alpha = 0.72 * strength;
+    sparkle.rotation = this.animationElapsed * 1.4 + tileIndex * 0.12;
+    const pulse = 0.78 + Math.sin(Math.min(1, age / 0.2) * Math.PI) * 0.12;
+    sparkle.scale.set(pulse);
+
+    const green = Math.round(255 - 14 * strength);
+    const blue = Math.round(255 - 55 * strength);
+    const tint = (0xff << 16) | (green << 8) | blue;
+    for (const tracked of this.tiles[tileIndex].sprites) tracked.sprite.tint = tint;
+  }
+
+  private setWisdomHintTileActive(tileIndex: number, active: boolean): void {
+    const tile = this.tiles[tileIndex];
+    if (!tile) return;
+    if (tile.wisdomSparkle) {
+      tile.wisdomSparkle.visible = active;
+      tile.wisdomSparkle.alpha = active ? 1 : 0;
+      if (!active) tile.wisdomSparkle.scale.set(1);
+    }
+    if (!active) {
+      for (const tracked of tile.sprites) tracked.sprite.tint = 0xffffff;
+    }
+  }
+
+  clearWisdomHint(): void {
+    this.resetWisdomHintWave();
+    this.wisdomHint = null;
+  }
+
+  private syncWisdomHintSuppression(): void {
+    const suppressed = this.collapsedTileMask !== 0 || this.repairingSide !== null;
+    if (suppressed === this.wisdomHintSuppressed) return;
+
+    this.wisdomHintSuppressed = suppressed;
+    this.resetWisdomHintWave();
+    if (!suppressed) this.updateWisdomHint(0);
+  }
+
+  private resetWisdomHintWave(): void {
+    const hint = this.wisdomHint;
+    if (!hint) return;
+    for (const tileIndex of hint.sparkleAges.keys()) {
+      this.setWisdomHintTileActive(tileIndex, false);
+    }
+    hint.sparkleAges.clear();
+    hint.elapsed = 0;
+    hint.currentStep = -1;
   }
 
   private animateRestoreTile(row: number, column: number): void {

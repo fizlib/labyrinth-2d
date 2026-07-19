@@ -11,8 +11,8 @@ import {
   MessageType,
   DEFAULT_ROOM_ID,
   type GameState,
-  type HubDirection,
   type PlayerRole,
+  type WisdomOrbHint,
   type JoinRoomMessage,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
@@ -37,7 +37,7 @@ export interface NetworkCallbacks {
   onPlayerLeft: (playerId: string) => void;
   onRunestoneActivated: (runestoneIndex: number) => void;
   onAllRunestonesActivated: (portalX: number, portalY: number) => void;
-  onWisdomOrbUsed: (direction: HubDirection, remainingWisdomOrbs: number) => void;
+  onWisdomOrbUsed: (hint: WisdomOrbHint, remainingWisdomOrbs: number) => void;
   onPlayerRoleChanged: (role: PlayerRole, wisdomOrbs: number) => void;
   onDebugPlayerRole: (playerId: string, role: PlayerRole) => void;
   onGateStateChanged: (gateIndex: number, open: boolean) => void;
@@ -223,7 +223,7 @@ export class NetworkManager {
         break;
 
       case MessageType.WisdomOrbUsed:
-        this.callbacks.onWisdomOrbUsed(msg.direction, msg.remainingWisdomOrbs);
+        this.callbacks.onWisdomOrbUsed(msg.hint, msg.remainingWisdomOrbs);
         break;
 
       case MessageType.PlayerRoleChanged:

@@ -20,6 +20,7 @@ import type {
   GatePlacement,
   PressurePlateInfo,
   BridgePlacement,
+  BridgeEntrySide,
   BridgeState,
 } from '@labyrinth/shared';
 import {
@@ -861,6 +862,28 @@ export class TilemapRenderer {
 
   updateBridgeAnimations(dt: number): void {
     for (const bridge of this.bridgeVisuals) bridge.update(dt);
+  }
+
+  /** Show a private wisdom-orb route hint on one bridge. */
+  showBridgeWisdomHint(
+    bridgeIndex: number,
+    safeTileMask: number,
+    entrySide: BridgeEntrySide,
+  ): void {
+    this.bridgeVisuals[bridgeIndex]?.showWisdomHint(safeTileMask, entrySide);
+  }
+
+  /** Show every hidden route to wardens, or clear those role-wide reveals. */
+  setWardenBridgeWisdomHints(
+    bridges: readonly BridgePlacement[],
+    visible: boolean,
+  ): void {
+    for (let bridgeIndex = 0; bridgeIndex < this.bridgeVisuals.length; bridgeIndex++) {
+      const visual = this.bridgeVisuals[bridgeIndex];
+      const bridge = bridges[bridgeIndex];
+      if (visible && bridge) visual.showWisdomHint(bridge.safeTileMask, 'north');
+      else visual.clearWisdomHint();
+    }
   }
 
   // ── Per-frame viewport culling ────────────────────────────────────────

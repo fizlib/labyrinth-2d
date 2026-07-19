@@ -1506,12 +1506,24 @@ async function main(): Promise<void> {
       pendingPortalPos = { x: portalX, y: portalY };
     },
 
-    onWisdomOrbUsed: (direction, remainingWisdomOrbs) => {
-      console.info(
-        `[WisdomOrb][Response] Server accepted! direction=${direction}, remaining=${remainingWisdomOrbs}`,
-      );
+    onWisdomOrbUsed: (hint, remainingWisdomOrbs) => {
       wisdomOrbHud?.setRemaining(remainingWisdomOrbs);
-      wisdomArrow?.show(direction);
+      if (hint.kind === 'bridge') {
+        wisdomArrow?.hide();
+        console.info(
+          `[WisdomOrb][Response] Server accepted private bridge ${hint.bridgeIndex} route from ${hint.entrySide}; remaining=${remainingWisdomOrbs}`,
+        );
+        tilemapRenderer?.showBridgeWisdomHint(
+          hint.bridgeIndex,
+          hint.safeTileMask,
+          hint.entrySide,
+        );
+      } else {
+        console.info(
+          `[WisdomOrb][Response] Server accepted direction=${hint.direction}; remaining=${remainingWisdomOrbs}`,
+        );
+        wisdomArrow?.show(hint.direction);
+      }
     },
 
     onPlayerRoleChanged: (role, wisdomOrbs) => {
@@ -1648,6 +1660,11 @@ async function main(): Promise<void> {
   applyLocalRoleUi = (role, wisdomOrbs, showIntroDialogue) => {
     localPlayerRole = role;
     if (!currentMap || !currentLayout) return;
+
+    tilemapRenderer?.setWardenBridgeWisdomHints(
+      currentLayout.bridges,
+      role === 'warden',
+    );
 
     minimap?.destroy();
     minimap = new Minimap(

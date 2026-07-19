@@ -41,6 +41,7 @@ import {
   getBridgeWalkwayTileAtPoint,
   getBridgeWalkwayTileMaskAtFeetCenter,
   getBridgeRepairCircleBounds,
+  findBridgeWisdomHintTarget,
   getBridgeCollapseMask,
   getBridgeRepairCollapsedMask,
   getBridgeBankReturnPosition,
@@ -741,6 +742,40 @@ export class Room {
       return;
     }
 
+    const ws = this.sockets.get(playerId);
+    if (!ws) {
+      console.warn(
+        `[Room:${this.id}][WisdomOrb] REJECTED: socket not found for player ${playerId}`,
+      );
+      return;
+    }
+
+    const bridgeHintTarget = findBridgeWisdomHintTarget(
+      this.bridges,
+      player.x,
+      player.y,
+      this.map.tileSize,
+    );
+    if (bridgeHintTarget) {
+      const bridge = this.bridges[bridgeHintTarget.bridgeIndex];
+      player.wisdomOrbs--;
+      const orbUsedMsg: WisdomOrbUsedMessage = {
+        type: MessageType.WisdomOrbUsed,
+        hint: {
+          kind: 'bridge',
+          bridgeIndex: bridgeHintTarget.bridgeIndex,
+          entrySide: bridgeHintTarget.entrySide,
+          safeTileMask: bridge.safeTileMask,
+        },
+        remainingWisdomOrbs: player.wisdomOrbs,
+      };
+      this.send(ws, orbUsedMsg);
+      console.info(
+        `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} -> private bridge ${bridgeHintTarget.bridgeIndex} route from ${bridgeHintTarget.entrySide} (${player.wisdomOrbs} remaining)`,
+      );
+      return;
+    }
+
     const activeTarget = this.portalActivated ? 'portal' : 'hub';
     const activeDistanceField = this.portalActivated
       ? this.portalDistanceField
@@ -777,19 +812,11 @@ export class Room {
       return;
     }
 
-    const ws = this.sockets.get(playerId);
-    if (!ws) {
-      console.warn(
-        `[Room:${this.id}][WisdomOrb] REJECTED: socket not found for player ${playerId}`,
-      );
-      return;
-    }
-
     player.wisdomOrbs--;
 
     const orbUsedMsg: WisdomOrbUsedMessage = {
       type: MessageType.WisdomOrbUsed,
-      direction,
+      hint: { kind: 'direction', direction },
       remainingWisdomOrbs: player.wisdomOrbs,
     };
     this.send(ws, orbUsedMsg);

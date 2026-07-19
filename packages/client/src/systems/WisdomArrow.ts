@@ -41,6 +41,11 @@ export class WisdomArrow {
     this.container.rotation = directionToRotation(direction);
   }
 
+  hide(): void {
+    this.timeRemaining = 0;
+    this.container.visible = false;
+  }
+
   update(dt: number, playerX: number, playerY: number): void {
     if (!this.container.visible) return;
 

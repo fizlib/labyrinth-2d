@@ -22,6 +22,11 @@ export interface BridgeTileCoordinate {
   column: number;
 }
 
+export interface BridgeWisdomHintTarget {
+  bridgeIndex: number;
+  entrySide: BridgeEntrySide;
+}
+
 /** Authoritative mutable state for one generated bridge. */
 export interface BridgeState {
   /** Index into GeneratedMazeLayout.bridges. */
@@ -156,6 +161,80 @@ export function getBridgeRepairCircleBounds(
     right: anchorX + (spec.x + 16) * scale - 1,
     bottom: anchorY + (spec.y + 16) * scale - 1,
   }));
+}
+
+/**
+ * Return the hidden safe route in traversal order from the requested bank.
+ * Generated bridge routes are connected and unbranched, so each step has at
+ * most one unvisited neighbour.
+ */
+export function getBridgeSafeTileOrder(
+  safeTileMask: number,
+  entrySide: BridgeEntrySide,
+): BridgeTileCoordinate[] {
+  const startRow = entrySide === 'north' ? 0 : BRIDGE_WALKWAY_ROWS - 1;
+  const startColumn = [0, 1].find(
+    (column) => (safeTileMask & getBridgeTileBit(startRow, column)) !== 0,
+  );
+  if (startColumn === undefined) return [];
+
+  const ordered: BridgeTileCoordinate[] = [];
+  const visited = new Set<string>();
+  let current: BridgeTileCoordinate | undefined = { row: startRow, column: startColumn };
+
+  while (current) {
+    ordered.push(current);
+    visited.add(`${current.row}:${current.column}`);
+
+    const neighbours: BridgeTileCoordinate[] = [
+      { row: current.row - 1, column: current.column },
+      { row: current.row + 1, column: current.column },
+      { row: current.row, column: current.column - 1 },
+      { row: current.row, column: current.column + 1 },
+    ];
+    current = neighbours.find(({ row, column }) => {
+      const bit = getBridgeTileBit(row, column);
+      return bit !== 0 && (safeTileMask & bit) !== 0 && !visited.has(`${row}:${column}`);
+    });
+  }
+
+  return ordered;
+}
+
+/** Find the closest bridge bank eligible to replace a directional wisdom hint. */
+export function findBridgeWisdomHintTarget(
+  bridges: readonly Pick<BridgePlacement, 'tileX' | 'tileY' | 'safeTileMask'>[],
+  playerX: number,
+  playerY: number,
+  tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
+  maxDistance: number = tileSize * 2.5,
+): BridgeWisdomHintTarget | null {
+  const maxDistanceSquared = maxDistance * maxDistance;
+  let nearest: (BridgeWisdomHintTarget & { distanceSquared: number }) | null = null;
+
+  for (let bridgeIndex = 0; bridgeIndex < bridges.length; bridgeIndex++) {
+    const bridge = bridges[bridgeIndex];
+    const scale = tileSize / BRIDGE_AUTHORING_TILE_SIZE;
+    const bankLeft = bridge.tileX * tileSize + 16 * scale;
+    const bankRight = bridge.tileX * tileSize + 80 * scale;
+    for (const entrySide of ['north', 'south'] as const) {
+      const entry = getBridgeBankReturnPosition(bridge, entrySide, tileSize);
+      const nearestBankX = Math.max(bankLeft, Math.min(bankRight, playerX));
+      const dx = playerX - nearestBankX;
+      const dy = playerY - entry.y;
+      const distanceSquared = dx * dx + dy * dy;
+      if (
+        distanceSquared <= maxDistanceSquared &&
+        (nearest === null || distanceSquared < nearest.distanceSquared)
+      ) {
+        nearest = { bridgeIndex, entrySide, distanceSquared };
+      }
+    }
+  }
+
+  return nearest
+    ? { bridgeIndex: nearest.bridgeIndex, entrySide: nearest.entrySide }
+    : null;
 }
 
 /**
