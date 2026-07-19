@@ -27,8 +27,6 @@ body {
   height: 100%;
   overflow: hidden;
   background-color: #0e0e1a;
-  user-select: none;
-  -webkit-user-select: none;
   font-family: 'Courier New', Courier, monospace;
   color: #c8d6e5;
 }
@@ -741,8 +739,10 @@ canvas {
 
 .mobile-controls {
   --mobile-button-size: clamp(3rem, 12vw, 4.5rem);
-  /* Slightly smaller footprint */
   --mobile-gap: clamp(0.35rem, 1.5vw, 0.65rem);
+  --mobile-action-width: clamp(3.5rem, 22vw, 8rem);
+  --joystick-base-size: clamp(7.5rem, min(30vw, 32vh), 10rem);
+  --joystick-knob-size: clamp(3rem, min(12vw, 14vh), 4rem);
   display: none;
   position: absolute;
   inset: 0;
@@ -754,39 +754,79 @@ canvas {
   display: block;
 }
 
-.mobile-controls__dpad {
+.mobile-controls__joystick-region {
   position: absolute;
-  left: max(1rem, env(safe-area-inset-left));
-  bottom: max(1rem, env(safe-area-inset-bottom));
-  display: grid;
-  grid-template-columns: repeat(3, var(--mobile-button-size));
-  grid-template-rows: repeat(3, var(--mobile-button-size));
-  grid-template-areas:
-    '. up .'
-    'left . right'
-    '. down .';
-  gap: var(--mobile-gap);
-  opacity: 0.5;
-  /* Transparent when idle so UI beneath is visible */
-  transition: opacity 0.2s ease;
+  z-index: 1;
+  left: max(0.75rem, env(safe-area-inset-left));
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
+  width: calc(50% - max(0.75rem, env(safe-area-inset-left)) - var(--mobile-gap));
+  height: clamp(8rem, 38vh, 17rem);
+  overflow: hidden;
+  border-radius: clamp(1rem, 5vw, 2.5rem);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: crosshair;
 }
 
-/* Brighten the entire D-pad when any button inside is being touched */
-.mobile-controls__dpad:active,
-.mobile-controls__dpad:focus-within {
+.mobile-controls__joystick {
+  position: absolute;
+  width: var(--joystick-base-size);
+  height: var(--joystick-base-size);
+  border: 2px solid rgba(200, 214, 229, 0.12);
+  border-radius: 50%;
+  background: rgba(14, 14, 26, 0.26);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.18),
+    inset 0 0 28px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.92);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 0s linear 120ms;
+  will-change: left, top, opacity, transform;
+}
+
+.mobile-controls__joystick.is-active {
   opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, -50%) scale(1);
+  transition:
+    opacity 70ms ease,
+    transform 70ms ease,
+    visibility 0s;
+}
+
+.mobile-controls__joystick-knob {
+  position: absolute;
+  inset: 0;
+  width: var(--joystick-knob-size);
+  height: var(--joystick-knob-size);
+  margin: auto;
+  border: 2px solid rgba(218, 222, 226, 0.48);
+  border-radius: 50%;
+  background: rgba(190, 192, 197, 0.24);
+  box-shadow:
+    inset 0 0 18px rgba(255, 255, 255, 0.06),
+    0 3px 10px rgba(0, 0, 0, 0.2);
+  will-change: transform;
 }
 
 .mobile-controls__actions {
   position: absolute;
+  z-index: 2;
   right: max(1rem, env(safe-area-inset-right));
   bottom: max(1rem, env(safe-area-inset-bottom));
-  /* Ergonomic fix: aligns the Interact button vertically with the Left/Right arrows of the D-Pad */
-  margin-bottom: calc(var(--mobile-button-size) + var(--mobile-gap));
   display: flex;
   gap: var(--mobile-gap);
   opacity: 0.5;
-  /* Transparent when idle */
+  pointer-events: auto;
   transition: opacity 0.2s ease;
 }
 
@@ -825,9 +865,13 @@ canvas {
   transition: transform 0.08s ease, background 0.08s ease, border-color 0.08s ease, box-shadow 0.08s ease;
 }
 
+.mobile-controls__button[hidden] {
+  display: none;
+}
+
 .mobile-controls__button--interact,
 .mobile-controls__button--wisdom {
-  min-width: clamp(6rem, 22vw, 8rem);
+  min-width: var(--mobile-action-width);
   padding: 0 1rem;
   font-size: clamp(0.9rem, 3.5vw, 1.25rem);
   letter-spacing: 0.1em;

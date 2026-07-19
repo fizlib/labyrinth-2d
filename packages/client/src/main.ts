@@ -119,6 +119,8 @@ const KEY_MAP: Record<string, MoveDirection> = {
 };
 
 function syncActiveKeys(): void {
+  // Preserve the existing additive input policy: keyboard and mobile movement may
+  // coexist, and releasing either source does not cancel the direction held by the other.
   for (const direction of MOVE_DIRECTIONS) {
     activeKeys[direction] = keyboardKeys[direction] || touchKeys[direction];
   }
