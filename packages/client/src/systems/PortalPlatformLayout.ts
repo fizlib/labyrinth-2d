@@ -1,3 +1,5 @@
+import { getFiorwoodsRuntimeAssetPath } from '../assets/runtimeAssetPaths';
+
 export interface PortalPlatformSpriteSpec {
   asset: string;
   x: number;
@@ -137,7 +139,7 @@ export function getPortalPlatformAssetPath(asset: string): string {
   const assetId = asset.slice(1);
   return asset.startsWith('t')
     ? `/assets/portal-platform/Sprite_Tormund_${assetId}.png`
-    : `/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_${assetId}.png`;
+    : getFiorwoodsRuntimeAssetPath(Number(assetId));
 }
 
 export const PORTAL_PLATFORM_ASSET_PATHS = [

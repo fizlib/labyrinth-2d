@@ -73,7 +73,6 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
   let pendingScan: Promise<CatalogAsset[]> | null = null;
 
   const styleLibraryRoot = path.join(publicDir, 'assets', 'chained-echoes-assets-sorted');
-  const runtimeStyleRoot = path.join(styleLibraryRoot, 'Assets', 'Maps', 'Fiorwoods');
 
   const isWithin = (parent: string, candidate: string): boolean => {
     const relative = path.relative(parent, candidate);
@@ -81,9 +80,8 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
   };
 
   const shouldIncludePublicPath = (candidate: string): boolean => {
-    if (includeFullStyleLibrary || !isWithin(styleLibraryRoot, candidate)) return true;
-    // Retain the directory chain leading to Fiorwoods as well as its contents.
-    return isWithin(candidate, runtimeStyleRoot) || isWithin(runtimeStyleRoot, candidate);
+    if (includeFullStyleLibrary) return true;
+    return !isWithin(styleLibraryRoot, candidate);
   };
 
   const scan = async (): Promise<CatalogAsset[]> => {
@@ -100,7 +98,7 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
           // filters reflect the sorted hierarchy.
           .filter((entry) => entry.isDirectory())
           .map((entry) => path.join(root, entry.name))
-        : [runtimeStyleRoot];
+        : [];
 
       while (directories.length > 0) {
         const directory = directories.pop()!;
@@ -381,7 +379,9 @@ export default defineConfig(({ command, mode }) => {
       rollupOptions: {
         input: {
           game: path.resolve(__dirname, 'index.html'),
-          styleEditor: path.resolve(__dirname, 'style-editor.html'),
+          ...(includeFullStyleLibrary
+            ? { styleEditor: path.resolve(__dirname, 'style-editor.html') }
+            : {}),
         },
       },
     },

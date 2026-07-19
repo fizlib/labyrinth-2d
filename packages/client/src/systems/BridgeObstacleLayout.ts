@@ -1,4 +1,5 @@
 import { BRIDGE_WALKWAY_ROW_Y, type BridgeEntrySide } from '@labyrinth/shared';
+import { getFiorwoodsRuntimeAssetPath } from '../assets/runtimeAssetPaths';
 
 export interface BridgeObstacleSpriteSpec {
   asset: BridgeObstacleAsset;
@@ -22,35 +23,21 @@ export interface BridgeObstacleHiddenForestSpriteSpec {
 }
 
 const BRIDGE_OBSTACLE_ASSET_PATH_BY_ID = {
-  f563: '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_563.png',
-  f1437:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1437.png',
-  f1443:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1443.png',
-  f1446:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1446.png',
-  f1447:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1447.png',
-  f1485:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1485.png',
-  f1537:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1537.png',
-  f1542:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1542.png',
-  f1545:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1545.png',
-  f1587:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1587.png',
-  f1591:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1591.png',
-  f1592:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1592.png',
-  f1987:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1987.png',
-  f1988:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1988.png',
-  f1992:
-    '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_1992.png',
+  f563: getFiorwoodsRuntimeAssetPath(563),
+  f1437: getFiorwoodsRuntimeAssetPath(1437),
+  f1443: getFiorwoodsRuntimeAssetPath(1443),
+  f1446: getFiorwoodsRuntimeAssetPath(1446),
+  f1447: getFiorwoodsRuntimeAssetPath(1447),
+  f1485: getFiorwoodsRuntimeAssetPath(1485),
+  f1537: getFiorwoodsRuntimeAssetPath(1537),
+  f1542: getFiorwoodsRuntimeAssetPath(1542),
+  f1545: getFiorwoodsRuntimeAssetPath(1545),
+  f1587: getFiorwoodsRuntimeAssetPath(1587),
+  f1591: getFiorwoodsRuntimeAssetPath(1591),
+  f1592: getFiorwoodsRuntimeAssetPath(1592),
+  f1987: getFiorwoodsRuntimeAssetPath(1987),
+  f1988: getFiorwoodsRuntimeAssetPath(1988),
+  f1992: getFiorwoodsRuntimeAssetPath(1992),
   a105: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_105.png',
   a106: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_106.png',
   a107: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_107.png',

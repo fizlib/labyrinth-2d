@@ -33,6 +33,7 @@ import {
 } from './FallbackTextures';
 import { PORTAL_PLATFORM_ASSET_PATHS } from '../systems/PortalPlatformLayout';
 import { BRIDGE_OBSTACLE_ASSET_PATHS } from '../systems/BridgeObstacleLayout';
+import { getFiorwoodsRuntimeAssetPath } from './runtimeAssetPaths';
 
 export interface FrontGateTextures {
   topLeft: Texture;
@@ -555,11 +556,8 @@ export async function loadAssets(): Promise<GameAssets> {
   // scattering of trees. Keep them in the source library so the module names
   // and placement match the extracted map layouts exactly.
   try {
-    const fiorwoodsRoot = 'assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods';
     const loadFiorwoodsTile = async (id: number): Promise<Texture> => {
-      const texture = await Assets.load<Texture>(
-        `${fiorwoodsRoot}/Sprite_Fiorwoods_${id}.png`,
-      );
+      const texture = await Assets.load<Texture>(getFiorwoodsRuntimeAssetPath(id));
       texture.source.scaleMode = 'nearest';
       return texture;
     };
