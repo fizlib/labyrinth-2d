@@ -1217,6 +1217,151 @@ async function main(): Promise<void> {
 
   let latestServerState: GameState | null = null;
 
+  function attachTilemapLayers(renderer: TilemapRenderer): void {
+    entityLayer.parent?.removeChild(entityLayer);
+    forestWallLayer.parent?.removeChild(forestWallLayer);
+    cellBoundaryOverlay?.parent?.removeChild(cellBoundaryOverlay);
+
+    worldContainer.addChild(renderer.backgroundLayer);
+    worldContainer.addChild(renderer.shadowLayer);
+    worldContainer.addChild(renderer.portalTerrainLayer);
+    worldContainer.addChild(renderer.forestUnderlayLayer);
+    worldContainer.addChild(renderer.groundDetailLayer);
+    worldContainer.addChild(entityLayer);
+    worldContainer.addChild(forestWallLayer);
+    if (cellBoundaryOverlay) worldContainer.addChild(cellBoundaryOverlay);
+
+    for (const wallChunk of renderer.wallRowChunks) {
+      forestWallLayer.addChild(wallChunk);
+    }
+
+    for (const wallChunk of renderer.northWallRowChunks) {
+      entityLayer.addChild(wallChunk);
+    }
+
+    for (const gate of renderer.gateSprites) {
+      entityLayer.addChild(gate);
+    }
+
+    for (const tree of renderer.treeSprites) {
+      entityLayer.addChild(tree);
+    }
+
+    for (const runestone of renderer.runestoneSprites) {
+      entityLayer.addChild(runestone.sprite);
+    }
+
+    for (const plate of renderer.pressurePlateSprites) {
+      entityLayer.addChild(plate.sprite);
+    }
+  }
+
+  /**
+   * Pixi can restore image-backed textures after a mobile WebGL/WebGPU context
+   * loss, but generated render textures have no CPU-side source to upload.
+   * Recreate the baked map chunks while preserving all authoritative game state.
+   */
+  function rebuildTilemapAfterContextChange(): void {
+    if (!currentMap || !currentLayout || !tilemapRenderer) return;
+
+    const previousRenderer = tilemapRenderer;
+    const previousPlateFrames = new Map(
+      previousRenderer.pressurePlateSprites.map((plate) => [
+        plate.plateId,
+        plate.currentFrame,
+      ]),
+    );
+
+    let replacementRenderer: TilemapRenderer;
+    try {
+      replacementRenderer = new TilemapRenderer(
+        currentMap,
+        currentLayout.gates,
+        currentLayout.pressurePlates,
+        currentLayout.bridges,
+        currentLayout.dirtMask,
+        assets,
+        app.renderer,
+      );
+    } catch (error) {
+      console.error('[Main] Failed to rebuild the map after graphics context restoration', error);
+      return;
+    }
+
+    if (latestServerState) {
+      replacementRenderer.syncBridgeStates(latestServerState.bridgeStates, false);
+
+      for (const runestoneState of latestServerState.runestones) {
+        const runestone = replacementRenderer.runestoneSprites.find(
+          (candidate) => candidate.index === runestoneState.index,
+        );
+        if (!runestone || !runestoneState.activated) continue;
+        runestone.activated = true;
+        runestone.sprite.texture = assets.runestoneTextures[runestoneState.index][1];
+      }
+    }
+
+    for (const plate of replacementRenderer.pressurePlateSprites) {
+      const frame = previousPlateFrames.get(plate.plateId) ?? 0;
+      plate.currentFrame = frame;
+      plate.sprite.texture = plate.frameSet[frame] ?? plate.frameSet[0];
+    }
+
+    const portalPosition = latestServerState?.portal ?? null;
+    const restorePortalPlatform = portalPlatform !== null && portalPosition !== null;
+    portalPlatform?.destroy();
+    portalPlatform = null;
+
+    for (const [gateIndex, slide] of gateSlideStates) {
+      if (slide.mask) {
+        if (slide.sprite) slide.sprite.mask = null;
+        slide.mask.parent?.removeChild(slide.mask);
+        slide.mask.destroy();
+        slide.mask = null;
+      }
+      slide.sprite = replacementRenderer.gateSprites[gateIndex] ?? null;
+    }
+
+    previousRenderer.destroy();
+    tilemapRenderer = replacementRenderer;
+    attachTilemapLayers(replacementRenderer);
+
+    if (restorePortalPlatform && portalPosition) {
+      portalPlatform = new PortalPlatform(
+        portalPosition.x,
+        portalPosition.y,
+        assets.portalPlatformTextures,
+        replacementRenderer.portalTerrainLayer,
+        replacementRenderer.groundDetailLayer,
+        entityLayer,
+      );
+    }
+
+    replacementRenderer.setWardenBridgeWisdomHints(
+      currentLayout.bridges,
+      localPlayerRole === 'warden',
+    );
+    updateGateSlideAnimations(0);
+    replacementRenderer.updateVisibility(
+      worldContainer.x,
+      worldContainer.y,
+      zoomLevel,
+    );
+    console.info('[Main] Rebuilt generated map textures after graphics context restoration');
+  }
+
+  let tilemapRecoveryFrame: number | null = null;
+  const renderContextRecovery = {
+    contextChange(): void {
+      if (!tilemapRenderer || tilemapRecoveryFrame !== null) return;
+      tilemapRecoveryFrame = window.requestAnimationFrame(() => {
+        tilemapRecoveryFrame = null;
+        rebuildTilemapAfterContextChange();
+      });
+    },
+  };
+  app.renderer.runners.contextChange.add(renderContextRecovery);
+
   function setPlayerPosition(
     data: PlayerSpriteData,
     x: number,
@@ -1285,48 +1430,7 @@ async function main(): Promise<void> {
       }
       cellBoundaryOverlay?.destroy();
       cellBoundaryOverlay = createCellBoundaryOverlay();
-
-      // Rebuild the fixed layer order. Forest walls remain above every entity.
-      worldContainer.removeChild(entityLayer);
-      worldContainer.removeChild(forestWallLayer);
-      worldContainer.addChild(tilemapRenderer.backgroundLayer);
-      worldContainer.addChild(tilemapRenderer.shadowLayer);
-      worldContainer.addChild(tilemapRenderer.portalTerrainLayer);
-      worldContainer.addChild(tilemapRenderer.forestUnderlayLayer);
-      worldContainer.addChild(tilemapRenderer.groundDetailLayer);
-      worldContainer.addChild(entityLayer);
-      worldContainer.addChild(forestWallLayer);
-      worldContainer.addChild(cellBoundaryOverlay);
-
-      // Wall chunks intentionally do not participate in player Y-sorting.
-      for (const wallChunk of tilemapRenderer.wallRowChunks) {
-        forestWallLayer.addChild(wallChunk);
-      }
-
-      // Northern walls sort naturally with players; only west/east/south
-      // walls belong to the unconditional foreground layer.
-      for (const wallChunk of tilemapRenderer.northWallRowChunks) {
-        entityLayer.addChild(wallChunk);
-      }
-
-      for (const gate of tilemapRenderer.gateSprites) {
-        entityLayer.addChild(gate);
-      }
-
-      // Add trees to entityLayer for Y-sorting
-      for (const tree of tilemapRenderer.treeSprites) {
-        entityLayer.addChild(tree);
-      }
-
-      // Add runestone sprites to entityLayer for Y-sorting
-      for (const rs of tilemapRenderer.runestoneSprites) {
-        entityLayer.addChild(rs.sprite);
-      }
-
-      // Add pressure plate sprites to entityLayer
-      for (const plate of tilemapRenderer.pressurePlateSprites) {
-        entityLayer.addChild(plate.sprite);
-      }
+      attachTilemapLayers(tilemapRenderer);
 
       if (statusEl) {
         statusEl.textContent = '🟢 Connected';
