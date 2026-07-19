@@ -1016,6 +1016,87 @@ function updatePressurePlateAnimations(
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+const LOADING_THEME_VOLUME = 0.42;
+const LOADING_THEME_FADE_MS = 480;
+let loadingThemeUnlockCleanup: (() => void) | null = null;
+let loadingThemeFadeFrame: number | null = null;
+
+function getLoadingTheme(): HTMLAudioElement | null {
+  return document.getElementById('loading-theme') as HTMLAudioElement | null;
+}
+
+function startLoadingTheme(): void {
+  const theme = getLoadingTheme();
+  if (!theme) return;
+
+  theme.volume = LOADING_THEME_VOLUME;
+
+  const resumeAfterInteraction = (): void => {
+    if (!document.getElementById('loading-screen')) {
+      loadingThemeUnlockCleanup?.();
+      return;
+    }
+
+    void theme
+      .play()
+      .then(() => loadingThemeUnlockCleanup?.())
+      .catch(() => undefined);
+  };
+  const cleanup = (): void => {
+    window.removeEventListener('pointerdown', resumeAfterInteraction);
+    window.removeEventListener('keydown', resumeAfterInteraction);
+    if (loadingThemeUnlockCleanup === cleanup) loadingThemeUnlockCleanup = null;
+  };
+
+  loadingThemeUnlockCleanup?.();
+  loadingThemeUnlockCleanup = cleanup;
+  window.addEventListener('pointerdown', resumeAfterInteraction, { passive: true });
+  window.addEventListener('keydown', resumeAfterInteraction);
+
+  // Unmuted autoplay is browser-policy dependent. Keep the interaction
+  // listeners above as a fallback for browsers that reject this first attempt.
+  void theme
+    .play()
+    .then(cleanup)
+    .catch(() => undefined);
+}
+
+function fadeOutLoadingTheme(): void {
+  const theme = getLoadingTheme();
+  loadingThemeUnlockCleanup?.();
+  if (!theme) return;
+
+  if (loadingThemeFadeFrame !== null) {
+    window.cancelAnimationFrame(loadingThemeFadeFrame);
+    loadingThemeFadeFrame = null;
+  }
+
+  if (theme.paused) {
+    theme.currentTime = 0;
+    theme.volume = LOADING_THEME_VOLUME;
+    return;
+  }
+
+  const initialVolume = theme.volume;
+  const fadeStartedAt = performance.now();
+  const fade = (now: number): void => {
+    const progress = Math.min(1, (now - fadeStartedAt) / LOADING_THEME_FADE_MS);
+    theme.volume = initialVolume * (1 - progress);
+
+    if (progress < 1) {
+      loadingThemeFadeFrame = window.requestAnimationFrame(fade);
+      return;
+    }
+
+    loadingThemeFadeFrame = null;
+    theme.pause();
+    theme.currentTime = 0;
+    theme.volume = LOADING_THEME_VOLUME;
+  };
+
+  loadingThemeFadeFrame = window.requestAnimationFrame(fade);
+}
+
 function updateLoadingProgress(progress: number, status: string): void {
   const screen = document.getElementById('loading-screen');
   if (!screen || screen.classList.contains('loading-screen--complete')) return;
@@ -1041,6 +1122,7 @@ function dismissLoadingScreen(): void {
 
   window.setTimeout(() => {
     screen.classList.add('loading-screen--complete');
+    fadeOutLoadingTheme();
   }, 240);
   window.setTimeout(() => screen.remove(), 780);
 }
@@ -1058,6 +1140,7 @@ function showLoadingError(message: string): void {
 }
 
 async function main(): Promise<void> {
+  startLoadingTheme();
   updateLoadingProgress(0.06, 'Lighting the first torch…');
   const app = new Application();
 
@@ -1766,7 +1849,10 @@ async function main(): Promise<void> {
   };
 
   const triggerInteract = (): void => {
-    if (minimap?.isExpanded()) return;
+    if (minimap?.isExpanded()) {
+      minimap.closeExpanded();
+      return;
+    }
 
     if (introDialogueHud?.isVisible()) {
       introDialogueHud.advance();
@@ -1830,6 +1916,9 @@ async function main(): Promise<void> {
         bridges: currentLayout.bridges,
         expandButtonTexture: assets.expandMapButtonTexture,
         contractButtonTexture: assets.contractMapButtonTexture,
+        onExpandedChange: (expanded) => {
+          mobileControls.setExpandedMinimapVisible(expanded);
+        },
       },
     );
     minimap.addToStage(app.stage);
@@ -2175,6 +2264,11 @@ async function main(): Promise<void> {
 
     const dir = KEY_MAP[e.code];
     if (dir) setKeyboardDirection(dir, true);
+
+    if (e.code === 'KeyE' && minimap?.isExpanded()) {
+      if (!e.repeat) triggerInteract();
+      return;
+    }
 
     // The expanded warden map remains modal for actions, but movement stays active.
     if (minimap?.isExpanded()) return;

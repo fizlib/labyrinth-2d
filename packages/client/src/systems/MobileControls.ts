@@ -90,6 +90,7 @@ export class MobileControls {
   private activeJoystickCaptureTarget: HTMLElement | null = null;
   private wisdomAvailable = true;
   private dialogueExclusion: IntroDialogueExclusion | null = null;
+  private expandedMinimapVisible = false;
 
   constructor(private readonly options: MobileControlsOptions) {
     this.mediaQuery = window.matchMedia(MOBILE_CONTROLS_QUERY);
@@ -170,6 +171,13 @@ export class MobileControls {
   setDialogueExclusion(bounds: IntroDialogueExclusion | null): void {
     this.releaseJoystick();
     this.dialogueExclusion = bounds;
+    this.updateJoystickZones();
+  }
+
+  /** Keep the modal warden map and its click-to-close backdrop interactive. */
+  setExpandedMinimapVisible(visible: boolean): void {
+    this.releaseJoystick();
+    this.expandedMinimapVisible = visible;
     this.updateJoystickZones();
   }
 
@@ -392,6 +400,15 @@ export class MobileControls {
       const scaleY = resolvedCanvasRect.height / resolvedCanvas.height;
       const canvasLeft = resolvedCanvasRect.left - parentRect.left;
       const canvasTop = resolvedCanvasRect.top - parentRect.top;
+
+      if (this.expandedMinimapVisible) {
+        addExclusion({
+          left: canvasLeft,
+          top: canvasTop,
+          right: canvasLeft + resolvedCanvasRect.width,
+          bottom: canvasTop + resolvedCanvasRect.height,
+        });
+      }
 
       if (this.wisdomAvailable) {
         addExclusion({

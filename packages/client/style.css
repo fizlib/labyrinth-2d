@@ -827,15 +827,8 @@ canvas {
   left: 50%;
   display: flex;
   gap: var(--mobile-gap);
-  opacity: 0.5;
   pointer-events: auto;
   transform: translateX(-50%);
-  transition: opacity 0.2s ease;
-}
-
-.mobile-controls__actions:active,
-.mobile-controls__actions:focus-within {
-  opacity: 1;
 }
 
 .mobile-controls__actions--side {
@@ -872,7 +865,8 @@ canvas {
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
-  transition: transform 0.08s ease, background 0.08s ease, border-color 0.08s ease, box-shadow 0.08s ease;
+  opacity: 0.5;
+  transition: transform 0.08s ease, background 0.08s ease, border-color 0.08s ease, box-shadow 0.08s ease, opacity 0.08s ease;
 }
 
 .mobile-controls__button[hidden] {
@@ -911,6 +905,7 @@ canvas {
 
 .mobile-controls__button.is-pressed {
   transform: scale(0.92);
+  opacity: 1;
   background: rgba(106, 90, 205, 0.6);
   /* Purple accent */
   border-color: rgba(255, 255, 255, 0.9);
