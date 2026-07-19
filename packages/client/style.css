@@ -45,6 +45,17 @@ body {
 
 /* ── Browser fullscreen toggle ─────────────────────────────────────────── */
 
+/* The game owns touch gestures; browser pinch/double-tap zoom can otherwise
+   leave part of the fixed-size game surface outside the phone viewport. */
+@media (hover: none) and (pointer: coarse) {
+  html,
+  body,
+  #game-container,
+  #game-container canvas {
+    touch-action: none;
+  }
+}
+
 .fullscreen-toggle {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
@@ -111,6 +122,124 @@ body {
 /* Keep the optional debug panel clear of the top-right control. */
 #fullscreen-toggle:not([hidden]) ~ #debug-ui {
   top: 68px;
+}
+
+.fullscreen-help {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+  padding:
+    max(24px, env(safe-area-inset-top))
+    max(20px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+  background: rgba(3, 6, 6, 0.78);
+}
+
+.fullscreen-help[hidden] {
+  display: none;
+}
+
+.fullscreen-help__panel {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 30px 26px 24px;
+  border: 2px solid #8b7d52;
+  border-radius: 8px;
+  background: #101b17;
+  color: #dfe8da;
+  box-shadow:
+    6px 6px 0 #030606,
+    inset 0 0 30px rgba(68, 134, 82, 0.12);
+  font-family: 'PixelOperator8', 'Courier New', Courier, monospace;
+}
+
+.fullscreen-help__panel h2 {
+  padding-right: 26px;
+  color: #f4ecd1;
+  font-size: 1.35rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+
+.fullscreen-help__panel p {
+  margin-top: 14px;
+  color: #b7c7b0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.fullscreen-help__steps {
+  margin: 20px 0 0 1.25rem;
+  color: #dfe8da;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.fullscreen-help__steps li + li {
+  margin-top: 10px;
+}
+
+.fullscreen-help__steps strong {
+  color: #d5c98d;
+  font-weight: 400;
+}
+
+.fullscreen-help__share-icon {
+  display: inline-grid;
+  width: 1.4rem;
+  height: 1.4rem;
+  place-items: center;
+  border: 1px solid #79a8d8;
+  border-radius: 4px;
+  color: #9bc8f2;
+  font-family: Arial, sans-serif;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fullscreen-help__close,
+.fullscreen-help__ok {
+  border: 1px solid #70a36e;
+  border-radius: 5px;
+  background: #264c34;
+  color: #f2f7e8;
+  cursor: pointer;
+  font: inherit;
+}
+
+.fullscreen-help__close:hover,
+.fullscreen-help__ok:hover {
+  border-color: #8bc289;
+  background: #315f40;
+}
+
+.fullscreen-help__close:focus-visible,
+.fullscreen-help__ok:focus-visible {
+  outline: 3px solid #79c86f;
+  outline-offset: 2px;
+}
+
+.fullscreen-help__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  color: #b7c7b0;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.fullscreen-help__ok {
+  display: block;
+  min-width: 120px;
+  min-height: 42px;
+  margin: 24px auto 0;
+  padding: 8px 18px;
 }
 
 /* ── Loading screen ────────────────────────────────────────────────────── */

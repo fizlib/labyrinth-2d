@@ -4,8 +4,12 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Labyrinth" />
     <title>🏰 Labyrinth 2D</title>
     <meta name="description" content="Co-op online 2D pixel-art labyrinth game for up to 10 players." />
     <link
@@ -100,6 +104,42 @@
         <path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" />
       </svg>
     </button>
+    <div
+      id="ios-fullscreen-help"
+      class="fullscreen-help"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ios-fullscreen-help-title"
+      hidden
+    >
+      <div class="fullscreen-help__panel">
+        <button
+          id="ios-fullscreen-help-close"
+          class="fullscreen-help__close"
+          type="button"
+          aria-label="Close fullscreen instructions"
+          title="Close"
+        >
+          ×
+        </button>
+        <h2 id="ios-fullscreen-help-title">Fullscreen on iPhone</h2>
+        <p id="ios-fullscreen-help-message">
+          Safari can open this game fullscreen from your Home Screen.
+        </p>
+        <ol id="ios-fullscreen-help-steps" class="fullscreen-help__steps">
+          <li>
+            Tap Safari’s
+            <span class="fullscreen-help__share-icon" aria-label="Share">⇧</span>
+            <strong>Share</strong> button.
+          </li>
+          <li>Choose <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
+          <li>Open <strong>Labyrinth</strong> from your Home Screen.</li>
+        </ol>
+        <button id="ios-fullscreen-help-ok" class="fullscreen-help__ok" type="button">
+          Got it
+        </button>
+      </div>
+    </div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

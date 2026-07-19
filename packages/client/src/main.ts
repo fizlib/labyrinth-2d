@@ -235,17 +235,70 @@ function getViewportScale(viewportW: number, viewportH: number): number {
   return fitScale;
 }
 
-let fullscreenCanvasSize: { width: number; height: number } | null = null;
+const IOS_FULLSCREEN_SCALE_STORAGE_KEY = 'labyrinth-ios-fullscreen-scale';
+let fullscreenCanvasScale: number | null = null;
+
+interface AppleNavigator extends Navigator {
+  standalone?: boolean;
+}
+
+interface WebkitFullscreenDocument extends Document {
+  webkitExitFullscreen?: () => Promise<void> | void;
+  webkitFullscreenElement?: Element | null;
+}
+
+interface WebkitFullscreenElement extends HTMLElement {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+}
+
+function isAppleMobileDevice(): boolean {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isAppleStandaloneMode(): boolean {
+  return Boolean((navigator as AppleNavigator).standalone)
+    || window.matchMedia('(display-mode: standalone)').matches;
+}
+
+function getFullscreenElement(): Element | null {
+  const webkitDocument = document as WebkitFullscreenDocument;
+  return document.fullscreenElement ?? webkitDocument.webkitFullscreenElement ?? null;
+}
+
+function saveIosFullscreenScale(app: Application): void {
+  const canvasRect = app.canvas.getBoundingClientRect();
+  const scale = Math.min(
+    canvasRect.width / INTERNAL_WIDTH,
+    canvasRect.height / INTERNAL_HEIGHT,
+  );
+
+  try {
+    window.localStorage.setItem(IOS_FULLSCREEN_SCALE_STORAGE_KEY, String(scale));
+  } catch {
+    // Standalone mode still works when private browsing blocks local storage.
+  }
+}
+
+function getSavedIosFullscreenScale(): number | null {
+  if (!isAppleMobileDevice() || !isAppleStandaloneMode()) return null;
+
+  try {
+    const scale = Number(window.localStorage.getItem(IOS_FULLSCREEN_SCALE_STORAGE_KEY));
+    return Number.isFinite(scale) && scale > 0 ? scale : null;
+  } catch {
+    return null;
+  }
+}
 
 function resizeCanvas(app: Application): void {
-  if (fullscreenCanvasSize) {
-    app.canvas.style.width = `${fullscreenCanvasSize.width}px`;
-    app.canvas.style.height = `${fullscreenCanvasSize.height}px`;
-  } else {
-    const scale = getViewportScale(window.innerWidth, window.innerHeight);
-    app.canvas.style.width = `${INTERNAL_WIDTH * scale}px`;
-    app.canvas.style.height = `${INTERNAL_HEIGHT * scale}px`;
-  }
+  const viewportScale = getViewportScale(window.innerWidth, window.innerHeight);
+  const scale = fullscreenCanvasScale === null
+    ? viewportScale
+    : Math.min(viewportScale, fullscreenCanvasScale);
+
+  app.canvas.style.width = `${INTERNAL_WIDTH * scale}px`;
+  app.canvas.style.height = `${INTERNAL_HEIGHT * scale}px`;
   app.renderer.resize(INTERNAL_WIDTH, INTERNAL_HEIGHT);
 }
 
@@ -253,13 +306,74 @@ function setupFullscreenToggle(app: Application): void {
   const button = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
   if (!button) return;
 
-  if (!document.fullscreenEnabled) {
+  const webkitDocument = document as WebkitFullscreenDocument;
+  const fullscreenRoot = document.documentElement as WebkitFullscreenElement;
+  const supportsStandardFullscreen = document.fullscreenEnabled
+    && typeof fullscreenRoot.requestFullscreen === 'function';
+  const supportsWebkitFullscreen = typeof fullscreenRoot.webkitRequestFullscreen === 'function';
+  const isAppleMobile = isAppleMobileDevice();
+
+  const helpDialog = document.querySelector<HTMLDivElement>('#ios-fullscreen-help');
+  const helpTitle = document.querySelector<HTMLHeadingElement>('#ios-fullscreen-help-title');
+  const helpMessage = document.querySelector<HTMLParagraphElement>(
+    '#ios-fullscreen-help-message',
+  );
+  const helpSteps = document.querySelector<HTMLOListElement>('#ios-fullscreen-help-steps');
+  const helpClose = document.querySelector<HTMLButtonElement>('#ios-fullscreen-help-close');
+  const helpOk = document.querySelector<HTMLButtonElement>('#ios-fullscreen-help-ok');
+  let helpPreviouslyFocused: HTMLElement | null = null;
+
+  const closeIosFullscreenHelp = (): void => {
+    if (!helpDialog || helpDialog.hidden) return;
+    helpDialog.hidden = true;
+    helpPreviouslyFocused?.focus();
+  };
+
+  const openIosFullscreenHelp = (standalone: boolean): void => {
+    if (!helpDialog || !helpTitle || !helpMessage || !helpSteps || !helpOk) return;
+
+    helpPreviouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : button;
+    helpTitle.textContent = standalone ? 'Exit fullscreen on iPhone' : 'Fullscreen on iPhone';
+    helpMessage.textContent = standalone
+      ? 'Swipe up from the bottom edge to close the fullscreen game or switch apps.'
+      : 'Safari can open this game fullscreen from your Home Screen.';
+    helpSteps.hidden = standalone;
+    helpDialog.hidden = false;
+    helpOk.focus();
+  };
+
+  helpClose?.addEventListener('click', closeIosFullscreenHelp);
+  helpOk?.addEventListener('click', closeIosFullscreenHelp);
+  helpDialog?.addEventListener('click', (event) => {
+    if (event.target === helpDialog) closeIosFullscreenHelp();
+  });
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeIosFullscreenHelp();
+  });
+
+  if (!supportsStandardFullscreen && !supportsWebkitFullscreen && isAppleMobile) {
+    const isStandalone = isAppleStandaloneMode();
+    button.classList.toggle('is-fullscreen', isStandalone);
+    button.setAttribute('aria-pressed', String(isStandalone));
+    button.setAttribute('aria-haspopup', 'dialog');
+    button.setAttribute('aria-label', isStandalone ? 'Exit fullscreen' : 'Enter fullscreen');
+    button.title = isStandalone ? 'Exit fullscreen' : 'Enter fullscreen';
+    button.addEventListener('click', () => {
+      if (!isStandalone) saveIosFullscreenScale(app);
+      openIosFullscreenHelp(isStandalone);
+    });
+    return;
+  }
+
+  if (!supportsStandardFullscreen && !supportsWebkitFullscreen) {
     button.hidden = true;
     return;
   }
 
   const syncFullscreenState = (): void => {
-    const isFullscreen = document.fullscreenElement !== null;
+    const isFullscreen = getFullscreenElement() !== null;
 
     button.classList.toggle('is-fullscreen', isFullscreen);
     button.setAttribute('aria-pressed', String(isFullscreen));
@@ -270,7 +384,7 @@ function setupFullscreenToggle(app: Application): void {
     button.title = isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen';
 
     if (!isFullscreen) {
-      fullscreenCanvasSize = null;
+      fullscreenCanvasScale = null;
       resizeCanvas(app);
     }
   };
@@ -279,20 +393,41 @@ function setupFullscreenToggle(app: Application): void {
     button.disabled = true;
 
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
+      if (getFullscreenElement()) {
+        if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+          await document.exitFullscreen();
+        } else {
+          await webkitDocument.webkitExitFullscreen?.();
+        }
       } else {
         const canvasRect = app.canvas.getBoundingClientRect();
-        fullscreenCanvasSize = {
-          width: canvasRect.width,
-          height: canvasRect.height,
-        };
-        await document.documentElement.requestFullscreen();
+        fullscreenCanvasScale = Math.min(
+          canvasRect.width / INTERNAL_WIDTH,
+          canvasRect.height / INTERNAL_HEIGHT,
+        );
+
+        if (supportsStandardFullscreen) {
+          await fullscreenRoot.requestFullscreen();
+        } else {
+          await fullscreenRoot.webkitRequestFullscreen?.();
+        }
+
+        if (!getFullscreenElement() && isAppleMobile) {
+          fullscreenCanvasScale = null;
+          resizeCanvas(app);
+          saveIosFullscreenScale(app);
+          openIosFullscreenHelp(false);
+        }
       }
     } catch (error) {
-      fullscreenCanvasSize = null;
+      fullscreenCanvasScale = null;
       resizeCanvas(app);
-      console.warn('Unable to change fullscreen mode.', error);
+      if (isAppleMobile) {
+        saveIosFullscreenScale(app);
+        openIosFullscreenHelp(false);
+      } else {
+        console.warn('Unable to change fullscreen mode.', error);
+      }
     } finally {
       button.disabled = false;
       syncFullscreenState();
@@ -300,6 +435,7 @@ function setupFullscreenToggle(app: Application): void {
   });
 
   document.addEventListener('fullscreenchange', syncFullscreenState);
+  document.addEventListener('webkitfullscreenchange', syncFullscreenState);
   syncFullscreenState();
 }
 
@@ -1228,6 +1364,7 @@ async function main(): Promise<void> {
   if (!container) throw new Error('Missing #game-container');
   container.appendChild(app.canvas);
 
+  fullscreenCanvasScale = getSavedIosFullscreenScale();
   resizeCanvas(app);
   setupFullscreenToggle(app);
   window.addEventListener('resize', () => resizeCanvas(app));
