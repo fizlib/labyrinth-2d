@@ -73,6 +73,9 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
   let pendingScan: Promise<CatalogAsset[]> | null = null;
 
   const styleLibraryRoot = path.join(publicDir, 'assets', 'chained-echoes-assets-sorted');
+  const characterFrameSourceRoots = ['lenne', 'glenn', 'amalia', 'robb', 'sienna'].map(
+    (name) => path.join(publicDir, 'assets', name),
+  );
 
   const isWithin = (parent: string, candidate: string): boolean => {
     const relative = path.relative(parent, candidate);
@@ -80,6 +83,7 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
   };
 
   const shouldIncludePublicPath = (candidate: string): boolean => {
+    if (characterFrameSourceRoots.some((root) => isWithin(root, candidate))) return false;
     if (includeFullStyleLibrary) return true;
     return !isWithin(styleLibraryRoot, candidate);
   };

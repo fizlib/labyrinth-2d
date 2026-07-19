@@ -33,6 +33,10 @@ import {
 } from './FallbackTextures';
 import { PORTAL_PLATFORM_ASSET_PATHS } from '../systems/PortalPlatformLayout';
 import { BRIDGE_OBSTACLE_ASSET_PATHS } from '../systems/BridgeObstacleLayout';
+import {
+  CHARACTER_ATLAS_MANIFEST,
+  CHARACTER_ATLAS_PATH,
+} from './characterAtlasManifest';
 import { getFiorwoodsRuntimeAssetPath } from './runtimeAssetPaths';
 
 export interface FrontGateTextures {
@@ -167,7 +171,7 @@ export interface GameAssets {
   shadowLeftTexture: Texture;
   /** Shadow overlay for inner corner tiles (below wall AND right of wall). */
   shadowCornerTexture: Texture;
-  /** Per-character animation variants. Index 0 is the default Lenne character. */
+  /** Per-character animation variants in PLAYER_CHARACTER_NAMES order. */
   playerAnimationSets: PlayerAnimationVariants[];
   /** Runestone textures: 3 pairs of [inactive, active]. Access via runestoneTextures[index][0|1]. */
   runestoneTextures: [Texture, Texture][];
@@ -657,82 +661,55 @@ export async function loadAssets(
   }
 
   // ── Player characters ───────────────────────────────────────────────────
-  // Keep this order in sync with the server's sprite assignment. Lenne must
-  // remain index 0 so the first player always receives the default character.
-  const PLAYER_CHARACTERS = [
-    {
-      id: 'lenne',
-      displayName: 'Lenne',
-      lyingFrame: 51,
-      hasDefaultAssets: false,
-      squadVariants: SQUAD_COLORS,
-    },
-    {
-      id: 'glenn',
-      displayName: 'Glenn',
-      lyingFrame: 55,
-      hasDefaultAssets: false,
-      squadVariants: SQUAD_COLORS,
-    },
-    {
-      id: 'amalia',
-      displayName: 'Amalia',
-      lyingFrame: 48,
-      hasDefaultAssets: false,
-      squadVariants: SQUAD_COLORS,
-    },
-    {
-      id: 'robb',
-      displayName: 'Robb',
-      lyingFrame: 55,
-      hasDefaultAssets: true,
-      squadVariants: SQUAD_COLORS,
-    },
-    {
-      id: 'sienna',
-      displayName: 'Sienna',
-      lyingFrame: 50,
-      hasDefaultAssets: true,
-      squadVariants: SQUAD_COLORS,
-    },
-  ] as const;
+  // All 612 authored frames are packed into one runtime texture. The manifest
+  // retains each frame's original cropped dimensions inside that atlas.
   const playerLoadStart = 0.44;
   const playerLoadEnd = 0.78;
-  const playerVariantCount = PLAYER_CHARACTERS.reduce(
-    (total, character) => total + character.squadVariants.length + 1,
-    0,
-  );
-  let loadedPlayerVariants = 0;
+  let loadedPlayerCharacters = 0;
 
   const reportPlayerProgress = (characterName: string): void => {
     reportProgress(
       playerLoadStart +
-        (loadedPlayerVariants / playerVariantCount) * (playerLoadEnd - playerLoadStart),
+        (loadedPlayerCharacters / CHARACTER_ATLAS_MANIFEST.length) *
+          (playerLoadEnd - playerLoadStart),
       `Gathering ${characterName} and the lost explorers…`,
     );
   };
 
-  // The source pack supplies individually cropped frames. Five right-facing
-  // directions cover all eight movement directions by mirroring the left side.
-  const loadCharacterAnimationSet = async (
-    character: { id: string; lyingFrame: number },
-    assetDirectory: string,
-  ): Promise<PlayerAnimationSet> => {
-    const loadCharacterFrame = async (frame: number): Promise<Texture> => {
-      const texture = await Assets.load<Texture>(
-        `assets/${assetDirectory}/${character.id}_${frame}.png`,
+  type CharacterAtlasFrame = readonly [
+    sourceFrame: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ];
+
+  const createAtlasAnimationSet = (
+    atlas: Texture,
+    frameDefinitions: readonly CharacterAtlasFrame[],
+  ): PlayerAnimationSet => {
+    const textures = new Map<number, Texture>();
+    for (const [sourceFrame, x, y, width, height] of frameDefinitions) {
+      textures.set(
+        sourceFrame,
+        new Texture({
+          source: atlas.source,
+          frame: new Rectangle(x, y, width, height),
+        }),
       );
-      texture.source.scaleMode = 'nearest';
+    }
+
+    const textureFor = (sourceFrame: number): Texture => {
+      const texture = textures.get(sourceFrame);
+      if (!texture) throw new Error(`Character atlas is missing frame ${sourceFrame}`);
       return texture;
     };
 
-    const [idleFrames, walkFrames, lyingFrame] = await Promise.all([
-      Promise.all([0, 1, 2, 3, 4].map(loadCharacterFrame)),
-      Promise.all(
-        Array.from({ length: 30 }, (_, index) => index + 16).map(loadCharacterFrame),
-      ),
-      loadCharacterFrame(character.lyingFrame),
-    ]);
+    const idleFrames = [0, 1, 2, 3, 4].map(textureFor);
+    const walkFrames = Array.from({ length: 30 }, (_, index) => index + 16).map(
+      textureFor,
+    );
+    const lyingFrameNumber = frameDefinitions[frameDefinitions.length - 1][0];
     const animations: Record<string, Texture[]> = {
       'idle-down': [idleFrames[0]],
       'idle-right': [idleFrames[1]],
@@ -744,7 +721,7 @@ export async function loadAssets(
       'walk-up': walkFrames.slice(12, 18),
       'walk-down-right': walkFrames.slice(18, 24),
       'walk-up-right': walkFrames.slice(24, 30),
-      lying: [lyingFrame],
+      lying: [textureFor(lyingFrameNumber)],
     };
     const mirroredKeys = new Set<string>();
     for (const state of ['idle', 'walk']) {
@@ -771,47 +748,38 @@ export async function loadAssets(
     return { animations, mirroredKeys: new Set(), scale: 1 };
   };
 
-  for (const character of PLAYER_CHARACTERS) {
+  let characterAtlas: Texture | null = null;
+  try {
+    characterAtlas = await Assets.load<Texture>(CHARACTER_ATLAS_PATH);
+    characterAtlas.source.scaleMode = 'nearest';
+    const animationSetCount = CHARACTER_ATLAS_MANIFEST.reduce(
+      (total, character) => total + (character.defaultFrames ? 1 : 0) + SQUAD_COLORS.length,
+      0,
+    );
+    console.info(
+      `[Assets] Loaded character spritesheet (${animationSetCount} animation sets, 612 frames)`,
+    );
+  } catch (error) {
+    console.warn('[Assets] Character spritesheet unavailable — using fallback art', error);
+  }
+
+  for (const character of CHARACTER_ATLAS_MANIFEST) {
     reportPlayerProgress(character.displayName);
-    let defaultAnimations: PlayerAnimationSet;
-    if (!character.hasDefaultAssets) {
-      defaultAnimations = createFallbackPlayerAnimationSet();
-    } else {
-      try {
-        defaultAnimations = await loadCharacterAnimationSet(character, character.id);
-        console.info(
-          `[Assets] Loaded ${character.displayName} standing, lying, and eight-way movement animations`,
-        );
-      } catch {
-        console.warn(
-          `[Assets] ${character.displayName} frames missing — using fallback character`,
-        );
-        defaultAnimations = createFallbackPlayerAnimationSet();
-      }
-    }
-    loadedPlayerVariants++;
-    reportPlayerProgress(character.displayName);
+    const defaultAnimations =
+      characterAtlas && character.defaultFrames
+        ? createAtlasAnimationSet(characterAtlas, character.defaultFrames)
+        : createFallbackPlayerAnimationSet();
 
     const squads: Partial<Record<SquadColor, PlayerAnimationSet>> = {};
-    for (const squadColor of character.squadVariants) {
-      try {
-        squads[squadColor] = await loadCharacterAnimationSet(
-          character,
-          `${character.id}/${character.id}_${squadColor}`,
-        );
-        console.info(
-          `[Assets] Loaded ${character.displayName} ${squadColor} squad animations`,
-        );
-      } catch {
-        console.warn(
-          `[Assets] ${character.displayName} ${squadColor} squad frames missing — using default colors`,
-        );
-      }
-      loadedPlayerVariants++;
-      reportPlayerProgress(character.displayName);
+    for (const squadColor of SQUAD_COLORS) {
+      squads[squadColor] = characterAtlas
+        ? createAtlasAnimationSet(characterAtlas, character.squadFrames[squadColor])
+        : defaultAnimations;
     }
 
     playerAnimationSets.push({ default: defaultAnimations, squads });
+    loadedPlayerCharacters++;
+    reportPlayerProgress(character.displayName);
   }
 
   reportProgress(0.8, 'Awakening the ancient runes…');

@@ -173,11 +173,11 @@ export const INITIAL_WISDOM_ORBS = 1;
 
 /** Playable character names in server sprite-index order. */
 export const PLAYER_CHARACTER_NAMES = [
-  'Lenne',
-  'Glenn',
-  'Amalia',
-  'Robb',
-  'Sienna',
+  'Female1',
+  'Male1',
+  'Female2',
+  'Male2',
+  'Female3',
 ] as const;
 
 /** Number of playable character animation sets. */
