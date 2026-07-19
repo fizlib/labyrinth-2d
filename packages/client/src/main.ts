@@ -1014,7 +1014,49 @@ function updatePressurePlateAnimations(
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+function updateLoadingProgress(progress: number, status: string): void {
+  const screen = document.getElementById('loading-screen');
+  if (!screen || screen.classList.contains('loading-screen--complete')) return;
+
+  const normalizedProgress = Math.max(0, Math.min(1, progress));
+  const percentage = Math.round(normalizedProgress * 100);
+  const progressBar = document.getElementById('loading-progress');
+  const statusText = document.getElementById('loading-status');
+  const percentText = document.getElementById('loading-percent');
+
+  screen.style.setProperty('--loading-progress', normalizedProgress.toString());
+  progressBar?.setAttribute('aria-valuenow', percentage.toString());
+  if (statusText) statusText.textContent = status;
+  if (percentText) percentText.textContent = `${percentage.toString().padStart(2, '0')}%`;
+}
+
+function dismissLoadingScreen(): void {
+  const screen = document.getElementById('loading-screen');
+  if (!screen) return;
+
+  updateLoadingProgress(1, 'The way is open.');
+  screen.setAttribute('aria-busy', 'false');
+
+  window.setTimeout(() => {
+    screen.classList.add('loading-screen--complete');
+  }, 240);
+  window.setTimeout(() => screen.remove(), 780);
+}
+
+function showLoadingError(message: string): void {
+  const screen = document.getElementById('loading-screen');
+  if (!screen) return;
+
+  screen.classList.add('loading-screen--error');
+  screen.setAttribute('aria-busy', 'false');
+  updateLoadingProgress(1, message);
+
+  const percentText = document.getElementById('loading-percent');
+  if (percentText) percentText.textContent = 'ERROR';
+}
+
 async function main(): Promise<void> {
+  updateLoadingProgress(0.06, 'Lighting the first torch…');
   const app = new Application();
 
   await app.init({
@@ -1035,7 +1077,8 @@ async function main(): Promise<void> {
   resizeCanvas(app);
   window.addEventListener('resize', () => resizeCanvas(app));
 
-  const assets: GameAssets = await loadAssets();
+  const assets: GameAssets = await loadAssets(updateLoadingProgress);
+  updateLoadingProgress(0.98, 'Finding your place in the maze…');
 
   // ── World Container ───────────────────────────────────────────────────
   const worldContainer = new Container();
@@ -1202,6 +1245,7 @@ async function main(): Promise<void> {
 
   const net = new NetworkManager({
     onRoomJoined: (roomId, playerId, mapSeed, role, wisdomOrbs, gameState) => {
+      updateLoadingProgress(0.99, 'Carving your path through the maze…');
       console.info(
         `[Main] Joined room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
       );
@@ -1401,6 +1445,7 @@ async function main(): Promise<void> {
       updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
       latestServerState = gameState;
       if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
+      window.requestAnimationFrame(dismissLoadingScreen);
     },
 
     onTickUpdate: (gameState) => {
@@ -1541,6 +1586,7 @@ async function main(): Promise<void> {
 
     onError: (code, message) => {
       console.error(`[Main] Server error [${code}]: ${message}`);
+      showLoadingError(`${message} Refresh to try again.`);
       if (statusEl) {
         statusEl.textContent = `🔴 Error: ${message}`;
         statusEl.classList.add('error');
@@ -1563,6 +1609,7 @@ async function main(): Promise<void> {
 
     onDisconnect: () => {
       console.info('[Main] Disconnected from server');
+      updateLoadingProgress(0.98, 'The gate is resisting. Retrying…');
       minimap?.closeExpanded();
       localPlayerRole = null;
       debugPlayerRoles.clear();
@@ -2079,4 +2126,7 @@ async function main(): Promise<void> {
   console.info('─────────────────────────────────────────────────');
 }
 
-main().catch(console.error);
+main().catch((error: unknown) => {
+  console.error(error);
+  showLoadingError('The maze could not be opened. Refresh to try again.');
+});

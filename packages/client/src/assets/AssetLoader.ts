@@ -191,7 +191,17 @@ export interface GameAssets {
   hubPressurePlateFrames: Texture[];
 }
 
-export async function loadAssets(): Promise<GameAssets> {
+export type AssetLoadProgressCallback = (progress: number, status: string) => void;
+
+export async function loadAssets(
+  onProgress?: AssetLoadProgressCallback,
+): Promise<GameAssets> {
+  const reportProgress = (progress: number, status: string): void => {
+    onProgress?.(Math.max(0, Math.min(1, progress)), status);
+  };
+
+  reportProgress(0.1, 'Laying the stone paths…');
+
   let floorTexture: Texture;
   let floorShadowTexture: Texture;
   let wallFaceVariantTextures: Texture[] = [];
@@ -477,6 +487,8 @@ export async function loadAssets(): Promise<GameAssets> {
     treeTexture = generateTreeTexture();
   }
 
+  reportProgress(0.22, 'Growing the forest walls…');
+
   // ── Forest labyrinth reskin ─────────────────────────────────────────────
   try {
     const loadForestTexture = async (name: string): Promise<Texture> => {
@@ -626,6 +638,8 @@ export async function loadAssets(): Promise<GameAssets> {
     );
   }
 
+  reportProgress(0.4, 'Painting the maze shadows…');
+
   // ── Shadow overlay assets (16×16 semi-transparent PNGs) ───────────────────
   try {
     shadowTopTexture = await Assets.load<Texture>('assets/shadow_top.png');
@@ -652,6 +666,21 @@ export async function loadAssets(): Promise<GameAssets> {
     { id: 'robb', displayName: 'Robb', lyingFrame: 55, squadVariants: SQUAD_COLORS },
     { id: 'sienna', displayName: 'Sienna', lyingFrame: 50, squadVariants: SQUAD_COLORS },
   ] as const;
+  const playerLoadStart = 0.44;
+  const playerLoadEnd = 0.78;
+  const playerVariantCount = PLAYER_CHARACTERS.reduce(
+    (total, character) => total + character.squadVariants.length + 1,
+    0,
+  );
+  let loadedPlayerVariants = 0;
+
+  const reportPlayerProgress = (characterName: string): void => {
+    reportProgress(
+      playerLoadStart +
+        (loadedPlayerVariants / playerVariantCount) * (playerLoadEnd - playerLoadStart),
+      `Gathering ${characterName} and the lost explorers…`,
+    );
+  };
 
   // The source pack supplies individually cropped frames. Five right-facing
   // directions cover all eight movement directions by mirroring the left side.
@@ -713,6 +742,7 @@ export async function loadAssets(): Promise<GameAssets> {
   };
 
   for (const character of PLAYER_CHARACTERS) {
+    reportPlayerProgress(character.displayName);
     let defaultAnimations: PlayerAnimationSet;
     try {
       defaultAnimations = await loadCharacterAnimationSet(character, character.id);
@@ -725,6 +755,8 @@ export async function loadAssets(): Promise<GameAssets> {
       );
       defaultAnimations = createFallbackPlayerAnimationSet();
     }
+    loadedPlayerVariants++;
+    reportPlayerProgress(character.displayName);
 
     const squads: Partial<Record<SquadColor, PlayerAnimationSet>> = {};
     for (const squadColor of character.squadVariants) {
@@ -741,10 +773,14 @@ export async function loadAssets(): Promise<GameAssets> {
           `[Assets] ${character.displayName} ${squadColor} squad frames missing — using default colors`,
         );
       }
+      loadedPlayerVariants++;
+      reportPlayerProgress(character.displayName);
     }
 
     playerAnimationSets.push({ default: defaultAnimations, squads });
   }
+
+  reportProgress(0.8, 'Awakening the ancient runes…');
 
   // ── Runestone spritesheet (96×32 — 6 cols × 1 row, each frame 16×32) ──────
   // Layout: [inactive0, active0, inactive1, active1, inactive2, active2]
@@ -796,6 +832,8 @@ export async function loadAssets(): Promise<GameAssets> {
       ]);
     }
   }
+
+  reportProgress(0.84, 'Lighting the hidden portal…');
 
   // ── Portal spritesheet (2 rows: row 1 = activation, row 2 = active idle) ──────
   try {
@@ -854,6 +892,8 @@ export async function loadAssets(): Promise<GameAssets> {
     }
   }
 
+  reportProgress(0.87, 'Raising the portal stones…');
+
   // ── Authored portal platform modules ─────────────────────────────────────
   try {
     portalPlatformTextures = new Map(
@@ -873,6 +913,8 @@ export async function loadAssets(): Promise<GameAssets> {
     console.warn('[Assets] Portal platform modules unavailable', error);
   }
 
+  reportProgress(0.9, 'Setting the maze trials…');
+
   // ── Authored bridge obstacle modules ─────────────────────────────────────
   try {
     bridgeObstacleTextures = new Map(
@@ -891,6 +933,8 @@ export async function loadAssets(): Promise<GameAssets> {
     bridgeObstacleTextures.clear();
     console.warn('[Assets] Bridge obstacle modules unavailable', error);
   }
+
+  reportProgress(0.93, 'Inscribing the final glyphs…');
 
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
   try {
@@ -973,6 +1017,8 @@ export async function loadAssets(): Promise<GameAssets> {
     ];
     hubPressurePlateFrames = pressurePlateFrames;
   }
+
+  reportProgress(0.97, 'Drawing the last passage…');
 
   return {
     floorTexture,
