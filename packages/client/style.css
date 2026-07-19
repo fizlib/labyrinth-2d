@@ -31,6 +31,12 @@ body {
   color: #c8d6e5;
 }
 
+:root {
+  --fullscreen-toggle-size: 44px;
+  --fullscreen-toggle-top: max(12px, env(safe-area-inset-top));
+  --fullscreen-toggle-right: max(12px, env(safe-area-inset-right));
+}
+
 /* ── Game Container — holds the canvas, centered ───────────────────────── */
 
 #game-container {
@@ -58,12 +64,12 @@ body {
 
 .fullscreen-toggle {
   position: fixed;
-  top: max(12px, env(safe-area-inset-top));
-  right: max(12px, env(safe-area-inset-right));
+  top: var(--fullscreen-toggle-top);
+  right: var(--fullscreen-toggle-right);
   z-index: 3000;
   display: grid;
-  width: 44px;
-  height: 44px;
+  width: var(--fullscreen-toggle-size);
+  height: var(--fullscreen-toggle-size);
   place-items: center;
   border: 2px solid rgba(213, 201, 141, 0.72);
   border-radius: 6px;
@@ -1031,7 +1037,14 @@ canvas {
 }
 
 .mobile-controls__actions--side {
-  top: calc(var(--mobile-canvas-top, 0px) + var(--mobile-frame-padding));
+  top: max(
+    calc(var(--mobile-canvas-top, 0px) + var(--mobile-frame-padding)),
+    calc(
+      var(--fullscreen-toggle-top) +
+      var(--fullscreen-toggle-size) +
+      var(--mobile-frame-padding)
+    )
+  );
   left: calc(var(--mobile-canvas-right, 100%) + var(--mobile-frame-padding));
   flex-direction: column;
   transform: none;
