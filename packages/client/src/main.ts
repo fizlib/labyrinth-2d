@@ -227,8 +227,20 @@ let cinematicTargetY = 0;
 
 // ── Integer Scaling ─────────────────────────────────────────────────────────
 
+function isLandscapeTouchViewport(viewportW: number, viewportH: number): boolean {
+  return viewportW > viewportH
+    && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
 function getViewportScale(viewportW: number, viewportH: number): number {
   const fitScale = Math.min(viewportW / INTERNAL_WIDTH, viewportH / INTERNAL_HEIGHT);
+  // Landscape phones often fit between two integer scale steps. Let the fixed
+  // game surface grow fluidly to the viewport height instead of leaving large
+  // letterbox bands above and below it. The internal resolution (and therefore
+  // the visible field) remains unchanged.
+  if (isLandscapeTouchViewport(viewportW, viewportH)) {
+    return fitScale;
+  }
   if (fitScale >= 1) {
     return Math.max(1, Math.floor(fitScale));
   }
@@ -293,7 +305,10 @@ function getSavedIosFullscreenScale(): number | null {
 
 function resizeCanvas(app: Application): void {
   const viewportScale = getViewportScale(window.innerWidth, window.innerHeight);
-  const scale = fullscreenCanvasScale === null
+  // A scale remembered while opening iOS standalone mode must not pin a phone
+  // to its smaller portrait/browser size after it rotates to landscape.
+  const isLandscapeTouch = isLandscapeTouchViewport(window.innerWidth, window.innerHeight);
+  const scale = fullscreenCanvasScale === null || isLandscapeTouch
     ? viewportScale
     : Math.min(viewportScale, fullscreenCanvasScale);
 
