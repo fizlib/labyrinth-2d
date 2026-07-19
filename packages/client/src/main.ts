@@ -235,11 +235,72 @@ function getViewportScale(viewportW: number, viewportH: number): number {
   return fitScale;
 }
 
+let fullscreenCanvasSize: { width: number; height: number } | null = null;
+
 function resizeCanvas(app: Application): void {
-  const scale = getViewportScale(window.innerWidth, window.innerHeight);
-  app.canvas.style.width = `${INTERNAL_WIDTH * scale}px`;
-  app.canvas.style.height = `${INTERNAL_HEIGHT * scale}px`;
+  if (fullscreenCanvasSize) {
+    app.canvas.style.width = `${fullscreenCanvasSize.width}px`;
+    app.canvas.style.height = `${fullscreenCanvasSize.height}px`;
+  } else {
+    const scale = getViewportScale(window.innerWidth, window.innerHeight);
+    app.canvas.style.width = `${INTERNAL_WIDTH * scale}px`;
+    app.canvas.style.height = `${INTERNAL_HEIGHT * scale}px`;
+  }
   app.renderer.resize(INTERNAL_WIDTH, INTERNAL_HEIGHT);
+}
+
+function setupFullscreenToggle(app: Application): void {
+  const button = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
+  if (!button) return;
+
+  if (!document.fullscreenEnabled) {
+    button.hidden = true;
+    return;
+  }
+
+  const syncFullscreenState = (): void => {
+    const isFullscreen = document.fullscreenElement !== null;
+
+    button.classList.toggle('is-fullscreen', isFullscreen);
+    button.setAttribute('aria-pressed', String(isFullscreen));
+    button.setAttribute(
+      'aria-label',
+      isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen',
+    );
+    button.title = isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen';
+
+    if (!isFullscreen) {
+      fullscreenCanvasSize = null;
+      resizeCanvas(app);
+    }
+  };
+
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        const canvasRect = app.canvas.getBoundingClientRect();
+        fullscreenCanvasSize = {
+          width: canvasRect.width,
+          height: canvasRect.height,
+        };
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (error) {
+      fullscreenCanvasSize = null;
+      resizeCanvas(app);
+      console.warn('Unable to change fullscreen mode.', error);
+    } finally {
+      button.disabled = false;
+      syncFullscreenState();
+    }
+  });
+
+  document.addEventListener('fullscreenchange', syncFullscreenState);
+  syncFullscreenState();
 }
 
 // ── Camera ──────────────────────────────────────────────────────────────────
@@ -1168,6 +1229,7 @@ async function main(): Promise<void> {
   container.appendChild(app.canvas);
 
   resizeCanvas(app);
+  setupFullscreenToggle(app);
   window.addEventListener('resize', () => resizeCanvas(app));
 
   const assets: GameAssets = await loadAssets(updateLoadingProgress);

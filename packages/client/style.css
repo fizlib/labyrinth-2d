@@ -43,6 +43,76 @@ body {
   position: relative;
 }
 
+/* ── Browser fullscreen toggle ─────────────────────────────────────────── */
+
+.fullscreen-toggle {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 3000;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 2px solid rgba(213, 201, 141, 0.72);
+  border-radius: 6px;
+  background: rgba(8, 13, 13, 0.82);
+  color: #f4ecd1;
+  box-shadow:
+    3px 3px 0 rgba(3, 6, 6, 0.72),
+    inset 0 0 0 1px rgba(49, 93, 61, 0.55);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 80ms ease;
+}
+
+.fullscreen-toggle:hover {
+  border-color: #d5c98d;
+  background: rgba(24, 48, 32, 0.94);
+  color: #ffffff;
+}
+
+.fullscreen-toggle:active {
+  transform: translate(2px, 2px);
+}
+
+.fullscreen-toggle:focus-visible {
+  outline: 3px solid #79c86f;
+  outline-offset: 3px;
+}
+
+.fullscreen-toggle:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.fullscreen-toggle__icon {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+
+.fullscreen-toggle__icon--exit,
+.fullscreen-toggle.is-fullscreen .fullscreen-toggle__icon--enter {
+  display: none;
+}
+
+.fullscreen-toggle.is-fullscreen .fullscreen-toggle__icon--exit {
+  display: block;
+}
+
+/* Keep the optional debug panel clear of the top-right control. */
+#fullscreen-toggle:not([hidden]) ~ #debug-ui {
+  top: 68px;
+}
+
 /* ── Loading screen ────────────────────────────────────────────────────── */
 
 .loading-screen {
