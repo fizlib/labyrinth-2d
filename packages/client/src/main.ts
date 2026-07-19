@@ -1017,6 +1017,7 @@ function updatePressurePlateAnimations(
 // ── Main ────────────────────────────────────────────────────────────────────
 
 const LOADING_THEME_VOLUME = 0.42;
+const LOADING_THEME_START_SECONDS = 4;
 const LOADING_THEME_FADE_MS = 480;
 let loadingThemeUnlockCleanup: (() => void) | null = null;
 let loadingThemeFadeFrame: number | null = null;
@@ -1030,6 +1031,13 @@ function startLoadingTheme(): void {
   if (!theme) return;
 
   theme.volume = LOADING_THEME_VOLUME;
+  const cuePastQuietIntro = (): void => {
+    if (theme.currentTime < LOADING_THEME_START_SECONDS) {
+      theme.currentTime = LOADING_THEME_START_SECONDS;
+    }
+  };
+  if (theme.readyState >= 1) cuePastQuietIntro();
+  else theme.addEventListener('loadedmetadata', cuePastQuietIntro, { once: true });
 
   const resumeAfterInteraction = (): void => {
     if (!document.getElementById('loading-screen')) {

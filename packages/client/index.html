@@ -8,6 +8,13 @@
     />
     <title>🏰 Labyrinth 2D</title>
     <meta name="description" content="Co-op online 2D pixel-art labyrinth game for up to 10 players." />
+    <link
+      rel="preload"
+      href="./assets/audio/main-theme.mp3"
+      as="audio"
+      type="audio/mpeg"
+      fetchpriority="high"
+    />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -28,6 +35,19 @@
           loop
           aria-hidden="true"
         ></audio>
+        <script>
+          (() => {
+            const theme = document.getElementById('loading-theme');
+            const startTheme = () => {
+              theme.volume = 0.42;
+              theme.currentTime = 4;
+              void theme.play().catch(() => undefined);
+            };
+
+            if (theme.readyState >= 1) startTheme();
+            else theme.addEventListener('loadedmetadata', startTheme, { once: true });
+          })();
+        </script>
         <div class="loading-screen__mist" aria-hidden="true"></div>
         <div class="loading-screen__content">
           <div class="loading-screen__gate" aria-hidden="true">
