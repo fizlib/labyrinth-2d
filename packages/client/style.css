@@ -742,14 +742,6 @@ canvas {
   --mobile-gap: clamp(0.35rem, 1.5vw, 0.65rem);
   --mobile-action-width: clamp(3.5rem, 22vw, 8rem);
   --mobile-frame-padding: clamp(0.75rem, 2.5vw, 1rem);
-  --mobile-frame-action-size: clamp(
-    2.5rem,
-    calc(
-      var(--mobile-bottom-frame-height, 6rem) - var(--mobile-frame-padding) -
-        max(0.5rem, env(safe-area-inset-bottom))
-    ),
-    var(--mobile-button-size)
-  );
   --joystick-base-size: clamp(7.5rem, min(30vw, 32vh), 10rem);
   --joystick-knob-size: clamp(3rem, min(12vw, 14vh), 4rem);
   display: none;
@@ -846,6 +838,13 @@ canvas {
   opacity: 1;
 }
 
+.mobile-controls__actions--side {
+  top: calc(var(--mobile-canvas-top, 0px) + var(--mobile-frame-padding));
+  left: calc(var(--mobile-canvas-right, 100%) + var(--mobile-frame-padding));
+  flex-direction: column;
+  transform: none;
+}
+
 .mobile-controls__button {
   min-width: var(--mobile-button-size);
   min-height: var(--mobile-button-size);
@@ -883,11 +882,20 @@ canvas {
 .mobile-controls__button--interact,
 .mobile-controls__button--wisdom {
   min-width: var(--mobile-action-width);
-  min-height: var(--mobile-frame-action-size);
-  height: var(--mobile-frame-action-size);
+  min-height: var(--mobile-button-size);
+  height: var(--mobile-button-size);
   padding: 0 1rem;
   font-size: clamp(0.9rem, 3.5vw, 1.25rem);
   letter-spacing: 0.1em;
+}
+
+.mobile-controls__actions--side .mobile-controls__button {
+  width: var(--mobile-side-action-size, 3rem);
+  min-width: var(--mobile-side-action-size, 3rem);
+  height: var(--mobile-side-action-size, 3rem);
+  min-height: var(--mobile-side-action-size, 3rem);
+  padding: 0;
+  font-size: clamp(1rem, 4vmin, 1.35rem);
 }
 
 .mobile-controls__button--interact {

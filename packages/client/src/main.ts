@@ -1859,6 +1859,7 @@ async function main(): Promise<void> {
         INTERNAL_WIDTH,
         INTERNAL_HEIGHT,
         role === 'warden' ? WARDEN_SPAWN_DIALOGUE_PAGES : SURVIVOR_SPAWN_DIALOGUE_PAGES,
+        (bounds) => mobileControls.setDialogueExclusion(bounds),
       );
       introDialogueHud.addToStage(app.stage);
     }

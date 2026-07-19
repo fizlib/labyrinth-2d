@@ -12,6 +12,15 @@ const BUTTON_SLOT_WIDTH = 28;
 const TEXT_SCALE = 0.5;
 const TYPEWRITER_CHARS_PER_SECOND = 72;
 
+export interface IntroDialogueExclusion {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+type IntroDialogueLayoutHandler = (bounds: IntroDialogueExclusion | null) => void;
+
 export class IntroDialogueHud {
   private readonly container: Container;
   private readonly background: Graphics;
@@ -25,7 +34,12 @@ export class IntroDialogueHud {
   private revealedChars = 0;
   private visible = true;
 
-  constructor(internalWidth: number, internalHeight: number, pages: readonly string[]) {
+  constructor(
+    internalWidth: number,
+    internalHeight: number,
+    pages: readonly string[],
+    private readonly onLayoutChange?: IntroDialogueLayoutHandler,
+  ) {
     this.pages = pages;
     this.internalWidth = internalWidth;
     this.internalHeight = internalHeight;
@@ -104,9 +118,11 @@ export class IntroDialogueHud {
     this.container.visible = false;
     this.advanceButton.eventMode = 'none';
     this.advanceButton.cursor = 'default';
+    this.onLayoutChange?.(null);
   }
 
   destroy(): void {
+    this.onLayoutChange?.(null);
     this.container.parent?.removeChild(this.container);
     this.container.destroy({ children: true });
   }
@@ -116,6 +132,7 @@ export class IntroDialogueHud {
     this.revealedChars = 0;
     this.resizeToCurrentPage();
     this.updateDisplayedText();
+    this.onLayoutChange?.(this.getExclusionBounds());
   }
 
   private drawPanel(): void {
@@ -194,6 +211,15 @@ export class IntroDialogueHud {
 
   private getCurrentPage(): string {
     return this.pages[this.pageIndex] ?? '';
+  }
+
+  private getExclusionBounds(): IntroDialogueExclusion {
+    return {
+      left: this.container.x,
+      top: this.container.y,
+      width: PANEL_WIDTH + 2,
+      height: this.panelHeight + 2,
+    };
   }
 
   private isCurrentPageFullyRevealed(): boolean {

@@ -1,5 +1,6 @@
 import { MINIMAP_HUD_EXCLUSION } from './Minimap';
 import { WISDOM_ORB_HUD_EXCLUSION } from './WisdomOrbHud';
+import type { IntroDialogueExclusion } from './IntroDialogueHud';
 
 export type MobileControlDirection = 'up' | 'down' | 'left' | 'right';
 
@@ -34,6 +35,10 @@ const MOVE_DIRECTIONS: readonly MobileControlDirection[] = ['up', 'down', 'left'
 const DEFAULT_DEAD_ZONE = 14;
 const DEFAULT_HYSTERESIS_DEGREES = 7.5;
 const JOYSTICK_EXCLUSION_PADDING = 6;
+const MIN_ACTION_FRAME_GUTTER = 12;
+const MAX_ACTION_FRAME_GUTTER = 16;
+const MIN_SIDE_ACTION_SIZE = 40;
+const MAX_SIDE_ACTION_SIZE = 56;
 const SECTOR_ANGLE_RADIANS = Math.PI / 4;
 const HALF_SECTOR_ANGLE_RADIANS = SECTOR_ANGLE_RADIANS / 2;
 const FULL_CIRCLE_RADIANS = Math.PI * 2;
@@ -84,6 +89,7 @@ export class MobileControls {
   private joystickSector: number | null = null;
   private activeJoystickCaptureTarget: HTMLElement | null = null;
   private wisdomAvailable = true;
+  private dialogueExclusion: IntroDialogueExclusion | null = null;
 
   constructor(private readonly options: MobileControlsOptions) {
     this.mediaQuery = window.matchMedia(MOBILE_CONTROLS_QUERY);
@@ -157,6 +163,13 @@ export class MobileControls {
       this.wisdomPointers.clear();
       this.syncActionButtonState(this.wisdomButton, this.wisdomPointers);
     }
+    this.updateJoystickZones();
+  }
+
+  /** Reserve the live dialogue panel for its PixiJS advance button. */
+  setDialogueExclusion(bounds: IntroDialogueExclusion | null): void {
+    this.releaseJoystick();
+    this.dialogueExclusion = bounds;
     this.updateJoystickZones();
   }
 
@@ -274,7 +287,10 @@ export class MobileControls {
     const canvas = this.options.parent.querySelector('canvas');
     if (!canvas) {
       this.root.style.removeProperty('--mobile-canvas-bottom');
-      this.root.style.removeProperty('--mobile-bottom-frame-height');
+      this.root.style.removeProperty('--mobile-canvas-top');
+      this.root.style.removeProperty('--mobile-canvas-right');
+      this.root.style.removeProperty('--mobile-side-action-size');
+      this.actions.classList.remove('mobile-controls__actions--side');
       this.updateJoystickZones();
       return;
     }
@@ -287,8 +303,46 @@ export class MobileControls {
     );
     const bottomFrameHeight = Math.max(0, parentRect.bottom - canvasRect.bottom);
     this.root.style.setProperty('--mobile-canvas-bottom', `${canvasBottom}px`);
-    this.root.style.setProperty('--mobile-bottom-frame-height', `${bottomFrameHeight}px`);
+    this.root.style.setProperty(
+      '--mobile-canvas-top',
+      `${Math.max(0, canvasRect.top - parentRect.top)}px`,
+    );
+    this.root.style.setProperty(
+      '--mobile-canvas-right',
+      `${Math.min(parentRect.width, canvasRect.right - parentRect.left)}px`,
+    );
+    this.updateActionLayout(parentRect, canvasRect, bottomFrameHeight);
     this.updateJoystickZones(parentRect, canvasRect, canvas);
+  }
+
+  private updateActionLayout(
+    parentRect: DOMRect,
+    canvasRect: DOMRect,
+    bottomFrameHeight: number,
+  ): void {
+    // Measure the normal horizontal layout first so the breakpoint follows the
+    // actual responsive button height rather than an orientation guess.
+    this.actions.classList.remove('mobile-controls__actions--side');
+    const normalActionHeight = this.actions.getBoundingClientRect().height;
+    const frameGutter = Math.min(
+      MAX_ACTION_FRAME_GUTTER,
+      Math.max(MIN_ACTION_FRAME_GUTTER, parentRect.width * 0.025),
+    );
+    const hasBottomRoom =
+      bottomFrameHeight >= normalActionHeight + frameGutter + MIN_ACTION_FRAME_GUTTER;
+
+    if (hasBottomRoom) {
+      this.root.style.removeProperty('--mobile-side-action-size');
+      return;
+    }
+
+    const rightPillarWidth = Math.max(0, parentRect.right - canvasRect.right);
+    const sideActionSize = Math.min(
+      MAX_SIDE_ACTION_SIZE,
+      Math.max(MIN_SIDE_ACTION_SIZE, rightPillarWidth - frameGutter * 2),
+    );
+    this.root.style.setProperty('--mobile-side-action-size', `${sideActionSize}px`);
+    this.actions.classList.add('mobile-controls__actions--side');
   }
 
   private updateJoystickZones(
@@ -301,6 +355,9 @@ export class MobileControls {
     }
 
     if (parentRect.width <= 0 || parentRect.height <= 0) return;
+
+    const resolvedCanvas = canvas ?? this.options.parent.querySelector('canvas');
+    const resolvedCanvasRect = canvasRect ?? resolvedCanvas?.getBoundingClientRect() ?? null;
 
     const exclusions: ControlRect[] = [];
     const addExclusion = (rect: ControlRect): void => {
@@ -325,11 +382,16 @@ export class MobileControls {
       });
     }
 
-    if (canvas && canvasRect && canvas.width > 0 && canvas.height > 0) {
-      const scaleX = canvasRect.width / canvas.width;
-      const scaleY = canvasRect.height / canvas.height;
-      const canvasLeft = canvasRect.left - parentRect.left;
-      const canvasTop = canvasRect.top - parentRect.top;
+    if (
+      resolvedCanvas &&
+      resolvedCanvasRect &&
+      resolvedCanvas.width > 0 &&
+      resolvedCanvas.height > 0
+    ) {
+      const scaleX = resolvedCanvasRect.width / resolvedCanvas.width;
+      const scaleY = resolvedCanvasRect.height / resolvedCanvas.height;
+      const canvasLeft = resolvedCanvasRect.left - parentRect.left;
+      const canvasTop = resolvedCanvasRect.top - parentRect.top;
 
       if (this.wisdomAvailable) {
         addExclusion({
@@ -344,10 +406,23 @@ export class MobileControls {
         });
       }
 
+      if (this.dialogueExclusion) {
+        addExclusion({
+          left: canvasLeft + this.dialogueExclusion.left * scaleX,
+          top: canvasTop + this.dialogueExclusion.top * scaleY,
+          right:
+            canvasLeft +
+            (this.dialogueExclusion.left + this.dialogueExclusion.width) * scaleX,
+          bottom:
+            canvasTop +
+            (this.dialogueExclusion.top + this.dialogueExclusion.height) * scaleY,
+        });
+      }
+
       const minimapRight =
-        canvasLeft + (canvas.width - MINIMAP_HUD_EXCLUSION.edgeInset) * scaleX;
+        canvasLeft + (resolvedCanvas.width - MINIMAP_HUD_EXCLUSION.edgeInset) * scaleX;
       const minimapBottom =
-        canvasTop + (canvas.height - MINIMAP_HUD_EXCLUSION.edgeInset) * scaleY;
+        canvasTop + (resolvedCanvas.height - MINIMAP_HUD_EXCLUSION.edgeInset) * scaleY;
       addExclusion({
         left: minimapRight - MINIMAP_HUD_EXCLUSION.size * scaleX,
         top: minimapBottom - MINIMAP_HUD_EXCLUSION.size * scaleY,
