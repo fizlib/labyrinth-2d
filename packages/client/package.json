@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@labyrinth/shared": "*",
+    "@supabase/supabase-js": "^2.90.1",
     "fflate": "^0.8.3",
     "pixi.js": "^8.6.0"
   },

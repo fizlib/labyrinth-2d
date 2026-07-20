@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-07-14 - Hidden survivor/warden roles and warden map
+Last updated: 2026-07-20 - Authenticated and guest frontend navigation
 
 ## Project Overview
 
@@ -8,7 +8,10 @@ Labyrinth 2D is a multiplayer top-down pixel-art labyrinth game built as a TypeS
 
 - `packages/shared`: shared constants, protocol types, procedural map generation, navigation, and collision.
 - `packages/server`: the authoritative multiplayer simulation and room management.
-- `packages/client`: the PixiJS renderer, client prediction, interpolation, HUD, and input handling.
+- `packages/client`: the authenticated DOM app shell plus the lazy PixiJS renderer, client prediction, interpolation, HUD, and input handling.
+
+Supabase provides browser authentication and owner-private profile storage. It
+does not participate in the authoritative simulation or WebSocket protocol.
 
 One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
@@ -221,6 +224,31 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 
 ## Client Rendering and HUD
 
+### Frontend Navigation and Startup Boundary
+
+The client first runs a lightweight DOM app shell with these states:
+
+1. restore the persisted Supabase session;
+2. show Google authentication and a local guest option when signed out;
+3. load or create the signed-in user's `public.profiles` row, or restore the
+   current tab's guest profile;
+4. show Main Menu or Profile; and
+5. dynamically import and start the PixiJS game only after Create Game is
+   selected.
+
+Guest profiles use `sessionStorage`, never call Supabase, and are discarded
+when the guest leaves the session or closes the browser tab. They support the
+same local display-name and HTTPS avatar validation as authenticated profiles.
+
+Auth, Main Menu, Profile, and the Join Game placeholder do not initialize Pixi,
+load runtime game assets, construct `NetworkManager`, or open a WebSocket. The
+existing default-room connection begins inside `startGame()` and uses the
+profile display name. A reload always restores to Main Menu rather than
+silently re-entering gameplay.
+
+See `docs/SUPABASE_SETUP.md` for the migration, Google provider, redirect URL,
+and environment configuration.
+
 ### Rendering Structure
 
 - The client renders to an internal resolution of `480 x 270`.
@@ -325,7 +353,13 @@ The client currently has multiple UI subsystems, not just the minimap:
 ### Client Package
 
 - `packages/client/src/main.ts`
-  - Pixi app bootstrap, input, prediction, reconciliation, interpolation, camera, HUD orchestration
+  - Supabase and guest session restoration plus Auth/Main Menu/Profile DOM navigation
+- `packages/client/src/auth/supabase.ts`
+  - browser-safe Supabase configuration, OAuth helpers, profile loading, validation, and updates
+- `packages/client/src/auth/guest.ts`
+  - tab-local guest profile creation, restoration, validation, and updates
+- `packages/client/src/game.ts`
+  - lazy Pixi app bootstrap, network entry, input, prediction, reconciliation, interpolation, camera, HUD orchestration
 - `packages/client/src/net/NetworkManager.ts`
   - client WebSocket wrapper and message dispatch
 - `packages/client/src/net/SnapshotBuffer.ts`
