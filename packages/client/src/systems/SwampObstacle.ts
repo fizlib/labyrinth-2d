@@ -1,5 +1,8 @@
-import { Container, Sprite, Texture } from 'pixi.js';
-import type { SwampPlacement } from '@labyrinth/shared';
+import { Container, Graphics, Sprite, Texture } from 'pixi.js';
+import {
+  getSwampFirmGroundTiles,
+  type SwampPlacement,
+} from '@labyrinth/shared';
 import {
   getSwampObstacleDetailSprites,
   getSwampObstacleTerrainSprites,
@@ -9,6 +12,99 @@ import {
 
 const AUTHORING_TILE_SIZE = 16;
 const FOREGROUND_Z_INDEX = 500;
+const WISDOM_WAVE_STEP_DURATION = 0.14;
+const WISDOM_WAVE_SPAN = 5;
+
+interface SwampFirmGroundVisualTile {
+  graphic: Graphics;
+  pathIndex: number;
+}
+
+type SwampFirmGroundReveal = 'hidden' | 'wisdom' | 'warden';
+
+/** Persistent local reveal of one swamp's otherwise hidden firm-ground route. */
+export class SwampObstacleVisual {
+  private readonly tiles: SwampFirmGroundVisualTile[] = [];
+  private readonly container: Container;
+  private reveal: SwampFirmGroundReveal = 'hidden';
+  private elapsed = 0;
+
+  constructor(swamp: SwampPlacement, tileSize: number, parent: Container) {
+    const scale = tileSize / AUTHORING_TILE_SIZE;
+    this.container = new Container();
+    this.container.x = swamp.tileX * tileSize;
+    this.container.y = swamp.tileY * tileSize;
+    this.container.zIndex = -1;
+    this.container.visible = false;
+
+    for (const tile of getSwampFirmGroundTiles(swamp)) {
+      const graphic = new Graphics()
+        .rect(
+          (tile.x + 1) * scale,
+          (tile.y + 1) * scale,
+          (tile.width - 2) * scale,
+          (tile.height - 2) * scale,
+        )
+        .fill({ color: 0xffd85c, alpha: 0.12 })
+        .rect(
+          (tile.x + 1) * scale,
+          (tile.y + 1) * scale,
+          (tile.width - 2) * scale,
+          (tile.height - 2) * scale,
+        )
+        .stroke({ color: 0xffdd72, alpha: 0.68, width: Math.max(1, scale) });
+      graphic.alpha = 0;
+      this.container.addChild(graphic);
+      this.tiles.push({ graphic, pathIndex: tile.pathIndex });
+    }
+
+    parent.addChild(this.container);
+  }
+
+  showWisdomHint(): void {
+    this.reveal = 'wisdom';
+    this.elapsed = 0;
+    this.syncVisibility();
+  }
+
+  setWardenVisible(visible: boolean): void {
+    this.reveal = visible ? 'warden' : 'hidden';
+    this.elapsed = 0;
+    this.syncVisibility();
+  }
+
+  update(dt: number): void {
+    if (this.reveal === 'hidden' || this.tiles.length === 0) return;
+    this.elapsed += dt;
+
+    if (this.reveal === 'warden') {
+      const alpha = 0.44 + Math.sin(this.elapsed * 2.2) * 0.035;
+      for (const tile of this.tiles) tile.graphic.alpha = alpha;
+      return;
+    }
+
+    const pathSpan = this.tiles.length;
+    const wavePosition = (this.elapsed / WISDOM_WAVE_STEP_DURATION) % pathSpan;
+    for (const tile of this.tiles) {
+      const directDistance = Math.abs(tile.pathIndex - wavePosition);
+      const wrappedDistance = pathSpan - directDistance;
+      const distance = Math.min(directDistance, wrappedDistance);
+      const waveStrength = Math.max(0, 1 - distance / WISDOM_WAVE_SPAN);
+      tile.graphic.alpha = 0.36 + waveStrength * 0.44;
+    }
+  }
+
+  private syncVisibility(): void {
+    this.container.visible = this.reveal !== 'hidden';
+    const baseAlpha = this.reveal === 'warden' ? 0.44 : 0.36;
+    for (const tile of this.tiles) tile.graphic.alpha = baseAlpha;
+  }
+}
+
+export interface SwampObstacleRenderResult {
+  foregroundSprites: Sprite[];
+  visuals: SwampObstacleVisual[];
+}
 
 /** Add authored swamp passages and return vegetation that must Y-sort with players. */
 export function addSwampObstacles(
@@ -17,9 +113,10 @@ export function addSwampObstacles(
   textures: ReadonlyMap<string, Texture>,
   terrainParent: Container,
   groundDetailParent: Container,
-): Sprite[] {
+): SwampObstacleRenderResult {
   const scale = tileSize / AUTHORING_TILE_SIZE;
   const foregroundSprites: Sprite[] = [];
+  const visuals: SwampObstacleVisual[] = [];
 
   const addGroundSpecs = (
     swamp: SwampPlacement,
@@ -55,6 +152,7 @@ export function addSwampObstacles(
     const groundSpecs = detailSpecs.filter((spec) => spec.z < FOREGROUND_Z_INDEX);
     const foregroundSpecs = detailSpecs.filter((spec) => spec.z >= FOREGROUND_Z_INDEX);
     addGroundSpecs(swamp, getSwampObstacleTerrainSprites(swamp), terrainParent, -1);
+    visuals.push(new SwampObstacleVisual(swamp, tileSize, groundDetailParent));
     addGroundSpecs(swamp, groundSpecs, groundDetailParent, 0);
 
     for (const spec of foregroundSpecs) {
@@ -70,5 +168,5 @@ export function addSwampObstacles(
     }
   }
 
-  return foregroundSprites;
+  return { foregroundSprites, visuals };
 }

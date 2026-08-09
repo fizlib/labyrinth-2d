@@ -23,7 +23,7 @@ import {
   getBridgeWalkwayTileBounds,
   type BridgeState,
 } from './bridge.js';
-import { isPlayerInSwamp, SWAMP_SPEED_MULTIPLIER } from './swamp.js';
+import { getPlayerSwampTerrain, SWAMP_SPEED_MULTIPLIER } from './swamp.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -394,9 +394,8 @@ export function applyInputWithCollision(
 
   let dx = 0;
   let dy = 0;
-  const speed =
-    PLAYER_SPEED *
-    (isPlayerInSwamp(swamps, x, y, map.tileSize) ? SWAMP_SPEED_MULTIPLIER : 1);
+  const swampTerrain = getPlayerSwampTerrain(swamps, x, y, map.tileSize);
+  const speed = PLAYER_SPEED * (swampTerrain === 'deep-mud' ? SWAMP_SPEED_MULTIPLIER : 1);
   if (input.up) dy -= speed * dt;
   if (input.down) dy += speed * dt;
   if (input.left) dx -= speed * dt;

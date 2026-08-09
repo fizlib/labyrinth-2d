@@ -44,6 +44,7 @@ import {
   getBridgeWalkwayTileMaskAtFeetCenter,
   getBridgeRepairCircleBounds,
   findBridgeWisdomHintTarget,
+  findSwampWisdomHintTarget,
   getBridgeCollapseMask,
   getBridgeRepairCollapsedMask,
   getBridgeBankReturnPosition,
@@ -789,6 +790,29 @@ export class Room {
       this.send(ws, orbUsedMsg);
       console.info(
         `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} -> private bridge ${bridgeHintTarget.bridgeIndex} route from ${bridgeHintTarget.entrySide} (${player.wisdomOrbs} remaining)`,
+      );
+      return;
+    }
+
+    const swampHintTarget = findSwampWisdomHintTarget(
+      this.swamps,
+      player.x,
+      player.y,
+      this.map.tileSize,
+    );
+    if (swampHintTarget) {
+      player.wisdomOrbs--;
+      const orbUsedMsg: WisdomOrbUsedMessage = {
+        type: MessageType.WisdomOrbUsed,
+        hint: {
+          kind: 'swamp',
+          swampIndex: swampHintTarget.swampIndex,
+        },
+        remainingWisdomOrbs: player.wisdomOrbs,
+      };
+      this.send(ws, orbUsedMsg);
+      console.info(
+        `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} -> private swamp ${swampHintTarget.swampIndex} firm-ground route (${player.wisdomOrbs} remaining)`,
       );
       return;
     }

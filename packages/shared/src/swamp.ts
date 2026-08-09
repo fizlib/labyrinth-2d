@@ -9,8 +9,32 @@ import {
 const SWAMP_AUTHORING_TILE_SIZE = 16;
 const SWAMP_AUTHORING_HEIGHT = 96;
 
-/** A swamp cuts movement speed in half while the player's feet are in water. */
-export const SWAMP_SPEED_MULTIPLIER = 0.5;
+/** Deep mud moves at one quarter of normal speed; firm ground remains full speed. */
+export const SWAMP_SPEED_MULTIPLIER = 0.25;
+
+export type SwampTerrain = 'dry' | 'firm-ground' | 'deep-mud';
+
+export interface SwampFirmGroundTile {
+  pathIndex: number;
+  tileX: number;
+  tileY: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SwampWisdomHintTarget {
+  swampIndex: number;
+}
+
+const FIRM_PATH_MIN_TILE_Y = 1;
+const FIRM_PATH_MAX_TILE_Y = 4;
+const FIRM_PATH_START_TILE_X = 3;
+const FIRM_PATH_END_INSET_TILES = 4;
+const FIRM_PATH_MIN_HORIZONTAL_RUN = 2;
+const FIRM_PATH_BASE_MAX_HORIZONTAL_RUN = 3;
+const FIRM_GAP_TILE_INTERVAL = 10;
 
 // Main water span on each authored pixel row. Tiny disconnected shoreline
 // glints are intentionally excluded so the wet-state cannot flicker on grass.
@@ -64,6 +88,219 @@ export function isSwampWaterAtAuthoringPoint(
   return waterLeft >= 0 && pixelX >= waterLeft && pixelX <= extendedWaterRight;
 }
 
+function hashFirmPath(seed: number, value: number, salt: number): number {
+  let hash = seed ^ salt;
+  hash = Math.imul(hash ^ (value + 1), 0x45d9f3b);
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x119de1f3);
+  hash ^= hash >>> 16;
+  return hash >>> 0;
+}
+
+interface FirmPathCoordinate {
+  tileX: number;
+  tileY: number;
+}
+
+const firmPathCoordinateCache = new WeakMap<
+  SwampPlacement,
+  readonly FirmPathCoordinate[]
+>();
+
+function getFirmGapTileCount(widthTiles: number): number {
+  return Math.max(1, Math.floor(widthTiles / FIRM_GAP_TILE_INTERVAL));
+}
+
+function getFirmGapTile(swamp: SwampPlacement, gapIndex: number, widthTiles: number): number {
+  const gapCount = getFirmGapTileCount(widthTiles);
+  const evenPosition = Math.round(((gapIndex + 1) * widthTiles) / (gapCount + 1));
+  const jitter = (hashFirmPath(swamp.decorationSeed, gapIndex, 0xa54ff53a) % 3) - 1;
+  return Math.max(2, Math.min(widthTiles - 3, evenPosition + jitter));
+}
+
+function isFirmPathGap(swamp: SwampPlacement, tileIndex: number, widthTiles: number): boolean {
+  const gapCount = getFirmGapTileCount(widthTiles);
+  for (let gapIndex = 0; gapIndex < gapCount; gapIndex++) {
+    if (getFirmGapTile(swamp, gapIndex, widthTiles) === tileIndex) return true;
+  }
+  return false;
+}
+
+function getFirmPathNextTileY(
+  seed: number,
+  turnIndex: number,
+  currentTileY: number,
+): number {
+  const candidates: number[] = [];
+  for (let tileY = FIRM_PATH_MIN_TILE_Y; tileY <= FIRM_PATH_MAX_TILE_Y; tileY++) {
+    if (Math.abs(tileY - currentTileY) >= 2) candidates.push(tileY);
+  }
+  const candidateIndex =
+    hashFirmPath(seed, turnIndex, 0x3c6ef372) % candidates.length;
+  return candidates[candidateIndex];
+}
+
+function getFirmPathCoordinates(swamp: SwampPlacement): readonly FirmPathCoordinate[] {
+  const cached = firmPathCoordinateCache.get(swamp);
+  if (cached) return cached;
+
+  const widthTiles = getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
+  const endTileX = widthTiles - FIRM_PATH_END_INSET_TILES;
+  const normalizedLength = normalizeLengthCells(swamp.lengthCells);
+  const maxHorizontalRun =
+    FIRM_PATH_BASE_MAX_HORIZONTAL_RUN +
+    (normalizedLength - MIN_SWAMP_LENGTH_CELLS);
+  const coordinates: FirmPathCoordinate[] = [];
+  const append = (tileX: number, tileY: number): void => {
+    const previous = coordinates[coordinates.length - 1];
+    if (previous?.tileX === tileX && previous.tileY === tileY) return;
+    coordinates.push({ tileX, tileY });
+  };
+
+  let tileX = FIRM_PATH_START_TILE_X;
+  let tileY =
+    FIRM_PATH_MIN_TILE_Y +
+    (hashFirmPath(swamp.decorationSeed, 0, 0xbb67ae85) %
+      (FIRM_PATH_MAX_TILE_Y - FIRM_PATH_MIN_TILE_Y + 1));
+  append(tileX, tileY);
+
+  for (let turnIndex = 0; tileX < endTileX && turnIndex < 128; turnIndex++) {
+    const horizontalRun =
+      FIRM_PATH_MIN_HORIZONTAL_RUN +
+      (hashFirmPath(swamp.decorationSeed, turnIndex, 0x510e527f) %
+        (maxHorizontalRun - FIRM_PATH_MIN_HORIZONTAL_RUN + 1));
+    let turnTileX = Math.min(endTileX, tileX + horizontalRun);
+    while (
+      turnTileX < endTileX &&
+      isFirmPathGap(swamp, turnTileX, widthTiles)
+    ) {
+      turnTileX++;
+    }
+
+    for (let horizontalTileX = tileX + 1; horizontalTileX <= turnTileX; horizontalTileX++) {
+      append(horizontalTileX, tileY);
+    }
+    tileX = turnTileX;
+    if (tileX >= endTileX) break;
+
+    const nextTileY = getFirmPathNextTileY(
+      swamp.decorationSeed,
+      turnIndex,
+      tileY,
+    );
+    const verticalStep = Math.sign(nextTileY - tileY);
+    while (tileY !== nextTileY) {
+      tileY += verticalStep;
+      append(tileX, tileY);
+    }
+  }
+
+  firmPathCoordinateCache.set(swamp, coordinates);
+  return coordinates;
+}
+
+/** Terrain beneath a point in a swamp's original authoring coordinate space. */
+export function getSwampTerrainAtAuthoringPoint(
+  swamp: SwampPlacement,
+  x: number,
+  y: number,
+): SwampTerrain {
+  if (!isSwampWaterAtAuthoringPoint(swamp.lengthCells, x, y)) return 'dry';
+
+  const widthTiles = getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
+  const tileX = Math.floor(x / SWAMP_AUTHORING_TILE_SIZE);
+  const tileY = Math.floor(y / SWAMP_AUTHORING_TILE_SIZE);
+  if (isFirmPathGap(swamp, tileX, widthTiles)) return 'deep-mud';
+
+  return getFirmPathCoordinates(swamp).some(
+    (coordinate) => coordinate.tileX === tileX && coordinate.tileY === tileY,
+  )
+    ? 'firm-ground'
+    : 'deep-mud';
+}
+
+/** Firm route segments in authoring space, excluding mandatory deep-mud gaps. */
+export function getSwampFirmGroundTiles(
+  swamp: SwampPlacement,
+): readonly SwampFirmGroundTile[] {
+  const widthTiles = getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
+  const tiles: SwampFirmGroundTile[] = [];
+
+  for (const coordinate of getFirmPathCoordinates(swamp)) {
+    if (isFirmPathGap(swamp, coordinate.tileX, widthTiles)) continue;
+    const centerX = (coordinate.tileX + 0.5) * SWAMP_AUTHORING_TILE_SIZE;
+    const centerY = (coordinate.tileY + 0.5) * SWAMP_AUTHORING_TILE_SIZE;
+    if (!isSwampWaterAtAuthoringPoint(swamp.lengthCells, centerX, centerY)) continue;
+    tiles.push({
+      pathIndex: tiles.length,
+      tileX: coordinate.tileX,
+      tileY: coordinate.tileY,
+      x: coordinate.tileX * SWAMP_AUTHORING_TILE_SIZE,
+      y: coordinate.tileY * SWAMP_AUTHORING_TILE_SIZE,
+      width: SWAMP_AUTHORING_TILE_SIZE,
+      height: SWAMP_AUTHORING_TILE_SIZE,
+    });
+  }
+
+  return tiles;
+}
+
+/** Find the closest swamp eligible to replace a directional wisdom hint. */
+export function findSwampWisdomHintTarget(
+  swamps: readonly SwampPlacement[],
+  playerX: number,
+  playerY: number,
+  tileSize: number = SWAMP_AUTHORING_TILE_SIZE,
+  maxDistance: number = tileSize * 2.5,
+): SwampWisdomHintTarget | null {
+  const scale = tileSize / SWAMP_AUTHORING_TILE_SIZE;
+  const maxDistanceSquared = maxDistance * maxDistance;
+  let nearest: (SwampWisdomHintTarget & { distanceSquared: number }) | null = null;
+
+  for (let swampIndex = 0; swampIndex < swamps.length; swampIndex++) {
+    const swamp = swamps[swampIndex];
+    const left = swamp.tileX * tileSize;
+    const top = swamp.tileY * tileSize;
+    const right = left + getSwampAuthoringWidth(swamp.lengthCells) * scale;
+    const bottom = top + SWAMP_AUTHORING_HEIGHT * scale;
+    const nearestX = Math.max(left, Math.min(right, playerX));
+    const nearestY = Math.max(top, Math.min(bottom, playerY));
+    const dx = playerX - nearestX;
+    const dy = playerY - nearestY;
+    const distanceSquared = dx * dx + dy * dy;
+    if (
+      distanceSquared <= maxDistanceSquared &&
+      (nearest === null || distanceSquared < nearest.distanceSquared)
+    ) {
+      nearest = { swampIndex, distanceSquared };
+    }
+  }
+
+  return nearest ? { swampIndex: nearest.swampIndex } : null;
+}
+
+/** Swamp terrain beneath a bottom-center player position. */
+export function getPlayerSwampTerrain(
+  swamps: readonly SwampPlacement[],
+  x: number,
+  y: number,
+  tileSize: number = SWAMP_AUTHORING_TILE_SIZE,
+): SwampTerrain {
+  const scale = tileSize / SWAMP_AUTHORING_TILE_SIZE;
+  if (scale <= 0) return 'dry';
+
+  for (const swamp of swamps) {
+    const anchorX = swamp.tileX * tileSize;
+    const anchorY = swamp.tileY * tileSize;
+    const localX = (x - anchorX) / scale;
+    const localY = (y - 1 - anchorY) / scale;
+    const terrain = getSwampTerrainAtAuthoringPoint(swamp, localX, localY);
+    if (terrain !== 'dry') return terrain;
+  }
+
+  return 'dry';
+}
+
 /** True when a bottom-center player position falls inside the authored water shape. */
 export function isPlayerInSwamp(
   swamps: readonly SwampPlacement[],
@@ -71,16 +308,5 @@ export function isPlayerInSwamp(
   y: number,
   tileSize: number = SWAMP_AUTHORING_TILE_SIZE,
 ): boolean {
-  const scale = tileSize / SWAMP_AUTHORING_TILE_SIZE;
-  if (scale <= 0) return false;
-
-  for (const swamp of swamps) {
-    const anchorX = swamp.tileX * tileSize;
-    const anchorY = swamp.tileY * tileSize;
-    const localX = Math.floor((x - anchorX) / scale);
-    const localY = Math.floor((y - 1 - anchorY) / scale);
-    if (isSwampWaterAtAuthoringPoint(swamp.lengthCells, localX, localY)) return true;
-  }
-
-  return false;
+  return getPlayerSwampTerrain(swamps, x, y, tileSize) !== 'dry';
 }

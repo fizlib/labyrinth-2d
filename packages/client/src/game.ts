@@ -35,7 +35,7 @@ import {
   FEET_HITBOX_H,
   generateMazeLayout,
   applyInputWithCollision,
-  isPlayerInSwamp,
+  getPlayerSwampTerrain,
   deriveFacingDirection,
 } from '@labyrinth/shared';
 import type {
@@ -45,6 +45,7 @@ import type {
   GatePlacement,
   GeneratedMazeLayout,
   PlayerRole,
+  SwampTerrain,
 } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 import {
@@ -1471,14 +1472,15 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
-  const PLAYER_SWAMP_SUBMERGE_DEPTH = 6;
+  const PLAYER_DEEP_MUD_SUBMERGE_DEPTH = 6;
+  const PLAYER_FIRM_GROUND_SUBMERGE_DEPTH = 3;
 
   interface PlayerSpriteData {
     container: Container;
     shadow: Graphics;
     sprite: AnimatedSprite;
     swampMask: Graphics;
-    inSwamp: boolean;
+    swampTerrain: SwampTerrain;
     currentAnimKey: string;
     spriteIndex: number;
     teamId: number;
@@ -1515,7 +1517,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       .ellipse(0, -2, 7, 3)
       .fill({ color: 0x16220d, alpha: 0.55 });
     const swampMask = new Graphics()
-      .rect(-40, -64, 80, 64 - PLAYER_SWAMP_SUBMERGE_DEPTH)
+      .rect(-40, -64, 80, 64 - PLAYER_DEEP_MUD_SUBMERGE_DEPTH)
       .fill({ color: 0xffffff });
     const container = new Container();
     container.addChild(shadow, sprite);
@@ -1526,7 +1528,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       shadow,
       sprite,
       swampMask,
-      inSwamp: false,
+      swampTerrain: 'dry',
       currentAnimKey: animKey,
       spriteIndex,
       teamId,
@@ -1551,12 +1553,21 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     return data;
   }
 
-  function setPlayerSwampState(data: PlayerSpriteData, inSwamp: boolean): void {
-    if (data.inSwamp === inSwamp) return;
-    data.inSwamp = inSwamp;
+  function setPlayerSwampTerrain(data: PlayerSpriteData, terrain: SwampTerrain): void {
+    if (data.swampTerrain === terrain) return;
+    data.swampTerrain = terrain;
+    const inSwamp = terrain !== 'dry';
 
     if (inSwamp) {
-      data.container.addChild(data.swampMask);
+      const submergeDepth =
+        terrain === 'firm-ground'
+          ? PLAYER_FIRM_GROUND_SUBMERGE_DEPTH
+          : PLAYER_DEEP_MUD_SUBMERGE_DEPTH;
+      data.swampMask
+        .clear()
+        .rect(-40, -64, 80, 64 - submergeDepth)
+        .fill({ color: 0xffffff });
+      if (!data.swampMask.parent) data.container.addChild(data.swampMask);
       data.sprite.mask = data.swampMask;
     } else {
       data.sprite.mask = null;
@@ -1566,7 +1577,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   }
 
   function setPlayerAnimation(data: PlayerSpriteData, animKey: string): void {
-    data.shadow.visible = animKey !== 'lying' && !data.inSwamp;
+    data.shadow.visible = animKey !== 'lying' && data.swampTerrain === 'dry';
     if (data.currentAnimKey === animKey) return;
     const animSet = getAnimSet(data.spriteIndex, data.teamId);
     const frames = animSet.animations[animKey];
@@ -1727,6 +1738,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       currentLayout.bridges,
       localPlayerRole === 'warden',
     );
+    replacementRenderer.setWardenSwampWisdomHints(localPlayerRole === 'warden');
     updateGateSlideAnimations(0);
     replacementRenderer.updateVisibility(
       worldContainer.x,
@@ -1755,9 +1767,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     portalPosition = latestServerState?.portal ?? null,
   ): void {
     setRoundedPosition(data.container, x, y, 1);
-    setPlayerSwampState(
+    setPlayerSwampTerrain(
       data,
-      isPlayerInSwamp(
+      getPlayerSwampTerrain(
         currentLayout?.swamps ?? [],
         x,
         y,
@@ -2066,6 +2078,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           hint.safeTileMask,
           hint.entrySide,
         );
+      } else if (hint.kind === 'swamp') {
+        wisdomArrow?.hide();
+        console.info(
+          `[WisdomOrb][Response] Server accepted private swamp ${hint.swampIndex} firm-ground route; remaining=${remainingWisdomOrbs}`,
+        );
+        tilemapRenderer?.showSwampWisdomHint(hint.swampIndex);
       } else {
         console.info(
           `[WisdomOrb][Response] Server accepted direction=${hint.direction}; remaining=${remainingWisdomOrbs}`,
@@ -2218,6 +2236,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       currentLayout.bridges,
       role === 'warden',
     );
+    tilemapRenderer?.setWardenSwampWisdomHints(role === 'warden');
 
     minimap?.destroy();
     minimap = new Minimap(

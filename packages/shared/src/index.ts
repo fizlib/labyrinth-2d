@@ -63,9 +63,16 @@ export {
 
 export {
   SWAMP_SPEED_MULTIPLIER,
+  findSwampWisdomHintTarget,
+  getPlayerSwampTerrain,
   getSwampAuthoringWidth,
+  getSwampFirmGroundTiles,
+  getSwampTerrainAtAuthoringPoint,
   isPlayerInSwamp,
   isSwampWaterAtAuthoringPoint,
+  type SwampFirmGroundTile,
+  type SwampTerrain,
+  type SwampWisdomHintTarget,
 } from './swamp.js';
 
 // ── Re-export map data ──────────────────────────────────────────────────────
@@ -378,6 +385,10 @@ export type WisdomOrbHint =
       bridgeIndex: number;
       entrySide: BridgeEntrySide;
       safeTileMask: number;
+    }
+  | {
+      kind: 'swamp';
+      swampIndex: number;
     };
 
 /** Private notification sent only to a player whose role changed through debug tools. */

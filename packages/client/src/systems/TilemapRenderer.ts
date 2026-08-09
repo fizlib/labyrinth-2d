@@ -49,7 +49,7 @@ import {
 } from './ForestWallLayout';
 import { addBridgeObstacles, type BridgeObstacleVisual } from './BridgeObstacle';
 import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
-import { addSwampObstacles } from './SwampObstacle';
+import { addSwampObstacles, type SwampObstacleVisual } from './SwampObstacle';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -373,6 +373,8 @@ export class TilemapRenderer {
   readonly bridgeVisuals: BridgeObstacleVisual[];
   /** Reeds and cattails that Y-sort with players. */
   readonly swampForegroundSprites: Sprite[];
+  /** Firm-ground route reveals in generated swamp-index order. */
+  readonly swampVisuals: SwampObstacleVisual[];
 
   // ── Internal tracking for culling + cleanup ────────────────────────────
   private allChunks: ChunkMeta[] = [];
@@ -752,13 +754,15 @@ export class TilemapRenderer {
       this.groundDetailLayer,
     );
 
-    this.swampForegroundSprites = addSwampObstacles(
+    const swampRender = addSwampObstacles(
       swamps,
       ts,
       assets.swampObstacleTextures,
       this.forestUnderlayLayer,
       this.groundDetailLayer,
     );
+    this.swampForegroundSprites = swampRender.foregroundSprites;
+    this.swampVisuals = swampRender.visuals;
 
     // ── Step 3: Extract Special Entities ──────────────────────────────
 
@@ -876,6 +880,7 @@ export class TilemapRenderer {
 
   updateBridgeAnimations(dt: number): void {
     for (const bridge of this.bridgeVisuals) bridge.update(dt);
+    for (const swamp of this.swampVisuals) swamp.update(dt);
   }
 
   /** Show a private wisdom-orb route hint on one bridge. */
@@ -898,6 +903,16 @@ export class TilemapRenderer {
       if (visible && bridge) visual.showWisdomHint(bridge.safeTileMask, 'north');
       else visual.clearWisdomHint();
     }
+  }
+
+  /** Show a private wisdom-orb reveal on one swamp. */
+  showSwampWisdomHint(swampIndex: number): void {
+    this.swampVisuals[swampIndex]?.showWisdomHint();
+  }
+
+  /** Wardens always see every firm-ground route. */
+  setWardenSwampWisdomHints(visible: boolean): void {
+    for (const swamp of this.swampVisuals) swamp.setWardenVisible(visible);
   }
 
   // ── Per-frame viewport culling ────────────────────────────────────────
@@ -979,6 +994,7 @@ export class TilemapRenderer {
     this.groundDetailRowChunks.length = 0;
     this.treeSprites.length = 0;
     this.swampForegroundSprites.length = 0;
+    this.swampVisuals.length = 0;
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;
     this.pressurePlateSprites.length = 0;
