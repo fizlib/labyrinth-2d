@@ -195,7 +195,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 - Closed gates are chosen from vertical (north-south) corridor cells on spawn-to-hub paths and are rendered as one-tile-thick horizontal barriers through the middle of those cells.
 - Each gate also produces a short rectangular dirt band in shared layout data. The dirt mask is visual-only and does not affect collision or navigation.
 - Bridge selection is deterministic per maze seed and is intentionally global rather than restricted to squad routes.
-- Bridge puzzle state is shared by the room. A wrong step removes both columns strictly ahead of the player. Freshly entering either authored treasure circle starts a server-authoritative ten-second channel: progress pauses when the channeling player leaves and can resume from either circle. Missing stones rise back one at a time and hover subtly, remaining blocked until the repair completes; stones that never fell stay normal and walkable throughout.
+- Bridge puzzle state is shared by the room. A wrong step removes both columns strictly ahead of the player; on the terminal row, only that row falls and the player returns to the preceding row. Freshly entering either authored treasure circle starts a server-authoritative ten-second channel: progress pauses when the channeling player leaves and can resume from either circle. Missing stones rise back one at a time and hover subtly, remaining blocked until the repair completes; stones that never fell stay normal and walkable throughout.
 - Portal placement is also BFS-driven, prefers cells deeper in the maze than player spawns, and excludes both cells reserved by every bridge.
 
 ### Tile IDs

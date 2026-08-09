@@ -15,6 +15,7 @@ import {
   generateMazeLayout,
   getBridgeBankReturnPosition,
   getBridgeCollapseMask,
+  getBridgeSafeRowFeetCenter,
   getBridgeRepairCircleBounds,
   getBridgeRepairCollapsedMask,
   getBridgeRepairTileOrder,
@@ -189,7 +190,7 @@ test('generated layouts assign a distinct hidden path to each bridge', () => {
   }
 });
 
-test('collapse masks select both columns strictly ahead', () => {
+test('collapse masks select rows ahead and the terminal row itself', () => {
   let expectedNorth = 0;
   for (let row = 0; row < 5; row++) {
     expectedNorth |= getBridgeTileBit(row, 0) | getBridgeTileBit(row, 1);
@@ -202,20 +203,35 @@ test('collapse masks select both columns strictly ahead', () => {
   }
   assert.equal(getBridgeCollapseMask(2, 'south'), expectedSouth);
 
-  let expectedSouthTerminal = 0;
-  for (let row = 0; row < BRIDGE_WALKWAY_ROWS - 1; row++) {
-    expectedSouthTerminal |= getBridgeTileBit(row, 0) | getBridgeTileBit(row, 1);
-  }
+  const expectedSouthTerminal =
+    getBridgeTileBit(BRIDGE_WALKWAY_ROWS - 1, 0) |
+    getBridgeTileBit(BRIDGE_WALKWAY_ROWS - 1, 1);
   assert.equal(
     getBridgeCollapseMask(BRIDGE_WALKWAY_ROWS - 1, 'south'),
     expectedSouthTerminal,
   );
 
-  let expectedNorthTerminal = 0;
-  for (let row = 1; row < BRIDGE_WALKWAY_ROWS; row++) {
-    expectedNorthTerminal |= getBridgeTileBit(row, 0) | getBridgeTileBit(row, 1);
-  }
+  const expectedNorthTerminal = getBridgeTileBit(0, 0) | getBridgeTileBit(0, 1);
   assert.equal(getBridgeCollapseMask(0, 'north'), expectedNorthTerminal);
+});
+
+test('bridge row returns use the nearest safe stone', () => {
+  const bridge = {
+    tileX: 10,
+    tileY: 20,
+    safeTileMask: getBridgeTileBit(4, 0) | getBridgeTileBit(4, 1),
+  };
+  const rightTile = getBridgeWalkwayTileBounds(bridge, 4, 1);
+  const preferredX = rightTile.right;
+  const position = getBridgeSafeRowFeetCenter(bridge, 4, preferredX);
+
+  assert.notEqual(position, null);
+  assert.deepEqual(
+    getBridgeWalkwayTileAtPoint(bridge, position.x, position.y),
+    { row: 4, column: 1 },
+  );
+  assert.equal(getBridgeSafeRowFeetCenter(bridge, 3, preferredX), null);
+  assert.equal(getBridgeSafeRowFeetCenter(bridge, BRIDGE_WALKWAY_ROWS, preferredX), null);
 });
 
 test('bridge repairs restore one tile at a time across a fixed ten seconds', () => {

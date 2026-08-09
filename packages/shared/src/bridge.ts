@@ -96,6 +96,28 @@ export function getBridgeWalkwayTileBounds(
   };
 }
 
+/** Feet-center position on the safe stone in a row nearest the requested X. */
+export function getBridgeSafeRowFeetCenter(
+  bridge: Pick<BridgePlacement, 'tileX' | 'tileY' | 'safeTileMask'>,
+  row: number,
+  preferredX: number,
+  tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
+): { x: number; y: number } | null {
+  if (row < 0 || row >= BRIDGE_WALKWAY_ROWS) return null;
+
+  let nearest: { x: number; y: number; distance: number } | null = null;
+  for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+    if (!isBridgeTileSafe(bridge, row, column)) continue;
+    const bounds = getBridgeWalkwayTileBounds(bridge, row, column, tileSize);
+    const x = (bounds.left + bounds.right + 1) / 2;
+    const y = (bounds.top + bounds.bottom + 1) / 2;
+    const distance = Math.abs(preferredX - x);
+    if (!nearest || distance < nearest.distance) nearest = { x, y, distance };
+  }
+
+  return nearest ? { x: nearest.x, y: nearest.y } : null;
+}
+
 /** Resolve a world-space point to a bridge walkway tile. */
 export function getBridgeWalkwayTileAtPoint(
   bridge: Pick<BridgePlacement, 'tileX' | 'tileY'>,
@@ -243,9 +265,8 @@ export function findBridgeWisdomHintTarget(
 }
 
 /**
- * Both columns in every row strictly ahead of the failed tile. At a terminal
- * row, where no puzzle stone exists ahead, all other central rows collapse so
- * the mistake cannot leave the bridge intact.
+ * Both columns in every row strictly ahead of the failed tile. When the failed
+ * tile is on the terminal row, only that terminal row collapses.
  */
 export function getBridgeCollapseMask(
   failedRow: number,
@@ -262,11 +283,8 @@ export function getBridgeCollapseMask(
   }
 
   if (mask === 0 && failedRow >= 0 && failedRow < BRIDGE_WALKWAY_ROWS) {
-    for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
-      if (row === failedRow) continue;
-      for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
-        mask |= getBridgeTileBit(row, column);
-      }
+    for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+      mask |= getBridgeTileBit(failedRow, column);
     }
   }
   return mask;

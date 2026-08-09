@@ -39,6 +39,7 @@ import {
   BRIDGE_FAILURE_FEEDBACK_DURATION_MS,
   getBridgeTileBit,
   getBridgeWalkwayTileBounds,
+  getBridgeSafeRowFeetCenter,
   getBridgeWalkwayTileAtPoint,
   getBridgeWalkwayTileMaskAtFeetCenter,
   getBridgeRepairCircleBounds,
@@ -1107,7 +1108,11 @@ export class Room {
     let triggeringPlayerReturned = false;
     for (const player of this.state.players) {
       if (!this.playerOverlapsBridgeMask(player, bridge, collapsedTileMask)) continue;
-      this.returnPlayerToBridgeEntry(player, bridgeIndex);
+      if (terminalFailure && player.id === triggeringPlayerId) {
+        this.returnPlayerToPreviousBridgeRow(player, bridgeIndex, failedRow, direction);
+      } else {
+        this.returnPlayerToBridgeEntry(player, bridgeIndex);
+      }
       if (player.id === triggeringPlayerId) triggeringPlayerReturned = true;
     }
 
@@ -1115,7 +1120,14 @@ export class Room {
       const triggeringPlayer = this.state.players.find(
         (player) => player.id === triggeringPlayerId,
       );
-      if (triggeringPlayer) this.returnPlayerToBridgeEntry(triggeringPlayer, bridgeIndex);
+      if (triggeringPlayer) {
+        this.returnPlayerToPreviousBridgeRow(
+          triggeringPlayer,
+          bridgeIndex,
+          failedRow,
+          direction,
+        );
+      }
     }
 
     console.info(
@@ -1277,6 +1289,29 @@ export class Room {
       feet.y >= bounds.top &&
       feet.y <= bounds.bottom
     );
+  }
+
+  private returnPlayerToPreviousBridgeRow(
+    player: RoomPlayerInfo,
+    bridgeIndex: number,
+    failedRow: number,
+    direction: 'north' | 'south',
+  ): void {
+    const bridge = this.bridges[bridgeIndex];
+    const returnRow = direction === 'south' ? failedRow - 1 : failedRow + 1;
+    const returnPosition = bridge
+      ? getBridgeSafeRowFeetCenter(bridge, returnRow, player.x, this.map.tileSize)
+      : null;
+    if (!returnPosition) {
+      this.returnPlayerToBridgeEntry(player, bridgeIndex);
+      return;
+    }
+
+    this.clearQueuedInputs(player);
+    player.x = returnPosition.x;
+    player.y = returnPosition.y + FEET_HITBOX_H / 2;
+    this.bridgeTraversals.delete(player.id);
+    this.bridgeRepairOccupancy.delete(player.id);
   }
 
   private playerOverlapsBridgeMask(
