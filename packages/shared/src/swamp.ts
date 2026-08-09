@@ -9,8 +9,8 @@ import {
 const SWAMP_AUTHORING_TILE_SIZE = 16;
 const SWAMP_AUTHORING_HEIGHT = 96;
 
-/** Deep mud moves at one quarter of normal speed; firm ground remains full speed. */
-export const SWAMP_SPEED_MULTIPLIER = 0.25;
+/** Deep mud moves at one eighth of normal speed; firm ground remains full speed. */
+export const SWAMP_SPEED_MULTIPLIER = 0.125;
 
 export type SwampTerrain = 'dry' | 'firm-ground' | 'deep-mud';
 

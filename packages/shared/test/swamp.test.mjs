@@ -293,7 +293,7 @@ test('hidden firm-ground paths contain mandatory deep-mud breaks', () => {
   }
 });
 
-test('firm ground restores normal speed while deep mud moves at quarter speed', () => {
+test('firm ground restores normal speed while deep mud moves at one-eighth speed', () => {
   const swamp = {
     westCellX: 0,
     cellY: 0,
@@ -359,7 +359,7 @@ test('firm ground restores normal speed while deep mud moves at quarter speed', 
     [],
     swamps,
   );
-  assert.equal(SWAMP_SPEED_MULTIPLIER, 0.25);
+  assert.equal(SWAMP_SPEED_MULTIPLIER, 0.125);
   assert.equal(
     deepMudResult.x - deepMudStart.x,
     PLAYER_SPEED * SWAMP_SPEED_MULTIPLIER * 0.1,
