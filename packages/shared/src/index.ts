@@ -61,6 +61,8 @@ export {
   type BridgeRepairCircleBounds,
 } from './bridge.js';
 
+export { SWAMP_SPEED_MULTIPLIER, isPlayerInSwamp } from './swamp.js';
+
 // ── Re-export map data ──────────────────────────────────────────────────────
 export {
   TILE_FLOOR,
@@ -102,6 +104,7 @@ export {
   type GatePlacement,
   type PressurePlateInfo,
   type BridgePlacement,
+  type SwampPlacement,
   type GeneratedMazeLayout,
   type HubTileBounds,
   getHubTileBounds,

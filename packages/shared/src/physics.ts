@@ -10,7 +10,12 @@
 // centered horizontally at x and extending upward from y.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { isSolidTileId, type BridgePlacement, type TileMapData } from './maps/level1.js';
+import {
+  isSolidTileId,
+  type BridgePlacement,
+  type SwampPlacement,
+  type TileMapData,
+} from './maps/level1.js';
 import {
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_ROWS,
@@ -18,6 +23,7 @@ import {
   getBridgeWalkwayTileBounds,
   type BridgeState,
 } from './bridge.js';
+import { isPlayerInSwamp, SWAMP_SPEED_MULTIPLIER } from './swamp.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -381,16 +387,20 @@ export function applyInputWithCollision(
   portal?: PortalCollider | null,
   bridges: readonly BridgePlacement[] = [],
   bridgeStates: readonly BridgeState[] = [],
+  swamps: readonly SwampPlacement[] = [],
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
 
   let dx = 0;
   let dy = 0;
-  if (input.up) dy -= PLAYER_SPEED * dt;
-  if (input.down) dy += PLAYER_SPEED * dt;
-  if (input.left) dx -= PLAYER_SPEED * dt;
-  if (input.right) dx += PLAYER_SPEED * dt;
+  const speed =
+    PLAYER_SPEED *
+    (isPlayerInSwamp(swamps, x, y, map.tileSize) ? SWAMP_SPEED_MULTIPLIER : 1);
+  if (input.up) dy -= speed * dt;
+  if (input.down) dy += speed * dt;
+  if (input.left) dx -= speed * dt;
+  if (input.right) dx += speed * dt;
 
   if (dx !== 0) {
     const candidateX = x + dx;

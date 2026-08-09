@@ -79,6 +79,17 @@ export interface BridgePlacement {
   safeTileMask: number;
 }
 
+/** Authored swamp occupying the opening between two horizontally adjacent cells. */
+export interface SwampPlacement {
+  /** Column of the cell west of the swamp. */
+  westCellX: number;
+  /** Shared cell row. */
+  cellY: number;
+  /** Top-left tile of the 11×6 east-west passage occupied by the swamp. */
+  tileX: number;
+  tileY: number;
+}
+
 export interface GeneratedMazeLayout {
   map: TileMapData;
   spawnPoints: SpawnPoint[];
@@ -87,6 +98,8 @@ export interface GeneratedMazeLayout {
   pressurePlates: PressurePlateInfo[];
   /** Decorative, collidable bridges placed in qualifying vertical passages. */
   bridges: BridgePlacement[];
+  /** Walkable swamps placed in qualifying horizontal passages. */
+  swamps: SwampPlacement[];
   /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
   dirtMask: Uint8Array;
 }
@@ -591,6 +604,10 @@ const BRIDGE_DENSITY = 0.16;
 const MIN_BRIDGES = 4;
 const MAX_BRIDGES = 12;
 const BRIDGE_RANDOM_SALT = 0x5f3759df;
+const SWAMP_DENSITY = 0.12;
+const MIN_SWAMPS = 4;
+const MAX_SWAMPS = 10;
+const SWAMP_RANDOM_SALT = 0x2c1b3c6d;
 
 function isWalkableTileId(tile: number): boolean {
   return tile === TILE_FLOOR || tile === TILE_FLOOR_SHADOW;
@@ -854,7 +871,7 @@ function computePressurePlates(gates: GatePlacement[]): PressurePlateInfo[] {
   return plates;
 }
 
-function isEmptyBridgeCell(data: number[], cx: number, cy: number): boolean {
+function isEmptyObstacleCell(data: number[], cx: number, cy: number): boolean {
   const { tx, ty } = cellToTile(cx, cy);
   for (let dy = 0; dy < CELL_SIZE; dy++) {
     for (let dx = 0; dx < CELL_SIZE; dx++) {
@@ -909,8 +926,8 @@ function computeBridgePlacements(
       const southKey = `${cellX},${northCellY + 1}`;
       if (hubCells.has(northKey) || hubCells.has(southKey)) continue;
       if (spawnCells.has(northKey) || spawnCells.has(southKey)) continue;
-      if (!isEmptyBridgeCell(data, cellX, northCellY)) continue;
-      if (!isEmptyBridgeCell(data, cellX, northCellY + 1)) continue;
+      if (!isEmptyObstacleCell(data, cellX, northCellY)) continue;
+      if (!isEmptyObstacleCell(data, cellX, northCellY + 1)) continue;
       if (!areCellsConnected(data, cellX, northCellY, cellX, northCellY + 1)) continue;
       if (!supportsBridge(data, cellX, northCellY)) continue;
 
@@ -954,6 +971,93 @@ function computeBridgePlacements(
   }));
 }
 
+function supportsSwamp(data: number[], westCellX: number, cellY: number): boolean {
+  const { tx, ty } = cellToTile(westCellX, cellY);
+  const passageX = tx + CELL_SIZE;
+
+  // The authored layout fills the complete 11×6 opening between two cells.
+  for (let dx = 0; dx < WALL_WIDTH; dx++) {
+    for (let dy = 0; dy < CELL_SIZE; dy++) {
+      if (!isWalkableTileId(data[(ty + dy) * MAP_WIDTH + passageX + dx])) return false;
+    }
+
+    // Keep the forest banks visible along the north and south shoreline.
+    if (!isForestWallTileId(data[(ty - 1) * MAP_WIDTH + passageX + dx])) return false;
+    if (!isForestWallTileId(data[(ty + CELL_SIZE) * MAP_WIDTH + passageX + dx]))
+      return false;
+  }
+
+  return true;
+}
+
+function computeSwampPlacements(
+  data: number[],
+  spawnPoints: SpawnPoint[],
+  bridges: readonly BridgePlacement[],
+  seed: number,
+): SwampPlacement[] {
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
+  const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+  const spawnCells = new Set(
+    spawnPoints.map((spawnPoint) => {
+      const cell = spawnPointToCell(spawnPoint);
+      return `${cell.cx},${cell.cy}`;
+    }),
+  );
+  const occupiedCells = new Set<string>();
+  for (const bridge of bridges) {
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY}`);
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
+  }
+
+  const candidates: SwampPlacement[] = [];
+  for (let cellY = 0; cellY < GRID_CELLS; cellY++) {
+    for (let westCellX = 0; westCellX < GRID_CELLS - 1; westCellX++) {
+      const westKey = `${westCellX},${cellY}`;
+      const eastKey = `${westCellX + 1},${cellY}`;
+      if (hubCells.has(westKey) || hubCells.has(eastKey)) continue;
+      if (spawnCells.has(westKey) || spawnCells.has(eastKey)) continue;
+      if (occupiedCells.has(westKey) || occupiedCells.has(eastKey)) continue;
+      if (!isEmptyObstacleCell(data, westCellX, cellY)) continue;
+      if (!isEmptyObstacleCell(data, westCellX + 1, cellY)) continue;
+      if (!areCellsConnected(data, westCellX, cellY, westCellX + 1, cellY)) continue;
+      if (!supportsSwamp(data, westCellX, cellY)) continue;
+
+      const { tx, ty } = cellToTile(westCellX, cellY);
+      candidates.push({
+        westCellX,
+        cellY,
+        tileX: tx + CELL_SIZE,
+        tileY: ty,
+      });
+    }
+  }
+
+  const rand = mulberry32(seed ^ SWAMP_RANDOM_SALT);
+  shuffle(candidates, rand);
+  const minimum = Math.min(MIN_SWAMPS, candidates.length);
+  const desiredCount = Math.min(
+    MAX_SWAMPS,
+    candidates.length,
+    Math.max(minimum, Math.round(candidates.length * SWAMP_DENSITY)),
+  );
+  const swamps: SwampPlacement[] = [];
+
+  for (const candidate of candidates) {
+    if (swamps.length >= desiredCount) break;
+    const westKey = `${candidate.westCellX},${candidate.cellY}`;
+    const eastKey = `${candidate.westCellX + 1},${candidate.cellY}`;
+    if (occupiedCells.has(westKey) || occupiedCells.has(eastKey)) continue;
+
+    occupiedCells.add(westKey);
+    occupiedCells.add(eastKey);
+    swamps.push(candidate);
+  }
+
+  swamps.sort((a, b) => a.cellY - b.cellY || a.westCellX - b.westCellX);
+  return swamps;
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 export const MAZE_WIDTH = MAP_WIDTH;
@@ -985,6 +1089,7 @@ export function generateMazeLayout(
   }
 
   const bridges = computeBridgePlacements(gatedData, spawnPoints, seed);
+  const swamps = computeSwampPlacements(gatedData, spawnPoints, bridges, seed);
 
   const safeSpawnPoints = spawnPoints.map((spawnPoint) =>
     findSafeSpawnPoint(gatedData, spawnPoint));
@@ -1000,6 +1105,7 @@ export function generateMazeLayout(
     gates,
     pressurePlates,
     bridges,
+    swamps,
     dirtMask,
   };
 }
@@ -1208,22 +1314,28 @@ export function computeSpawnPoints(
  * @param data           Flat tile array from generateMaze
  * @param spawnDistance   The spawn distance used for teams (to ensure portal is farther)
  * @param bridges         Bridge cells to exclude from portal platform placement
+ * @param swamps          Swamp cells to exclude from portal platform placement
  * @returns              Tile-space coordinates of the portal center, or null if none found
  */
 export function computePortalPosition(
   data: number[],
   spawnDistance: number,
   bridges: readonly BridgePlacement[] = [],
+  swamps: readonly SwampPlacement[] = [],
 ): SpawnPoint | null {
-  const bridgeCells = new Set<string>();
+  const obstacleCells = new Set<string>();
   for (const bridge of bridges) {
-    bridgeCells.add(`${bridge.cellX},${bridge.northCellY}`);
-    bridgeCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
+    obstacleCells.add(`${bridge.cellX},${bridge.northCellY}`);
+    obstacleCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
+  }
+  for (const swamp of swamps) {
+    obstacleCells.add(`${swamp.westCellX},${swamp.cellY}`);
+    obstacleCells.add(`${swamp.westCellX + 1},${swamp.cellY}`);
   }
 
   const supportsPortalPlatform = (cx: number, cy: number): boolean => {
     if (cy < 2) return false;
-    if (bridgeCells.has(`${cx},${cy}`) || bridgeCells.has(`${cx},${cy - 1}`)) return false;
+    if (obstacleCells.has(`${cx},${cy}`) || obstacleCells.has(`${cx},${cy - 1}`)) return false;
     const lowerNorthWall = !areCellsConnected(data, cx, cy, cx, cy - 1);
     const upperNorthWall = !areCellsConnected(data, cx, cy - 1, cx, cy - 2);
     return lowerNorthWall && upperNorthWall;

@@ -20,6 +20,7 @@ import type {
   GatePlacement,
   PressurePlateInfo,
   BridgePlacement,
+  SwampPlacement,
   BridgeEntrySide,
   BridgeState,
 } from '@labyrinth/shared';
@@ -48,6 +49,7 @@ import {
 } from './ForestWallLayout';
 import { addBridgeObstacles, type BridgeObstacleVisual } from './BridgeObstacle';
 import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
+import { addSwampObstacles } from './SwampObstacle';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -369,6 +371,8 @@ export class TilemapRenderer {
   readonly pressurePlateSprites: PressurePlateSpriteData[] = [];
   /** Stateful visual controllers in generated bridge-index order. */
   readonly bridgeVisuals: BridgeObstacleVisual[];
+  /** Reeds and cattails that Y-sort with players. */
+  readonly swampForegroundSprites: Sprite[];
 
   // ── Internal tracking for culling + cleanup ────────────────────────────
   private allChunks: ChunkMeta[] = [];
@@ -380,6 +384,7 @@ export class TilemapRenderer {
     gates: GatePlacement[],
     pressurePlates: PressurePlateInfo[],
     bridges: BridgePlacement[],
+    swamps: SwampPlacement[],
     dirtMask: Uint8Array,
     assets: GameAssets,
     renderer: Renderer,
@@ -747,6 +752,14 @@ export class TilemapRenderer {
       this.groundDetailLayer,
     );
 
+    this.swampForegroundSprites = addSwampObstacles(
+      swamps,
+      ts,
+      assets.swampObstacleTextures,
+      this.forestUnderlayLayer,
+      this.groundDetailLayer,
+    );
+
     // ── Step 3: Extract Special Entities ──────────────────────────────
 
     for (let y = 0; y < map.height; y++) {
@@ -941,6 +954,11 @@ export class TilemapRenderer {
       tree.destroy();
     }
 
+    for (const sprite of this.swampForegroundSprites) {
+      sprite.parent?.removeChild(sprite);
+      sprite.destroy();
+    }
+
     for (const rs of this.runestoneSprites) {
       rs.sprite.parent?.removeChild(rs.sprite);
       rs.sprite.destroy();
@@ -960,6 +978,7 @@ export class TilemapRenderer {
     this.northWallRowChunks.length = 0;
     this.groundDetailRowChunks.length = 0;
     this.treeSprites.length = 0;
+    this.swampForegroundSprites.length = 0;
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;
     this.pressurePlateSprites.length = 0;

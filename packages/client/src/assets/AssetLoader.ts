@@ -33,6 +33,7 @@ import {
 } from './FallbackTextures';
 import { PORTAL_PLATFORM_ASSET_PATHS } from '../systems/PortalPlatformLayout';
 import { BRIDGE_OBSTACLE_ASSET_PATHS } from '../systems/BridgeObstacleLayout';
+import { SWAMP_OBSTACLE_ASSET_PATHS } from '../systems/SwampObstacleLayout';
 import {
   CHARACTER_ATLAS_MANIFEST,
   CHARACTER_ATLAS_PATH,
@@ -181,6 +182,8 @@ export interface GameAssets {
   portalPlatformTextures: ReadonlyMap<string, Texture>;
   /** Authored ground, masonry, and decoration modules used by bridge obstacles. */
   bridgeObstacleTextures: ReadonlyMap<string, Texture>;
+  /** Authored terrain, lilies, and vegetation used by swamp obstacles. */
+  swampObstacleTextures: ReadonlyMap<string, Texture>;
   /** Number of activation frames (the rest are active idle frames). */
   portalActivationCount: number;
   /** Wisdom orb HUD texture. */
@@ -251,6 +254,7 @@ export async function loadAssets(
   let portalFrames: Texture[] = [];
   let portalPlatformTextures = new Map<string, Texture>();
   let bridgeObstacleTextures = new Map<string, Texture>();
+  let swampObstacleTextures = new Map<string, Texture>();
   let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
   let expandMapButtonTexture: Texture | null = null;
@@ -936,6 +940,25 @@ export async function loadAssets(
     console.warn('[Assets] Bridge obstacle modules unavailable', error);
   }
 
+  // ── Authored swamp obstacle modules ──────────────────────────────────────
+  try {
+    swampObstacleTextures = new Map(
+      await Promise.all(
+        SWAMP_OBSTACLE_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded swamp obstacles (${swampObstacleTextures.size} source modules)`,
+    );
+  } catch (error) {
+    swampObstacleTextures.clear();
+    console.warn('[Assets] Swamp obstacle modules unavailable', error);
+  }
+
   reportProgress(0.93, 'Inscribing the final glyphs…');
 
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
@@ -1057,6 +1080,7 @@ export async function loadAssets(
     portalFrames,
     portalPlatformTextures,
     bridgeObstacleTextures,
+    swampObstacleTextures,
     portalActivationCount,
     wisdomOrbTexture,
     expandMapButtonTexture,

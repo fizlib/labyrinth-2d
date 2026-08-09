@@ -56,6 +56,7 @@ import {
   type GatePlacement,
   type PressurePlateInfo,
   type BridgePlacement,
+  type SwampPlacement,
   type BridgeEntrySide,
   type BridgeState,
   type GameState,
@@ -251,6 +252,9 @@ export class Room {
   /** Authored bridge obstacles from deterministic map generation. */
   private readonly bridges: BridgePlacement[];
 
+  /** Authored walkable swamps from deterministic map generation. */
+  private readonly swamps: SwampPlacement[];
+
   /** Shared, server-authoritative missing-stone masks. */
   private readonly bridgeStates: BridgeState[];
 
@@ -285,6 +289,7 @@ export class Room {
     this.gates = layout.gates;
     this.pressurePlates = layout.pressurePlates;
     this.bridges = layout.bridges;
+    this.swamps = layout.swamps;
     this.bridgeStates = this.bridges.map((_, bridgeIndex) => ({
       bridgeIndex,
       collapsedTileMask: 0,
@@ -299,7 +304,12 @@ export class Room {
     this.hubDistanceField = computeHubDistanceField(this.map);
     this.runestones = findRunestonePositions(this.map);
 
-    const portalTile = computePortalPosition(this.map.data, SPAWN_DISTANCE, this.bridges);
+    const portalTile = computePortalPosition(
+      this.map.data,
+      SPAWN_DISTANCE,
+      this.bridges,
+      this.swamps,
+    );
     if (portalTile) {
       this.portalPosition = {
         x: portalTile.x * TILE_SIZE,
@@ -333,7 +343,7 @@ export class Room {
       );
     }
     console.info(
-      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Bridges: ${this.bridges.length}`,
+      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Bridges: ${this.bridges.length}, Swamps: ${this.swamps.length}`,
     );
     if (this.portalPosition) {
       console.info(
@@ -875,6 +885,7 @@ export class Room {
           this.portalPosition,
           this.bridges,
           this.bridgeStates,
+          this.swamps,
         );
         player.x = result.x;
         player.y = result.y;

@@ -35,6 +35,7 @@ import {
   FEET_HITBOX_H,
   generateMazeLayout,
   applyInputWithCollision,
+  isPlayerInSwamp,
   deriveFacingDirection,
 } from '@labyrinth/shared';
 import type {
@@ -1470,10 +1471,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
+  const PLAYER_SWAMP_SUBMERGE_DEPTH = 6;
+
   interface PlayerSpriteData {
     container: Container;
     shadow: Graphics;
     sprite: AnimatedSprite;
+    swampMask: Graphics;
+    inSwamp: boolean;
     currentAnimKey: string;
     spriteIndex: number;
     teamId: number;
@@ -1509,6 +1514,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     const shadow = new Graphics()
       .ellipse(0, -2, 7, 3)
       .fill({ color: 0x16220d, alpha: 0.55 });
+    const swampMask = new Graphics()
+      .rect(-40, -64, 80, 64 - PLAYER_SWAMP_SUBMERGE_DEPTH)
+      .fill({ color: 0xffffff });
     const container = new Container();
     container.addChild(shadow, sprite);
     entityLayer.addChild(container);
@@ -1517,6 +1525,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       container,
       shadow,
       sprite,
+      swampMask,
+      inSwamp: false,
       currentAnimKey: animKey,
       spriteIndex,
       teamId,
@@ -1541,8 +1551,22 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     return data;
   }
 
+  function setPlayerSwampState(data: PlayerSpriteData, inSwamp: boolean): void {
+    if (data.inSwamp === inSwamp) return;
+    data.inSwamp = inSwamp;
+
+    if (inSwamp) {
+      data.container.addChild(data.swampMask);
+      data.sprite.mask = data.swampMask;
+    } else {
+      data.sprite.mask = null;
+      data.swampMask.parent?.removeChild(data.swampMask);
+    }
+    data.shadow.visible = data.currentAnimKey !== 'lying' && !inSwamp;
+  }
+
   function setPlayerAnimation(data: PlayerSpriteData, animKey: string): void {
-    data.shadow.visible = animKey !== 'lying';
+    data.shadow.visible = animKey !== 'lying' && !data.inSwamp;
     if (data.currentAnimKey === animKey) return;
     const animSet = getAnimSet(data.spriteIndex, data.teamId);
     const frames = animSet.animations[animKey];
@@ -1559,6 +1583,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   function removePlayerSprite(playerId: string): void {
     const data = playerSprites.get(playerId);
     if (data) {
+      data.sprite.mask = null;
+      data.swampMask.parent?.removeChild(data.swampMask);
+      data.swampMask.destroy();
       entityLayer.removeChild(data.container);
       data.container.destroy({ children: true });
       playerSprites.delete(playerId);
@@ -1597,6 +1624,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       entityLayer.addChild(gate);
     }
 
+    for (const swampDecoration of renderer.swampForegroundSprites) {
+      entityLayer.addChild(swampDecoration);
+    }
+
     for (const tree of renderer.treeSprites) {
       entityLayer.addChild(tree);
     }
@@ -1633,6 +1664,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout.gates,
         currentLayout.pressurePlates,
         currentLayout.bridges,
+        currentLayout.swamps,
         currentLayout.dirtMask,
         assets,
         app.renderer,
@@ -1723,6 +1755,15 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     portalPosition = latestServerState?.portal ?? null,
   ): void {
     setRoundedPosition(data.container, x, y, 1);
+    setPlayerSwampState(
+      data,
+      isPlayerInSwamp(
+        currentLayout?.swamps ?? [],
+        x,
+        y,
+        currentMap?.tileSize ?? TILE_SIZE,
+      ),
+    );
     if (!portalPosition) return;
 
     const zFloor = getPortalPlatformPlayerZFloor(
@@ -1776,6 +1817,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         layout.gates,
         layout.pressurePlates,
         layout.bridges,
+        layout.swamps,
         layout.dirtMask,
         assets,
         app.renderer,
@@ -1940,6 +1982,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
               latestServerState?.portal,
               currentLayout?.bridges,
               gameState.bridgeStates,
+              currentLayout?.swamps,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -2264,6 +2307,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         latestServerState?.portal,
         currentLayout?.bridges,
         latestServerState?.bridgeStates,
+        currentLayout?.swamps,
       );
       localX = result.x;
       localY = result.y;
