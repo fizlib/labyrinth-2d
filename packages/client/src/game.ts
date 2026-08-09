@@ -2247,6 +2247,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       {
         isWarden: role === 'warden',
         bridges: currentLayout.bridges,
+        swamps: currentLayout.swamps,
         expandButtonTexture: assets.expandMapButtonTexture,
         contractButtonTexture: assets.contractMapButtonTexture,
         onExpandedChange: (expanded) => {

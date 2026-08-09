@@ -11,8 +11,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Container, Sprite, Texture, Graphics, Rectangle } from 'pixi.js';
-import type { BridgePlacement, TileMapData } from '@labyrinth/shared';
+import type { BridgePlacement, SwampPlacement, TileMapData } from '@labyrinth/shared';
 import {
+  getSwampAuthoringWidth,
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
   TILE_GATE_HORIZONTAL,
@@ -64,6 +65,8 @@ const COL_DIRT: readonly number[] = [142, 110, 78, 255]; // muted dirt brown
 const COL_WALL: readonly number[] = [89, 73, 58, 255]; // dark wood/stone wall
 const COL_BRIDGE_WATER: readonly number[] = [47, 105, 125, 255]; // deep blue-green water
 const COL_BRIDGE_STONE: readonly number[] = [188, 157, 103, 255]; // pale ancient stone
+const COL_SWAMP: readonly number[] = [38, 76, 60, 255]; // murky green water
+const COL_SWAMP_DOT: readonly number[] = [104, 156, 72, 255]; // marsh vegetation
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
 const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot center
@@ -73,6 +76,7 @@ const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot ce
 export interface MinimapOptions {
   isWarden?: boolean;
   bridges?: readonly BridgePlacement[];
+  swamps?: readonly SwampPlacement[];
   expandButtonTexture?: Texture | null;
   contractButtonTexture?: Texture | null;
   onExpandedChange?: (expanded: boolean) => void;
@@ -107,6 +111,7 @@ export class Minimap {
   private mapData: TileMapData;
   private dirtMask: Uint8Array;
   private bridgeMask: Uint8Array;
+  private swampMask: Uint8Array;
   private fog: Uint8Array;
 
   // ── Tracking for incremental updates ───────────────────────────────────
@@ -137,6 +142,7 @@ export class Minimap {
     this.mapData = mapData;
     this.dirtMask = dirtMask;
     this.bridgeMask = this.createBridgeMask(options.bridges ?? []);
+    this.swampMask = this.createSwampMask(options.swamps ?? []);
     this.isWarden = options.isWarden ?? false;
     this.expandButtonTexture = options.expandButtonTexture ?? null;
     this.contractButtonTexture = options.contractButtonTexture ?? null;
@@ -384,6 +390,48 @@ export class Minimap {
       stampRect(bridge.tileX, bridge.tileY + 3, 6, 6, 1);
       // Its two-column stone path spans x=2..3 and intersects tile rows 2..8.
       stampRect(bridge.tileX + 2, bridge.tileY + 2, 2, 7, 2);
+    }
+
+    return mask;
+  }
+
+  /** Stamp each swamp as a clean rectangle with deterministic vegetation dots. */
+  private createSwampMask(swamps: readonly SwampPlacement[]): Uint8Array {
+    const mask = new Uint8Array(this.mapData.width * this.mapData.height);
+    const authoringTileSize = 16;
+    const heightTiles = 6;
+
+    for (const swamp of swamps) {
+      const widthTiles = getSwampAuthoringWidth(swamp.lengthCells) / authoringTileSize;
+
+      for (let localY = 0; localY < heightTiles; localY++) {
+        const tileY = swamp.tileY + localY;
+        if (tileY < 0 || tileY >= this.mapData.height) continue;
+
+        for (let localX = 0; localX < widthTiles; localX++) {
+          const tileX = swamp.tileX + localX;
+          if (tileX < 0 || tileX >= this.mapData.width) continue;
+
+          mask[tileY * this.mapData.width + tileX] = 1;
+        }
+      }
+
+      const dotStartX = 2 + ((swamp.decorationSeed >>> 0) % 2);
+      for (let localX = dotStartX; localX < widthTiles - 1; localX += 3) {
+        let dotHash = swamp.decorationSeed ^ Math.imul(localX + 1, 0x45d9f3b);
+        dotHash = Math.imul(dotHash ^ (dotHash >>> 16), 0x119de1f3);
+        const localY = 1 + ((dotHash >>> 0) % (heightTiles - 2));
+        const tileX = swamp.tileX + localX;
+        const tileY = swamp.tileY + localY;
+        if (
+          tileX >= 0 &&
+          tileX < this.mapData.width &&
+          tileY >= 0 &&
+          tileY < this.mapData.height
+        ) {
+          mask[tileY * this.mapData.width + tileX] = 2;
+        }
+      }
     }
 
     return mask;
@@ -717,6 +765,8 @@ export class Minimap {
   private tileColor(tileIndex: number, id: number): readonly number[] {
     if (this.bridgeMask[tileIndex] === 2) return COL_BRIDGE_STONE;
     if (this.bridgeMask[tileIndex] === 1) return COL_BRIDGE_WATER;
+    if (this.swampMask[tileIndex] === 2) return COL_SWAMP_DOT;
+    if (this.swampMask[tileIndex] === 1) return COL_SWAMP;
 
     const isGroundTile =
       id === TILE_FLOOR ||
