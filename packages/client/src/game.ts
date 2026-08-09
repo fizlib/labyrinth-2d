@@ -488,6 +488,50 @@ function updateCamera(
   world.x = Math.round(camX);
   world.y = Math.round(camY);
 }
+
+interface BridgeRepairCameraFocus {
+  x: number;
+  y: number;
+}
+
+const BRIDGE_CAMERA_EASE_DURATION = 0.45;
+const BRIDGE_CAMERA_WIDTH_TILES = 8;
+const BRIDGE_CAMERA_HEIGHT_TILES = 10;
+
+/** Center the authored bridge while the local player channels its repair. */
+function getBridgeRepairCameraFocus(
+  layout: GeneratedMazeLayout | null,
+  state: GameState | null,
+  playerId: string,
+): BridgeRepairCameraFocus | null {
+  if (!layout || !state) return null;
+
+  const repairState = state.bridgeStates.find(
+    (bridgeState) =>
+      bridgeState.repairActive && bridgeState.repairingPlayerId === playerId,
+  );
+  if (!repairState) return null;
+
+  const bridge = layout.bridges[repairState.bridgeIndex];
+  if (!bridge) return null;
+
+  // Include the water-edge tiles that sit outside the six-tile-wide bank.
+  const left = (bridge.tileX - 1) * TILE_SIZE;
+  const top = bridge.tileY * TILE_SIZE;
+  const width = BRIDGE_CAMERA_WIDTH_TILES * TILE_SIZE;
+  const height = BRIDGE_CAMERA_HEIGHT_TILES * TILE_SIZE;
+
+  // updateCamera treats targetY as a player's feet and offsets it upward by half a tile.
+  return {
+    x: left + width / 2,
+    y: top + height / 2 + TILE_SIZE / 2,
+  };
+}
+
+function smoothstep(value: number): number {
+  return value * value * (3 - 2 * value);
+}
+
 /**
  * Draws the 15×15 logical maze cells used by spawn-distance BFS. The overlay
  * covers each 6×6 floor cell only; the intervening walls remain uncovered.
@@ -1409,6 +1453,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const MAX_ZOOM = 2.0;
   const ZOOM_STEP = 0.05;
   let zoomLevel = MAX_ZOOM;
+  let bridgeCameraBlend = 0;
+  let bridgeCameraFocus: BridgeRepairCameraFocus | null = null;
 
   // Zoom-toggle state: cycles default → zoomed-out → zoomed-in
   type ZoomToggleState = 'default' | 'zoomed-out' | 'zoomed-in';
@@ -1714,6 +1760,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       pendingPortalPos = null;
       shakeTimeRemaining = 0;
       cinematicPhase = 'idle';
+      bridgeCameraBlend = 0;
+      bridgeCameraFocus = null;
 
       const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
       currentMap = layout.map;
@@ -2263,16 +2311,41 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
 
     // ── 3. Camera follow + zoom ─────────────────────────────────────
-    if (worldContainer.scale.x !== zoomLevel || worldContainer.scale.y !== zoomLevel) {
-      worldContainer.scale.set(zoomLevel);
-    }
-
-    // Determine camera target: player normally, or cinematic override
     let camTargetX = localX;
     let camTargetY = localY;
+
     if (cinematicPhase !== 'idle') {
+      // The portal reveal remains an instant, higher-priority camera override.
       camTargetX = cinematicTargetX;
       camTargetY = cinematicTargetY;
+      bridgeCameraBlend = 0;
+      bridgeCameraFocus = null;
+    } else {
+      const activeBridgeFocus = getBridgeRepairCameraFocus(
+        currentLayout,
+        latestServerState,
+        net.playerId,
+      );
+      const blendStep = dtSeconds / BRIDGE_CAMERA_EASE_DURATION;
+
+      if (activeBridgeFocus) {
+        bridgeCameraFocus = activeBridgeFocus;
+        bridgeCameraBlend = Math.min(1, bridgeCameraBlend + blendStep);
+      } else {
+        bridgeCameraBlend = Math.max(0, bridgeCameraBlend - blendStep);
+      }
+
+      if (bridgeCameraFocus && bridgeCameraBlend > 0) {
+        const blend = smoothstep(bridgeCameraBlend);
+        camTargetX = localX + (bridgeCameraFocus.x - localX) * blend;
+        camTargetY = localY + (bridgeCameraFocus.y - localY) * blend;
+      } else if (!activeBridgeFocus) {
+        bridgeCameraFocus = null;
+      }
+    }
+
+    if (worldContainer.scale.x !== zoomLevel || worldContainer.scale.y !== zoomLevel) {
+      worldContainer.scale.set(zoomLevel);
     }
     updateCamera(worldContainer, camTargetX, camTargetY, mapPixelW, mapPixelH, zoomLevel);
 

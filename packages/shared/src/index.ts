@@ -38,6 +38,7 @@ export {
   BRIDGE_WALKWAY_ROW_Y,
   BRIDGE_REPAIR_DURATION_MS,
   BRIDGE_TILE_RESTORE_DURATION_MS,
+  BRIDGE_FAILURE_FEEDBACK_DURATION_MS,
   getBridgeTileBit,
   isBridgeTileSafe,
   getBridgeWalkwayTileBounds,

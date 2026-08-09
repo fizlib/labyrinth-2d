@@ -36,6 +36,7 @@ import {
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_ROWS,
   BRIDGE_REPAIR_DURATION_MS,
+  BRIDGE_FAILURE_FEEDBACK_DURATION_MS,
   getBridgeTileBit,
   getBridgeWalkwayTileBounds,
   getBridgeWalkwayTileAtPoint,
@@ -255,6 +256,9 @@ export class Room {
   /** Current bridge attempt for each player. */
   private readonly bridgeTraversals = new Map<string, BridgeTraversalState>();
 
+  /** Expiry time for each bridge's short wrong-stone visual marker. */
+  private readonly bridgeFailureFeedbackExpirations = new Map<number, number>();
+
   /** Current treasure-circle occupancy, used to require a fresh step-on edge. */
   private readonly bridgeRepairOccupancy = new Map<string, string>();
 
@@ -283,8 +287,10 @@ export class Room {
     this.bridgeStates = this.bridges.map((_, bridgeIndex) => ({
       bridgeIndex,
       collapsedTileMask: 0,
+      wrongTileIndex: null,
       repairingSide: null,
       repairActive: false,
+      repairingPlayerId: null,
       repairStartedTick: null,
       repairInitialCollapsedTileMask: 0,
     }));
@@ -895,6 +901,7 @@ export class Room {
       queue.length = 0;
     }
 
+    this.advanceBridgeFailureFeedbacks();
     this.advanceBridgeRepairs();
 
     // ── Pressure plate / gate logic ──────────────────────────────────────
@@ -1027,9 +1034,51 @@ export class Room {
       this.bridgeStates[currentBridgeIndex].collapsedTileMask === 0
     ) {
       const direction = traversal.entrySide === 'north' ? 'south' : 'north';
-      this.collapseBridge(currentBridgeIndex, currentTile.row, direction, player.id);
+      const wrongTileMask = tileMask & ~bridge.safeTileMask;
+      let wrongColumn = currentTile.column;
+      if ((wrongTileMask & getBridgeTileBit(currentTile.row, wrongColumn)) === 0) {
+        wrongColumn =
+          Array.from({ length: BRIDGE_WALKWAY_COLUMNS }, (_, column) => column).find(
+            (column) => (wrongTileMask & getBridgeTileBit(currentTile.row, column)) !== 0,
+          ) ?? wrongColumn;
+      }
+      this.triggerBridgeFailure(
+        currentBridgeIndex,
+        currentTile.row,
+        wrongColumn,
+        direction,
+        player.id,
+      );
     }
     traversal.lastTileMask = tileMask;
+  }
+
+  private triggerBridgeFailure(
+    bridgeIndex: number,
+    failedRow: number,
+    failedColumn: number,
+    direction: 'north' | 'south',
+    triggeringPlayerId: string,
+  ): void {
+    const bridgeState = this.bridgeStates[bridgeIndex];
+    if (!bridgeState || bridgeState.collapsedTileMask !== 0) return;
+
+    bridgeState.wrongTileIndex = failedRow * BRIDGE_WALKWAY_COLUMNS + failedColumn;
+    this.bridgeFailureFeedbackExpirations.set(
+      bridgeIndex,
+      Date.now() + BRIDGE_FAILURE_FEEDBACK_DURATION_MS,
+    );
+    this.collapseBridge(bridgeIndex, failedRow, direction, triggeringPlayerId);
+  }
+
+  private advanceBridgeFailureFeedbacks(): void {
+    const now = Date.now();
+    for (const [bridgeIndex, expiresAtMs] of this.bridgeFailureFeedbackExpirations) {
+      if (now < expiresAtMs) continue;
+      this.bridgeFailureFeedbackExpirations.delete(bridgeIndex);
+      const bridgeState = this.bridgeStates[bridgeIndex];
+      if (bridgeState) bridgeState.wrongTileIndex = null;
+    }
   }
 
   private collapseBridge(
@@ -1049,6 +1098,7 @@ export class Room {
     bridgeState.collapsedTileMask = collapsedTileMask;
     bridgeState.repairingSide = null;
     bridgeState.repairActive = false;
+    bridgeState.repairingPlayerId = null;
     bridgeState.repairStartedTick = null;
     bridgeState.repairInitialCollapsedTileMask = 0;
     this.bridgeRepairs.delete(bridgeIndex);
@@ -1100,6 +1150,7 @@ export class Room {
     this.bridgeRepairs.set(bridgeIndex, repair);
     bridgeState.repairingSide = side;
     bridgeState.repairActive = true;
+    bridgeState.repairingPlayerId = repairingPlayerId;
     bridgeState.repairStartedTick = repair.startedTick;
     bridgeState.repairInitialCollapsedTileMask = repair.initialCollapsedTileMask;
     bridgeState.collapsedTileMask = getBridgeRepairCollapsedMask(
@@ -1139,6 +1190,7 @@ export class Room {
     repair.lastUpdatedAtMs = Date.now();
     bridgeState.repairingSide = side;
     bridgeState.repairActive = true;
+    bridgeState.repairingPlayerId = repairingPlayerId;
     console.info(
       `[Room:${this.id}] Bridge ${bridgeIndex} repair resumed from ${side} by ${repairingPlayerId}`,
     );
@@ -1166,6 +1218,7 @@ export class Room {
           ))
       ) {
         bridgeState.repairActive = false;
+        bridgeState.repairingPlayerId = null;
         repair.repairingPlayerId = null;
         console.info(`[Room:${this.id}] Bridge ${bridgeIndex} repair paused`);
       } else if (bridgeState.repairActive) {
@@ -1183,6 +1236,7 @@ export class Room {
       bridgeState.collapsedTileMask = 0;
       bridgeState.repairingSide = null;
       bridgeState.repairActive = false;
+      bridgeState.repairingPlayerId = null;
       bridgeState.repairStartedTick = null;
       bridgeState.repairInitialCollapsedTileMask = 0;
       this.bridgeRepairs.delete(bridgeIndex);
@@ -1390,6 +1444,7 @@ export class Room {
     this.sockets.clear();
     this.inputQueues.clear();
     this.bridgeTraversals.clear();
+    this.bridgeFailureFeedbackExpirations.clear();
     this.bridgeRepairOccupancy.clear();
     this.state.players = [];
   }

@@ -848,6 +848,7 @@ export class TilemapRenderer {
       const state = bridgeStates.find(
         (candidate) => candidate.bridgeIndex === bridgeIndex,
       );
+      this.bridgeVisuals[bridgeIndex].syncWrongTileState(state?.wrongTileIndex ?? null);
       this.bridgeVisuals[bridgeIndex].syncCollapsedTileMask(
         state?.collapsedTileMask ?? 0,
         animate,

@@ -2,6 +2,7 @@ import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import {
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_ROWS,
+  BRIDGE_FAILURE_FEEDBACK_DURATION_MS,
   BRIDGE_TILE_RESTORE_DURATION_MS,
   getBridgeTileBit,
   getBridgeSafeTileOrder,
@@ -25,6 +26,8 @@ const BRIDGE_TILE_FALL_DISTANCE = 8;
 const BRIDGE_REPAIR_PARTICLE_COUNT = 6;
 const BRIDGE_WISDOM_HINT_STEP_DURATION = 0.14;
 const BRIDGE_WISDOM_HINT_SPARKLE_LIFETIME = 0.8;
+const BRIDGE_WRONG_TILE_FEEDBACK_DURATION = BRIDGE_FAILURE_FEEDBACK_DURATION_MS / 1000;
+const BRIDGE_WRONG_TILE_DIP_DISTANCE = 3;
 
 interface TrackedBridgeSprite {
   sprite: Sprite;
@@ -34,6 +37,11 @@ interface TrackedBridgeSprite {
 interface BridgeTileVisual {
   sprites: TrackedBridgeSprite[];
   wisdomSparkle: Container | null;
+}
+
+interface BridgeWrongTileFeedback {
+  tileIndex: number;
+  elapsed: number;
 }
 
 interface BridgeTileAnimation {
@@ -71,6 +79,8 @@ export class BridgeObstacleVisual {
   private repairActive = false;
   private magicalTileMask = 0;
   private animationElapsed = 0;
+  private syncedWrongTileIndex: number | null = null;
+  private wrongTileFeedback: BridgeWrongTileFeedback | null = null;
   private wisdomHint: BridgeWisdomHintVisual | null = null;
   private wisdomHintSuppressed = false;
 
@@ -89,6 +99,14 @@ export class BridgeObstacleVisual {
     sparkle.zIndex = sprite.zIndex + 1_000;
     sprite.parent.addChild(sparkle);
     tile.wisdomSparkle = sparkle;
+  }
+
+  /** React once when the authoritative state identifies a newly failed stone. */
+  syncWrongTileState(tileIndex: number | null): void {
+    if (tileIndex === this.syncedWrongTileIndex) return;
+    this.syncedWrongTileIndex = tileIndex;
+    if (tileIndex === null || !this.tiles[tileIndex]) return;
+    this.startWrongTileFeedback(tileIndex);
   }
 
   /** Begin a local-only, bank-to-bank reveal of the safe bridge route. */
@@ -262,7 +280,56 @@ export class BridgeObstacleVisual {
 
     this.updateRepairMagic(dt);
     this.updateMagicalTiles();
+    this.updateWrongTileFeedback(dt);
     this.updateWisdomHint(dt);
+  }
+
+  private startWrongTileFeedback(tileIndex: number): void {
+    this.resetWrongTileFeedback();
+    const tile = this.tiles[tileIndex];
+    if (!tile) return;
+
+    this.animations.delete(tileIndex);
+    this.wrongTileFeedback = { tileIndex, elapsed: 0 };
+    for (const tracked of tile.sprites) {
+      tracked.sprite.visible = true;
+      tracked.sprite.alpha = 1;
+      tracked.sprite.y = tracked.originalY;
+      tracked.sprite.tint = 0xff683e;
+    }
+  }
+
+  private updateWrongTileFeedback(dt: number): void {
+    const feedback = this.wrongTileFeedback;
+    if (!feedback) return;
+    const tile = this.tiles[feedback.tileIndex];
+    if (!tile) {
+      this.wrongTileFeedback = null;
+      return;
+    }
+
+    feedback.elapsed += dt;
+    const progress = Math.min(1, feedback.elapsed / BRIDGE_WRONG_TILE_FEEDBACK_DURATION);
+    const dip =
+      Math.sin(progress * Math.PI) * BRIDGE_WRONG_TILE_DIP_DISTANCE * this.scale;
+    const flash = Math.sin(progress * Math.PI * 4) >= 0 ? 0xff683e : 0xff9a45;
+    for (const tracked of tile.sprites) {
+      tracked.sprite.y = tracked.originalY + Math.round(dip);
+      tracked.sprite.tint = flash;
+    }
+
+    if (progress >= 1) this.resetWrongTileFeedback();
+  }
+
+  private resetWrongTileFeedback(): void {
+    const feedback = this.wrongTileFeedback;
+    if (!feedback) return;
+    const tile = this.tiles[feedback.tileIndex];
+    for (const tracked of tile?.sprites ?? []) {
+      tracked.sprite.y = tracked.originalY;
+      tracked.sprite.tint = 0xffffff;
+    }
+    this.wrongTileFeedback = null;
   }
 
   private createWisdomSparkle(): Container {

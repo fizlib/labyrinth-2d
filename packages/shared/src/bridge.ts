@@ -13,6 +13,7 @@ export const BRIDGE_WALKWAY_COLUMNS = 2;
 export const BRIDGE_WALKWAY_TILE_COUNT = BRIDGE_WALKWAY_ROWS * BRIDGE_WALKWAY_COLUMNS;
 export const BRIDGE_REPAIR_DURATION_MS = 10_000;
 export const BRIDGE_TILE_RESTORE_DURATION_MS = 250;
+export const BRIDGE_FAILURE_FEEDBACK_DURATION_MS = 160;
 
 export type BridgeEntrySide = 'north' | 'south';
 export type BridgeTravelDirection = 'north' | 'south';
@@ -33,10 +34,14 @@ export interface BridgeState {
   bridgeIndex: number;
   /** Bit row * 2 + column is set when that walkway stone is missing. */
   collapsedTileMask: number;
+  /** Wrong stone currently showing its brief rejection flash, or null while idle. */
+  wrongTileIndex: number | null;
   /** Circle currently channeling a repair, or null while idle. */
   repairingSide: BridgeEntrySide | null;
   /** Whether a player is currently holding the repair circle. */
   repairActive: boolean;
+  /** Player currently holding the repair circle, or null while paused. */
+  repairingPlayerId: string | null;
   /** Authoritative tick on which the current repair began. */
   repairStartedTick: number | null;
   /** Missing stones captured when this repair began. */
