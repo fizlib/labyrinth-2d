@@ -79,13 +79,17 @@ export interface BridgePlacement {
   safeTileMask: number;
 }
 
-/** Authored swamp occupying the opening between two horizontally adjacent cells. */
+/** Authored swamp spanning a straight run of horizontally adjacent cells. */
 export interface SwampPlacement {
   /** Column of the cell west of the swamp. */
   westCellX: number;
   /** Shared cell row. */
   cellY: number;
-  /** Top-left tile of the 11×6 east-west passage occupied by the swamp. */
+  /** Number of cells joined by the swamp, from 2 through 5. */
+  lengthCells: number;
+  /** Stable seed used for this swamp's terrain variation and decorations. */
+  decorationSeed: number;
+  /** Top-left tile of the first 11×6 east-west passage occupied by the swamp. */
   tileX: number;
   tileY: number;
 }
@@ -608,6 +612,9 @@ const SWAMP_DENSITY = 0.12;
 const MIN_SWAMPS = 4;
 const MAX_SWAMPS = 10;
 const SWAMP_RANDOM_SALT = 0x2c1b3c6d;
+export const MIN_SWAMP_LENGTH_CELLS = 2;
+export const MAX_SWAMP_LENGTH_CELLS = 5;
+const SWAMP_LENGTH_WEIGHT_MULTIPLIER = 6;
 
 function isWalkableTileId(tile: number): boolean {
   return tile === TILE_FLOOR || tile === TILE_FLOOR_SHADOW;
@@ -971,7 +978,7 @@ function computeBridgePlacements(
   }));
 }
 
-function supportsSwamp(data: number[], westCellX: number, cellY: number): boolean {
+function supportsSwampPassage(data: number[], westCellX: number, cellY: number): boolean {
   const { tx, ty } = cellToTile(westCellX, cellY);
   const passageX = tx + CELL_SIZE;
 
@@ -990,12 +997,55 @@ function supportsSwamp(data: number[], westCellX: number, cellY: number): boolea
   return true;
 }
 
+function supportsSwampInteriorCell(data: number[], cellX: number, cellY: number): boolean {
+  const { tx, ty } = cellToTile(cellX, cellY);
+
+  for (let dx = 0; dx < CELL_SIZE; dx++) {
+    if (!isForestWallTileId(data[(ty - 1) * MAP_WIDTH + tx + dx])) return false;
+    if (!isForestWallTileId(data[(ty + CELL_SIZE) * MAP_WIDTH + tx + dx])) return false;
+  }
+
+  return true;
+}
+
+function mixSwampSeed(seed: number, westCellX: number, cellY: number): number {
+  let value = seed ^ SWAMP_RANDOM_SALT;
+  value = Math.imul(value ^ (westCellX + 1), 0x45d9f3b);
+  value = Math.imul(value ^ (cellY + 1), 0x119de1f3);
+  value ^= value >>> 16;
+  return value >>> 0;
+}
+
+function chooseSwampLength(maxLengthCells: number, rand: () => number): number {
+  let totalWeight = 0;
+  for (let length = MIN_SWAMP_LENGTH_CELLS; length <= maxLengthCells; length++) {
+    totalWeight += SWAMP_LENGTH_WEIGHT_MULTIPLIER ** (length - MIN_SWAMP_LENGTH_CELLS);
+  }
+
+  let roll = rand() * totalWeight;
+  for (let length = MIN_SWAMP_LENGTH_CELLS; length <= maxLengthCells; length++) {
+    roll -= SWAMP_LENGTH_WEIGHT_MULTIPLIER ** (length - MIN_SWAMP_LENGTH_CELLS);
+    if (roll < 0) return length;
+  }
+
+  return maxLengthCells;
+}
+
 function computeSwampPlacements(
   data: number[],
   spawnPoints: SpawnPoint[],
   bridges: readonly BridgePlacement[],
   seed: number,
 ): SwampPlacement[] {
+  interface SwampCandidate {
+    westCellX: number;
+    cellY: number;
+    tileX: number;
+    tileY: number;
+    maxLengthCells: number;
+    priority: number;
+  }
+
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
   const spawnCells = new Set(
@@ -1010,31 +1060,66 @@ function computeSwampPlacements(
     occupiedCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
   }
 
-  const candidates: SwampPlacement[] = [];
+  const candidateRand = mulberry32(seed ^ SWAMP_RANDOM_SALT);
+  const candidates: SwampCandidate[] = [];
   for (let cellY = 0; cellY < GRID_CELLS; cellY++) {
     for (let westCellX = 0; westCellX < GRID_CELLS - 1; westCellX++) {
-      const westKey = `${westCellX},${cellY}`;
-      const eastKey = `${westCellX + 1},${cellY}`;
-      if (hubCells.has(westKey) || hubCells.has(eastKey)) continue;
-      if (spawnCells.has(westKey) || spawnCells.has(eastKey)) continue;
-      if (occupiedCells.has(westKey) || occupiedCells.has(eastKey)) continue;
-      if (!isEmptyObstacleCell(data, westCellX, cellY)) continue;
-      if (!isEmptyObstacleCell(data, westCellX + 1, cellY)) continue;
-      if (!areCellsConnected(data, westCellX, cellY, westCellX + 1, cellY)) continue;
-      if (!supportsSwamp(data, westCellX, cellY)) continue;
+      let maxLengthCells = 1;
+
+      for (
+        let lengthCells = MIN_SWAMP_LENGTH_CELLS;
+        lengthCells <= MAX_SWAMP_LENGTH_CELLS;
+        lengthCells++
+      ) {
+        const eastCellX = westCellX + lengthCells - 1;
+        if (eastCellX >= GRID_CELLS) break;
+
+        const eastKey = `${eastCellX},${cellY}`;
+        if (hubCells.has(eastKey) || spawnCells.has(eastKey) || occupiedCells.has(eastKey)) break;
+        if (!isEmptyObstacleCell(data, eastCellX, cellY)) break;
+
+        if (lengthCells === MIN_SWAMP_LENGTH_CELLS) {
+          const westKey = `${westCellX},${cellY}`;
+          if (
+            hubCells.has(westKey) ||
+            spawnCells.has(westKey) ||
+            occupiedCells.has(westKey) ||
+            !isEmptyObstacleCell(data, westCellX, cellY)
+          ) {
+            break;
+          }
+        } else if (!supportsSwampInteriorCell(data, eastCellX - 1, cellY)) {
+          break;
+        }
+
+        if (
+          !areCellsConnected(data, eastCellX - 1, cellY, eastCellX, cellY) ||
+          !supportsSwampPassage(data, eastCellX - 1, cellY)
+        ) {
+          break;
+        }
+
+        maxLengthCells = lengthCells;
+      }
+
+      if (maxLengthCells < MIN_SWAMP_LENGTH_CELLS) continue;
 
       const { tx, ty } = cellToTile(westCellX, cellY);
+      const lengthWeight =
+        SWAMP_LENGTH_WEIGHT_MULTIPLIER ** (maxLengthCells - MIN_SWAMP_LENGTH_CELLS);
       candidates.push({
         westCellX,
         cellY,
         tileX: tx + CELL_SIZE,
         tileY: ty,
+        maxLengthCells,
+        priority: candidateRand() ** (1 / lengthWeight),
       });
     }
   }
 
   const rand = mulberry32(seed ^ SWAMP_RANDOM_SALT);
-  shuffle(candidates, rand);
+  candidates.sort((a, b) => b.priority - a.priority);
   const minimum = Math.min(MIN_SWAMPS, candidates.length);
   const desiredCount = Math.min(
     MAX_SWAMPS,
@@ -1045,13 +1130,26 @@ function computeSwampPlacements(
 
   for (const candidate of candidates) {
     if (swamps.length >= desiredCount) break;
-    const westKey = `${candidate.westCellX},${candidate.cellY}`;
-    const eastKey = `${candidate.westCellX + 1},${candidate.cellY}`;
-    if (occupiedCells.has(westKey) || occupiedCells.has(eastKey)) continue;
+    let availableLengthCells = 0;
+    for (let offset = 0; offset < candidate.maxLengthCells; offset++) {
+      const cellKey = `${candidate.westCellX + offset},${candidate.cellY}`;
+      if (occupiedCells.has(cellKey)) break;
+      availableLengthCells = offset + 1;
+    }
+    if (availableLengthCells < MIN_SWAMP_LENGTH_CELLS) continue;
 
-    occupiedCells.add(westKey);
-    occupiedCells.add(eastKey);
-    swamps.push(candidate);
+    const lengthCells = chooseSwampLength(availableLengthCells, rand);
+    for (let offset = 0; offset < lengthCells; offset++) {
+      occupiedCells.add(`${candidate.westCellX + offset},${candidate.cellY}`);
+    }
+    swamps.push({
+      westCellX: candidate.westCellX,
+      cellY: candidate.cellY,
+      lengthCells,
+      decorationSeed: mixSwampSeed(seed, candidate.westCellX, candidate.cellY),
+      tileX: candidate.tileX,
+      tileY: candidate.tileY,
+    });
   }
 
   swamps.sort((a, b) => a.cellY - b.cellY || a.westCellX - b.westCellX);
@@ -1329,8 +1427,9 @@ export function computePortalPosition(
     obstacleCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
   }
   for (const swamp of swamps) {
-    obstacleCells.add(`${swamp.westCellX},${swamp.cellY}`);
-    obstacleCells.add(`${swamp.westCellX + 1},${swamp.cellY}`);
+    for (let offset = 0; offset < swamp.lengthCells; offset++) {
+      obstacleCells.add(`${swamp.westCellX + offset},${swamp.cellY}`);
+    }
   }
 
   const supportsPortalPlatform = (cx: number, cy: number): boolean => {

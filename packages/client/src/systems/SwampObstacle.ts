@@ -1,8 +1,8 @@
 import { Container, Sprite, Texture } from 'pixi.js';
 import type { SwampPlacement } from '@labyrinth/shared';
 import {
-  SWAMP_OBSTACLE_DETAIL_SPRITES,
-  SWAMP_OBSTACLE_TERRAIN_SPRITES,
+  getSwampObstacleDetailSprites,
+  getSwampObstacleTerrainSprites,
   getSwampObstacleAssetPath,
   type SwampObstacleSpriteSpec,
 } from './SwampObstacleLayout';
@@ -19,12 +19,6 @@ export function addSwampObstacles(
   groundDetailParent: Container,
 ): Sprite[] {
   const scale = tileSize / AUTHORING_TILE_SIZE;
-  const groundSpecs = SWAMP_OBSTACLE_DETAIL_SPRITES.filter(
-    (spec) => spec.z < FOREGROUND_Z_INDEX,
-  );
-  const foregroundSpecs = SWAMP_OBSTACLE_DETAIL_SPRITES.filter(
-    (spec) => spec.z >= FOREGROUND_Z_INDEX,
-  );
   const foregroundSprites: Sprite[] = [];
 
   const addGroundSpecs = (
@@ -57,7 +51,10 @@ export function addSwampObstacles(
   for (const swamp of swamps) {
     const anchorX = swamp.tileX * tileSize;
     const anchorY = swamp.tileY * tileSize;
-    addGroundSpecs(swamp, SWAMP_OBSTACLE_TERRAIN_SPRITES, terrainParent, -1);
+    const detailSpecs = getSwampObstacleDetailSprites(swamp);
+    const groundSpecs = detailSpecs.filter((spec) => spec.z < FOREGROUND_Z_INDEX);
+    const foregroundSpecs = detailSpecs.filter((spec) => spec.z >= FOREGROUND_Z_INDEX);
+    addGroundSpecs(swamp, getSwampObstacleTerrainSprites(swamp), terrainParent, -1);
     addGroundSpecs(swamp, groundSpecs, groundDetailParent, 0);
 
     for (const spec of foregroundSpecs) {

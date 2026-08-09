@@ -61,7 +61,12 @@ export {
   type BridgeRepairCircleBounds,
 } from './bridge.js';
 
-export { SWAMP_SPEED_MULTIPLIER, isPlayerInSwamp } from './swamp.js';
+export {
+  SWAMP_SPEED_MULTIPLIER,
+  getSwampAuthoringWidth,
+  isPlayerInSwamp,
+  isSwampWaterAtAuthoringPoint,
+} from './swamp.js';
 
 // ── Re-export map data ──────────────────────────────────────────────────────
 export {
@@ -93,6 +98,8 @@ export {
   computeSpawnPoints,
   CELL_STEP_X,
   CELL_STEP_Y,
+  MIN_SWAMP_LENGTH_CELLS,
+  MAX_SWAMP_LENGTH_CELLS,
   GRID_CELLS,
   computePortalPosition,
   generateMazeLayout,

@@ -1,7 +1,12 @@
-import type { SwampPlacement } from './maps/level1.js';
+import {
+  CELL_STEP_X,
+  MAX_SWAMP_LENGTH_CELLS,
+  MIN_SWAMP_LENGTH_CELLS,
+  WALL_WIDTH,
+  type SwampPlacement,
+} from './maps/level1.js';
 
 const SWAMP_AUTHORING_TILE_SIZE = 16;
-const SWAMP_AUTHORING_WIDTH = 176;
 const SWAMP_AUTHORING_HEIGHT = 96;
 
 /** A swamp cuts movement speed in half while the player's feet are in water. */
@@ -26,6 +31,39 @@ const WATER_RIGHT_BY_ROW = [
   162, 162, 162, 162, 164, 165, 165, 167, 166,
 ] as const;
 
+function normalizeLengthCells(lengthCells: number): number {
+  return Math.max(
+    MIN_SWAMP_LENGTH_CELLS,
+    Math.min(MAX_SWAMP_LENGTH_CELLS, Math.round(lengthCells)),
+  );
+}
+
+/** Pixel width of the rendered swamp at its original 16px authoring scale. */
+export function getSwampAuthoringWidth(lengthCells: number): number {
+  const normalizedLength = normalizeLengthCells(lengthCells);
+  const widthTiles = WALL_WIDTH + (normalizedLength - MIN_SWAMP_LENGTH_CELLS) * CELL_STEP_X;
+  return widthTiles * SWAMP_AUTHORING_TILE_SIZE;
+}
+
+/** True when an authoring-space point is inside the extended shoreline. */
+export function isSwampWaterAtAuthoringPoint(
+  lengthCells: number,
+  x: number,
+  y: number,
+): boolean {
+  const pixelX = Math.floor(x);
+  const pixelY = Math.floor(y);
+  const width = getSwampAuthoringWidth(lengthCells);
+  if (pixelX < 0 || pixelX >= width || pixelY < 0 || pixelY >= SWAMP_AUTHORING_HEIGHT) {
+    return false;
+  }
+
+  const waterLeft = WATER_LEFT_BY_ROW[pixelY];
+  const waterRight = WATER_RIGHT_BY_ROW[pixelY];
+  const extendedWaterRight = waterRight + width - WALL_WIDTH * SWAMP_AUTHORING_TILE_SIZE;
+  return waterLeft >= 0 && pixelX >= waterLeft && pixelX <= extendedWaterRight;
+}
+
 /** True when a bottom-center player position falls inside the authored water shape. */
 export function isPlayerInSwamp(
   swamps: readonly SwampPlacement[],
@@ -41,18 +79,7 @@ export function isPlayerInSwamp(
     const anchorY = swamp.tileY * tileSize;
     const localX = Math.floor((x - anchorX) / scale);
     const localY = Math.floor((y - 1 - anchorY) / scale);
-    if (
-      localX < 0 ||
-      localX >= SWAMP_AUTHORING_WIDTH ||
-      localY < 0 ||
-      localY >= SWAMP_AUTHORING_HEIGHT
-    ) {
-      continue;
-    }
-
-    const waterLeft = WATER_LEFT_BY_ROW[localY];
-    const waterRight = WATER_RIGHT_BY_ROW[localY];
-    if (waterLeft >= 0 && localX >= waterLeft && localX <= waterRight) return true;
+    if (isSwampWaterAtAuthoringPoint(swamp.lengthCells, localX, localY)) return true;
   }
 
   return false;
