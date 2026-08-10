@@ -1455,6 +1455,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const forestWallLayer = new Container();
   worldContainer.addChild(forestWallLayer);
 
+  // Remote-player labels render in screen space above every world object.
+  const playerNameTagLayer = new Container();
+  playerNameTagLayer.sortableChildren = true;
+  app.stage.addChild(playerNameTagLayer);
+
   let mapPixelW = MAZE_WIDTH * TILE_SIZE;
   let mapPixelH = MAZE_HEIGHT * TILE_SIZE;
 
@@ -1481,11 +1486,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   const PLAYER_DEEP_MUD_SUBMERGE_DEPTH = 6;
   const PLAYER_FIRM_GROUND_SUBMERGE_DEPTH = 3;
+  const PLAYER_NAME_TAG_OFFSET_Y = 1;
+  const PLAYER_NAME_TAG_SCALE = 0.125;
 
   interface PlayerSpriteData {
     container: Container;
     shadow: Graphics;
     sprite: AnimatedSprite;
+    nameTag: Text | null;
     swampMask: Graphics;
     swampTerrain: SwampTerrain;
     currentAnimKey: string;
@@ -1565,6 +1573,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       container,
       shadow,
       sprite,
+      nameTag: null,
       swampMask,
       swampTerrain: 'dry',
       currentAnimKey: animKey,
@@ -1575,10 +1584,52 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     return data;
   }
 
+  function syncPlayerNameTag(
+    data: PlayerSpriteData,
+    displayName: string,
+    shouldShow: boolean,
+  ): void {
+    if (!shouldShow) {
+      if (data.nameTag) {
+        data.nameTag.parent?.removeChild(data.nameTag);
+        data.nameTag.destroy();
+        data.nameTag = null;
+      }
+      return;
+    }
+
+    if (!data.nameTag) {
+      data.nameTag = new Text({
+        text: displayName,
+        style: new TextStyle({
+          fontFamily: 'PixelOperator8',
+          fontSize: 64,
+          fill: '#fff0b5',
+          stroke: {
+            color: '#211407',
+            width: 8,
+            join: 'miter',
+          },
+          align: 'center',
+        }),
+        roundPixels: true,
+        resolution: 2,
+      });
+      data.nameTag.anchor.set(0.5, 0);
+      data.nameTag.scale.set(PLAYER_NAME_TAG_SCALE);
+      data.nameTag.eventMode = 'none';
+      playerNameTagLayer.addChild(data.nameTag);
+    } else if (data.nameTag.text !== displayName) {
+      data.nameTag.text = displayName;
+    }
+  }
+
   function ensurePlayerSprite(
     playerId: string,
     spriteIndex: number,
     teamId: number,
+    displayName: string,
+    shouldShowNameTag: boolean,
   ): PlayerSpriteData {
     let data = playerSprites.get(playerId);
     if (!data) data = createPlayerSprite(playerId, spriteIndex, teamId);
@@ -1588,6 +1639,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       data.currentAnimKey = '';
       setPlayerAnimation(data, 'idle-down');
     }
+    syncPlayerNameTag(data, displayName, shouldShowNameTag);
     return data;
   }
 
@@ -1633,6 +1685,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     const data = playerSprites.get(playerId);
     if (data) {
       data.sprite.mask = null;
+      if (data.nameTag) {
+        data.nameTag.parent?.removeChild(data.nameTag);
+        data.nameTag.destroy();
+        data.nameTag = null;
+      }
       data.swampMask.parent?.removeChild(data.swampMask);
       data.swampMask.destroy();
       entityLayer.removeChild(data.container);
@@ -1646,6 +1703,22 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   // ── Network Manager ───────────────────────────────────────────────────
 
   let latestServerState: GameState | null = null;
+
+  function updatePlayerNameTagScreenPositions(): void {
+    const scaleX = worldContainer.scale.x;
+    const scaleY = worldContainer.scale.y;
+
+    for (const data of playerSprites.values()) {
+      if (!data.nameTag) continue;
+      const screenX = Math.round(worldContainer.x + data.container.x * scaleX);
+      const screenY = Math.round(
+        worldContainer.y + (data.container.y + PLAYER_NAME_TAG_OFFSET_Y) * scaleY,
+      );
+      if (data.nameTag.x !== screenX) data.nameTag.x = screenX;
+      if (data.nameTag.y !== screenY) data.nameTag.y = screenY;
+      if (data.nameTag.zIndex !== screenY) data.nameTag.zIndex = screenY;
+    }
+  }
 
   function attachTilemapLayers(renderer: TilemapRenderer): void {
     cageGroundLayer.parent?.removeChild(cageGroundLayer);
@@ -2023,7 +2096,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
       for (const player of gameState.players) {
         const isLocal = player.id === playerId;
-        const data = ensurePlayerSprite(player.id, player.spriteIndex, player.teamId);
+        const data = ensurePlayerSprite(
+          player.id,
+          player.spriteIndex,
+          player.teamId,
+          player.displayName,
+          !isLocal,
+        );
         setPlayerAnimation(
           data,
           getAnimationKey(player.facing, player.isMoving, player.isDead),
@@ -2038,6 +2117,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
       updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
       latestServerState = gameState;
+      updatePlayerNameTagScreenPositions();
       if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
       window.requestAnimationFrame(dismissLoadingScreen);
     },
@@ -2060,6 +2140,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           localPlayerData.id,
           localPlayerData.spriteIndex,
           localPlayerData.teamId,
+          localPlayerData.displayName,
+          false,
         );
 
         if (!debugTeleportActive) {
@@ -2115,7 +2197,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       for (const player of gameState.players) {
         if (player.id !== localPlayerId) {
           knownRemotePlayers.add(player.id);
-          ensurePlayerSprite(player.id, player.spriteIndex, player.teamId);
+          ensurePlayerSprite(
+            player.id,
+            player.spriteIndex,
+            player.teamId,
+            player.displayName,
+            true,
+          );
         }
       }
 
@@ -2915,6 +3003,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     if (tilemapRenderer && latestServerState) {
       updatePressurePlateAnimations(tilemapRenderer, latestServerState, dtSeconds);
     }
+    updatePlayerNameTagScreenPositions();
   });
 
   // ── Mousewheel Zoom (debug) ───────────────────────────────────────────

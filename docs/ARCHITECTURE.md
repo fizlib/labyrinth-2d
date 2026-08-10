@@ -372,6 +372,11 @@ The client currently has multiple UI subsystems, not just the minimap:
   - local-only world-space hint arrow above the local player
   - appears after a successful orb use
   - follows the player briefly while keeping the server-returned direction fixed
+- Player name tags
+  - remote-only world-space labels positioned just below each character
+  - project world positions into a dedicated screen-space overlay above all world objects
+  - retain a fixed crisp screen size through camera zoom so scenery cannot cover or distort them
+  - use the replicated `PlayerInfo.displayName`; the local player's own label is hidden
 - Runestone/chest interaction prompt
   - world-space `[E]` prompt shown above nearby eligible inactive runestones, unopened treasure chests, or unlatched gate buttons for wardens
   - switches to `[ Q ]` at either entrance of a blocking sword field for survivors carrying an orb
