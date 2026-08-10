@@ -37,6 +37,7 @@ import {
   generateMazeLayout,
   applyInputWithCollision,
   getPlayerSwampTerrain,
+  findSwordFieldWisdomTarget,
   deriveFacingDirection,
 } from '@labyrinth/shared';
 import type {
@@ -236,8 +237,10 @@ let cinematicTargetY = 0;
 // ── Integer Scaling ─────────────────────────────────────────────────────────
 
 function isLandscapeTouchViewport(viewportW: number, viewportH: number): boolean {
-  return viewportW > viewportH
-    && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  return (
+    viewportW > viewportH &&
+    window.matchMedia('(hover: none) and (pointer: coarse)').matches
+  );
 }
 
 function getViewportScale(viewportW: number, viewportH: number): number {
@@ -272,13 +275,17 @@ interface WebkitFullscreenElement extends HTMLElement {
 }
 
 function isAppleMobileDevice(): boolean {
-  return /iPhone|iPad|iPod/.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return (
+    /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
 }
 
 function isAppleStandaloneMode(): boolean {
-  return Boolean((navigator as AppleNavigator).standalone)
-    || window.matchMedia('(display-mode: standalone)').matches;
+  return (
+    Boolean((navigator as AppleNavigator).standalone) ||
+    window.matchMedia('(display-mode: standalone)').matches
+  );
 }
 
 function getFullscreenElement(): Element | null {
@@ -315,10 +322,14 @@ function resizeCanvas(app: Application): void {
   const viewportScale = getViewportScale(window.innerWidth, window.innerHeight);
   // A scale remembered while opening iOS standalone mode must not pin a phone
   // to its smaller portrait/browser size after it rotates to landscape.
-  const isLandscapeTouch = isLandscapeTouchViewport(window.innerWidth, window.innerHeight);
-  const scale = fullscreenCanvasScale === null || isLandscapeTouch
-    ? viewportScale
-    : Math.min(viewportScale, fullscreenCanvasScale);
+  const isLandscapeTouch = isLandscapeTouchViewport(
+    window.innerWidth,
+    window.innerHeight,
+  );
+  const scale =
+    fullscreenCanvasScale === null || isLandscapeTouch
+      ? viewportScale
+      : Math.min(viewportScale, fullscreenCanvasScale);
 
   app.canvas.style.width = `${INTERNAL_WIDTH * scale}px`;
   app.canvas.style.height = `${INTERNAL_HEIGHT * scale}px`;
@@ -331,18 +342,25 @@ function setupFullscreenToggle(app: Application): void {
 
   const webkitDocument = document as WebkitFullscreenDocument;
   const fullscreenRoot = document.documentElement as WebkitFullscreenElement;
-  const supportsStandardFullscreen = document.fullscreenEnabled
-    && typeof fullscreenRoot.requestFullscreen === 'function';
-  const supportsWebkitFullscreen = typeof fullscreenRoot.webkitRequestFullscreen === 'function';
+  const supportsStandardFullscreen =
+    document.fullscreenEnabled && typeof fullscreenRoot.requestFullscreen === 'function';
+  const supportsWebkitFullscreen =
+    typeof fullscreenRoot.webkitRequestFullscreen === 'function';
   const isAppleMobile = isAppleMobileDevice();
 
   const helpDialog = document.querySelector<HTMLDivElement>('#ios-fullscreen-help');
-  const helpTitle = document.querySelector<HTMLHeadingElement>('#ios-fullscreen-help-title');
+  const helpTitle = document.querySelector<HTMLHeadingElement>(
+    '#ios-fullscreen-help-title',
+  );
   const helpMessage = document.querySelector<HTMLParagraphElement>(
     '#ios-fullscreen-help-message',
   );
-  const helpSteps = document.querySelector<HTMLOListElement>('#ios-fullscreen-help-steps');
-  const helpClose = document.querySelector<HTMLButtonElement>('#ios-fullscreen-help-close');
+  const helpSteps = document.querySelector<HTMLOListElement>(
+    '#ios-fullscreen-help-steps',
+  );
+  const helpClose = document.querySelector<HTMLButtonElement>(
+    '#ios-fullscreen-help-close',
+  );
   const helpOk = document.querySelector<HTMLButtonElement>('#ios-fullscreen-help-ok');
   let helpPreviouslyFocused: HTMLElement | null = null;
 
@@ -355,10 +373,11 @@ function setupFullscreenToggle(app: Application): void {
   const openIosFullscreenHelp = (standalone: boolean): void => {
     if (!helpDialog || !helpTitle || !helpMessage || !helpSteps || !helpOk) return;
 
-    helpPreviouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : button;
-    helpTitle.textContent = standalone ? 'Exit fullscreen on iPhone' : 'Fullscreen on iPhone';
+    helpPreviouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : button;
+    helpTitle.textContent = standalone
+      ? 'Exit fullscreen on iPhone'
+      : 'Fullscreen on iPhone';
     helpMessage.textContent = standalone
       ? 'Swipe up from the bottom edge to close the fullscreen game or switch apps.'
       : 'Safari can open this game fullscreen from your Home Screen.';
@@ -381,7 +400,10 @@ function setupFullscreenToggle(app: Application): void {
     button.classList.toggle('is-fullscreen', isStandalone);
     button.setAttribute('aria-pressed', String(isStandalone));
     button.setAttribute('aria-haspopup', 'dialog');
-    button.setAttribute('aria-label', isStandalone ? 'Exit fullscreen' : 'Enter fullscreen');
+    button.setAttribute(
+      'aria-label',
+      isStandalone ? 'Exit fullscreen' : 'Enter fullscreen',
+    );
     button.title = isStandalone ? 'Exit fullscreen' : 'Enter fullscreen';
     button.addEventListener('click', () => {
       if (!isStandalone) saveIosFullscreenScale(app);
@@ -1614,6 +1636,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       entityLayer.addChild(swampDecoration);
     }
 
+    for (const swordFieldSprite of renderer.swordFieldSprites) {
+      entityLayer.addChild(swordFieldSprite);
+    }
+
     for (const chestDeadEndSprite of renderer.chestDeadEndSprites) {
       entityLayer.addChild(chestDeadEndSprite);
     }
@@ -1655,18 +1681,27 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout.pressurePlates,
         currentLayout.bridges,
         currentLayout.swamps,
+        currentLayout.swordFields,
         currentLayout.chestDeadEnds,
         currentLayout.dirtMask,
         assets,
         app.renderer,
       );
     } catch (error) {
-      console.error('[Main] Failed to rebuild the map after graphics context restoration', error);
+      console.error(
+        '[Main] Failed to rebuild the map after graphics context restoration',
+        error,
+      );
       return;
     }
 
     if (latestServerState) {
       replacementRenderer.syncBridgeStates(latestServerState.bridgeStates, false);
+      replacementRenderer.syncSwordFieldStates(
+        latestServerState.swordFieldStates,
+        latestServerState.tick,
+        false,
+      );
       replacementRenderer.syncChestStates(latestServerState.chestStates, false);
 
       for (const runestoneState of latestServerState.runestones) {
@@ -1721,12 +1756,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     );
     replacementRenderer.setWardenSwampWisdomHints(localPlayerRole === 'warden');
     updateGateSlideAnimations(0);
-    replacementRenderer.updateVisibility(
-      worldContainer.x,
-      worldContainer.y,
-      zoomLevel,
+    replacementRenderer.updateVisibility(worldContainer.x, worldContainer.y, zoomLevel);
+    console.info(
+      '[Main] Rebuilt generated map textures after graphics context restoration',
     );
-    console.info('[Main] Rebuilt generated map textures after graphics context restoration');
   }
 
   let tilemapRecoveryFrame: number | null = null;
@@ -1811,12 +1844,18 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         layout.pressurePlates,
         layout.bridges,
         layout.swamps,
+        layout.swordFields,
         layout.chestDeadEnds,
         layout.dirtMask,
         assets,
         app.renderer,
       );
       tilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
+      tilemapRenderer.syncSwordFieldStates(
+        gameState.swordFieldStates,
+        gameState.tick,
+        false,
+      );
       tilemapRenderer.syncChestStates(gameState.chestStates, false);
       if (cellBoundaryOverlay?.parent === worldContainer) {
         worldContainer.removeChild(cellBoundaryOverlay);
@@ -1949,6 +1988,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       const localPlayerId = net.playerId;
       snapshotBuffer.push(gameState);
       tilemapRenderer?.syncBridgeStates(gameState.bridgeStates, true);
+      tilemapRenderer?.syncSwordFieldStates(
+        gameState.swordFieldStates,
+        gameState.tick,
+        true,
+      );
       tilemapRenderer?.syncChestStates(gameState.chestStates, true);
 
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
@@ -1980,6 +2024,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
               gameState.bridgeStates,
               currentLayout?.swamps,
               currentLayout?.chestDeadEnds,
+              currentLayout?.swordFields,
+              gameState.swordFieldStates,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -2085,6 +2131,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           `[WisdomOrb][Response] Server accepted private swamp ${hint.swampIndex} firm-ground route; remaining=${remainingWisdomOrbs}`,
         );
         tilemapRenderer?.showSwampWisdomHint(hint.swampIndex);
+      } else if (hint.kind === 'sword-field') {
+        wisdomArrow?.hide();
+        tilemapRenderer?.beginSwordFieldLowering(hint.swordFieldIndex);
+        console.info(
+          `[WisdomOrb][Response] Server accepted sword field ${hint.swordFieldIndex}; remaining=${remainingWisdomOrbs}`,
+        );
       } else {
         console.info(
           `[WisdomOrb][Response] Server accepted direction=${hint.direction}; remaining=${remainingWisdomOrbs}`,
@@ -2223,6 +2275,20 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       return;
     }
 
+    if (localPlayerRole === 'warden' && currentLayout && latestServerState) {
+      const swordFieldTarget = findSwordFieldWisdomTarget(
+        currentLayout.swordFields,
+        latestServerState.swordFieldStates,
+        localX,
+        localY,
+        TILE_SIZE,
+      );
+      if (swordFieldTarget) {
+        net.sendUseWisdomOrb();
+        return;
+      }
+    }
+
     if (localPlayerRole === 'warden' && latestServerState) {
       const latchedPlateIds = new Set(
         latestServerState.pressurePlateStates
@@ -2290,10 +2356,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     if (interactPrompt) interactPrompt.style.fill = getInteractPromptColor(role);
     if (!currentMap || !currentLayout) return;
 
-    tilemapRenderer?.setWardenBridgeWisdomHints(
-      currentLayout.bridges,
-      role === 'warden',
-    );
+    tilemapRenderer?.setWardenBridgeWisdomHints(currentLayout.bridges, role === 'warden');
     tilemapRenderer?.setWardenSwampWisdomHints(role === 'warden');
 
     minimap?.destroy();
@@ -2388,6 +2451,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         latestServerState?.bridgeStates,
         currentLayout?.swamps,
         currentLayout?.chestDeadEnds,
+        currentLayout?.swordFields,
+        latestServerState?.swordFieldStates,
       );
       localX = result.x;
       localY = result.y;
@@ -2553,6 +2618,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       let nearestDistSq = Infinity;
       let promptX = 0;
       let promptY = 0;
+      let promptText = '[ E ]';
       const INTERACT_RANGE = 28; // ~1.75 tiles in pixels
       const INTERACT_RANGE_SQ = INTERACT_RANGE * INTERACT_RANGE;
       const localTeamId = latestServerState?.players.find(
@@ -2612,7 +2678,29 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         }
       }
 
+      if (
+        (localPlayerRole === 'warden' ||
+          (localPlayerRole === 'survivor' && localWisdomOrbs > 0)) &&
+        currentLayout &&
+        latestServerState
+      ) {
+        const swordFieldTarget = findSwordFieldWisdomTarget(
+          currentLayout.swordFields,
+          latestServerState.swordFieldStates,
+          localX,
+          localY,
+          TILE_SIZE,
+        );
+        if (swordFieldTarget) {
+          nearestDistSq = 0;
+          promptX = swordFieldTarget.x;
+          promptY = swordFieldTarget.y - 12;
+          promptText = localPlayerRole === 'warden' ? '[ E ]' : '[ Q ]';
+        }
+      }
+
       if (nearestDistSq < Infinity) {
+        if (interactPrompt.text !== promptText) interactPrompt.text = promptText;
         if (!interactPrompt.visible) interactPrompt.visible = true;
         if (interactPrompt.x !== promptX) interactPrompt.x = promptX;
         if (interactPrompt.y !== promptY) interactPrompt.y = promptY;
@@ -2624,11 +2712,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     // ── 6. Pressure plate animations ───────────────────────────────────
     if (tilemapRenderer && latestServerState) {
-      updatePressurePlateAnimations(
-        tilemapRenderer,
-        latestServerState,
-        dtSeconds,
-      );
+      updatePressurePlateAnimations(tilemapRenderer, latestServerState, dtSeconds);
     }
   });
 

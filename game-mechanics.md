@@ -64,9 +64,11 @@ Traps and other hazards can slow players down, but they do not eliminate players
 - Every survivor receives **1 wisdom orb**.
 - Wardens do not receive wisdom orbs because their map already gives them superior navigation information.
 - A wisdom orb is consumed after one use.
-- When used, it privately shows its owner an arrow pointing in the general direction of the maze's center.
+- Away from a nearby obstacle interaction, using one privately shows its owner an arrow pointing in the general direction of the maze's center.
+- At either entrance of a sword field, the `[ Q ]` prompt lets a survivor spend one orb to lower every sword and open the route after a short shared magic animation.
+- Wardens see a red `[ E ]` at the same entrances. Pressing it clears the sword field without spending an orb, and wardens may repeat this at every field they encounter.
 - The arrow does not provide a full route or turn-by-turn directions.
-- Wisdom-orb use is completely private. Other players receive no confirmation that an orb was consumed or what it revealed.
+- Direction and hidden-route reveals are private. World-changing uses such as clearing a sword field are visible to everyone because the obstacle state is shared.
 - Because use is private, a warden can falsely claim to have consumed an orb and use that claim to justify a suggested direction.
 
 ## Warden information and play
@@ -95,7 +97,7 @@ Warden interference should focus on delay, misinformation, and manipulation rath
 ## Intended match flow
 
 1. Three squads spawn in different areas of the labyrinth.
-2. They navigate toward the central hub, using survivors' limited wisdom orbs and potentially encountering locked escape doors.
+2. Every squad's direct generated route toward the central hub contains exactly one sword field. Additional fields may appear elsewhere, but never add a second field to a direct route. Survivors can spend limited wisdom orbs to clear them, while wardens can clear them freely with `E`.
 3. Each squad activates its wardstone.
 4. At the hub, players exchange information about routes, hazards, and possible escape-door locations.
 5. Once all three wardstones are active, the escape doors unlock.

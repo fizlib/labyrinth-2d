@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-08-10 - Warden gate-button interaction and timed gate reset
+Last updated: 2026-08-10 - Per-team sword fields and warden clearing
 
 ## Project Overview
 
@@ -13,7 +13,7 @@ Labyrinth 2D is a multiplayer top-down pixel-art labyrinth game built as a TypeS
 Supabase provides browser authentication and owner-private profile storage. It
 does not participate in the authoritative simulation or WebSocket protocol.
 
-One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, treasure-chest state, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
+One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, treasure-chest state, sword-field state, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
 ## Tech Stack
 
@@ -36,6 +36,7 @@ One room owns one maze instance. The server is authoritative for player state, h
   - one player list
   - one runestone state array
   - one treasure-chest state array
+  - one sword-field state array
   - one portal position selected during room creation
   - one portal activation flag
   - one precomputed hub-distance field for phase 1 wisdom guidance
@@ -71,7 +72,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `ACTIVATE_RUNESTONE` | Request activation of a nearby runestone |
 | `OPEN_CHEST` | Request opening a nearby unopened treasure chest |
 | `PRESS_PRESSURE_PLATE` | Warden-only request to latch a nearby gate button |
-| `USE_WISDOM_ORB` | Spend one orb to request a hub-direction hint |
+| `USE_WISDOM_ORB` | Survivors spend an orb on a nearby reveal/clear or request direction; wardens may use the same proximity request only to clear sword fields |
 | `DEBUG_TELEPORT` | Debug-only teleport helper used by developer tooling |
 
 #### Server -> Client
@@ -85,7 +86,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `ALL_RUNESTONES_ACTIVATED` | Broadcast the existing portal coordinates once all runestones are active |
 | `CHEST_OPENED` | Broadcast a chest's shared opened state and opener |
 | `WISDOM_ORB_GRANTED` | Privately provide a rewarded survivor's post-reward orb count; wardens receive no reward message |
-| `WISDOM_ORB_USED` | Private response to the player who spent an orb, containing the hint direction and remaining orb count |
+| `WISDOM_ORB_USED` | Private accepted-action response containing the result and remaining orb count; warden sword clears leave the count at zero |
 | `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
 | `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
 | `ERROR` | Report room-join or protocol errors |
@@ -125,6 +126,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
 | `bridgeStates` | `BridgeState[]` | Authoritative missing-stone mask for every generated bridge |
 | `chestStates` | `ChestState[]` | Authoritative opened/unopened state for every generated treasure chest |
+| `swordFieldStates` | `SwordFieldState[]` | Authoritative blocking, lowering, and cleared state for every generated sword field |
 | `gateStates` | `GateState[]` | Authoritative open/closed state for every generated gate |
 | `pressurePlateStates` | `PressurePlateState[]` | Authoritative physical-press and warden-latch state for every gate button |
 
@@ -140,6 +142,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Wardens can separately latch nearby buttons with `E`; when a latch completes one side's button requirement, the gate opens for five seconds, resets every associated button, and requires occupied buttons to be released before another activation cycle.
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
 - Directional treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
+- Sword fields preserve the ten small fence/marker colliders from the first editor export. The additional `149×32` central blocker from the second export remains solid through the shake-and-sink sequence and is removed only when the server marks the field cleared.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
 
 ### Runestones and Portal Flow
@@ -154,10 +157,11 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 ### Hidden Roles and Wisdom Orbs
 
 - A full room has `7` survivors and `2` wardens. The wardens occupy different teams, and a stable team-seat assignment preserves that distribution when a disconnected player is replaced.
-- Each survivor starts with `1` wisdom orb; wardens start with `0` and server-side role validation rejects their orb requests.
+- Each survivor starts with `1` wisdom orb; wardens start with `0`. A warden cannot request navigation or private route hints, but can use the shared interaction request to clear a nearby sword field without an orb.
 - Survivors may carry at most `3` wisdom orbs. Opening a nearby unopened chest grants one orb only when the survivor is below that cap. Wardens can instead open and permanently consume a chest without granting an orb to anyone.
 - Roles and wisdom orbs are server-authoritative private room state. They are never included in broadcast `GameState` snapshots.
 - Nearby bridge and swamp route reveals are tracked privately per player. The first orb reveals that obstacle's safe route; later orb uses near the same revealed obstacle return normal hub/portal direction guidance instead of replaying the reveal.
+- Near either entrance of a blocking sword field, a survivor's orb or a warden's unlimited `E` interaction starts a shared `1.2s` lowering sequence. All clients render the sword shake, cyan/gold magic sparkles, sinking, and disappearance from the replicated state.
 - Shared phase-aware guidance lives in `packages/shared/src/navigation.ts`.
 - `computeHubDistanceField()` builds the phase 1 pathfield toward the central hub.
 - `computePortalDistanceField()` builds the phase 2 pathfield toward walkable portal-approach tiles around the blocked portal collider.
@@ -178,11 +182,19 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Opening swaps all clients to the authored `chest01 16` sprite and plays a short blue wisdom-magic burst.
 - Open state persists in `GameState.chestStates`, so late joiners see the correct sprite without replaying the opening effect.
 
+### Sword Fields
+
+- Before other obstacle placement, generation reserves non-overlapping qualifying east-west passages so every team's computed direct spawn-to-hub route contains exactly one sword field. One or more additional deterministic fields are scattered only outside those direct routes. They never overlap spawns, the hub, bridges, swamps, treasure cells, or the portal platform.
+- Survivors with an orb see `[ Q ]` at either still-blocked entrance. Keyboard `Q`, mobile `Q`, and clicking the orb HUD all use the same server-validated request.
+- Wardens instead see a red `[ E ]` and may clear any number of encountered fields with keyboard/mobile `E`; they spend no orb.
+- The server consumes one orb only for survivors, records the lowering start tick, keeps the main collider active for the full animation, then marks the field cleared. Late joiners reconstruct the correct visual phase from the current server tick.
+- Fence, grave, and ground art remain after all forty-one swords disappear, matching the supplied editor layout.
+
 ## Map System
 
 Map generation lives in `packages/shared/src/maps/level1.ts`.
 
-`generateMazeLayout()` returns the tile map, spawn points, gate and bridge placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable collapsed masks live in `GameState`.
+`generateMazeLayout()` returns the tile map, spawn points, gate, bridge, swamp, sword-field, and chest placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable obstacle state lives in `GameState`.
 
 ### Core Layout
 
@@ -345,6 +357,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - follows the player briefly while keeping the server-returned direction fixed
 - Runestone/chest interaction prompt
   - world-space `[E]` prompt shown above nearby eligible inactive runestones, unopened treasure chests, or unlatched gate buttons for wardens
+  - switches to `[ Q ]` at either entrance of a blocking sword field for survivors carrying an orb
+  - wardens see a red `[ E ]` at blocking sword-field entrances and can clear them without an orb
   - the prompt is white for survivors and red for wardens across all supported interactions
 
 ### Input Handling
@@ -356,6 +370,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Chest interaction: `E` or the mobile `E` button while near an unopened chest; survivors must carry fewer than three wisdom orbs, while wardens destroy the chest without a reward
 - Gate-button interaction: wardens can press `E` or the mobile `E` button near an unlatched button to latch it until that gate's next timed reset
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
+- Sword-field clear: survivors use the wisdom-orb controls while `[ Q ]` is visible; wardens use `E` or the mobile `E` button while their red `[ E ]` is visible
 - Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.
 - Debug-only tools can enable scroll zoom, zoom toggling, and click teleport
 - The debug player menu privately fetches a selected player's current role and can authoritatively change it. The server updates that seat and privately rebuilds the affected player's role-specific HUD and inventory.
@@ -372,6 +387,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - procedural labyrinth generation, gated layout stamping, spawn selection, portal placement
 - `packages/shared/src/navigation.ts`
   - hub-distance fields and wisdom-orb guidance
+- `packages/shared/src/sword-field.ts`
+  - authored colliders, entrance targeting, and replicated sword-field state
 
 ### Server Package
 

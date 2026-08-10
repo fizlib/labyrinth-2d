@@ -50,6 +50,8 @@ import {
   getBridgeRepairCircleBounds,
   findBridgeWisdomHintTarget,
   findSwampWisdomHintTarget,
+  findSwordFieldWisdomTarget,
+  SWORD_FIELD_LOWER_DURATION_MS,
   getBridgeCollapseMask,
   getBridgeRepairCollapsedMask,
   getBridgeBankReturnPosition,
@@ -65,6 +67,8 @@ import {
   type BridgePlacement,
   type ChestDeadEndPlacement,
   type SwampPlacement,
+  type SwordFieldPlacement,
+  type SwordFieldState,
   type BridgeEntrySide,
   type BridgeState,
   type ChestState,
@@ -268,6 +272,12 @@ export class Room {
   /** Authored walkable swamps from deterministic map generation. */
   private readonly swamps: SwampPlacement[];
 
+  /** Authored survivor-orb/warden-interaction barriers from map generation. */
+  private readonly swordFields: SwordFieldPlacement[];
+
+  /** Shared lowering/cleared state for every sword barrier. */
+  private readonly swordFieldStates: SwordFieldState[];
+
   /** Authored collidable treasure prefabs in south-opening dead ends. */
   private readonly chestDeadEnds: ChestDeadEndPlacement[];
 
@@ -327,6 +337,12 @@ export class Room {
     this.pressurePlates = layout.pressurePlates;
     this.bridges = layout.bridges;
     this.swamps = layout.swamps;
+    this.swordFields = layout.swordFields;
+    this.swordFieldStates = this.swordFields.map((_, swordFieldIndex) => ({
+      swordFieldIndex,
+      loweringStartedTick: null,
+      cleared: false,
+    }));
     this.chestDeadEnds = layout.chestDeadEnds;
     this.chestStates = this.chestDeadEnds.map((_, chestIndex) => ({
       chestIndex,
@@ -384,6 +400,7 @@ export class Room {
       pressurePlateStates: this.pressurePlateStates,
       bridgeStates: this.bridgeStates,
       chestStates: this.chestStates,
+      swordFieldStates: this.swordFieldStates,
     };
     console.info(
       `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
@@ -395,7 +412,7 @@ export class Room {
       );
     }
     console.info(
-      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Bridges: ${this.bridges.length}, Swamps: ${this.swamps.length}`,
+      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Bridges: ${this.bridges.length}, Swamps: ${this.swamps.length}, Sword fields: ${this.swordFields.length}`,
     );
     if (this.portalPosition) {
       console.info(
@@ -876,6 +893,7 @@ export class Room {
 
   // ── Game Loop ─────────────────────────────────────────────────────────
 
+  /** Handle survivor wisdom use or a warden's orb-free nearby sword clear. */
   handleUseWisdomOrb(playerId: string): void {
     console.info(`[Room:${this.id}][WisdomOrb] USE request from ${playerId}`);
 
@@ -886,21 +904,59 @@ export class Room {
       );
       return;
     }
+    const ws = this.sockets.get(playerId);
+    if (!ws) {
+      console.warn(
+        `[Room:${this.id}][WisdomOrb] REJECTED: socket not found for player ${playerId}`,
+      );
+      return;
+    }
+
+    const swordFieldTarget = findSwordFieldWisdomTarget(
+      this.swordFields,
+      this.swordFieldStates,
+      player.x,
+      player.y,
+      this.map.tileSize,
+    );
+    if (swordFieldTarget) {
+      const swordFieldState = this.swordFieldStates[swordFieldTarget.swordFieldIndex];
+      if (!swordFieldState) return;
+      if (player.role === 'survivor' && player.wisdomOrbs <= 0) {
+        console.warn(
+          `[Room:${this.id}][SwordField] REJECTED: survivor ${playerId} has 0 orbs remaining`,
+        );
+        return;
+      }
+
+      if (player.role === 'survivor') player.wisdomOrbs--;
+      swordFieldState.loweringStartedTick = this.state.tick;
+      const orbUsedMsg: WisdomOrbUsedMessage = {
+        type: MessageType.WisdomOrbUsed,
+        hint: {
+          kind: 'sword-field',
+          swordFieldIndex: swordFieldTarget.swordFieldIndex,
+        },
+        remainingWisdomOrbs: player.wisdomOrbs,
+      };
+      this.send(ws, orbUsedMsg);
+      console.info(
+        player.role === 'warden'
+          ? `[Room:${this.id}][SwordField] SUCCESS: warden ${playerId} lowered sword field ${swordFieldTarget.swordFieldIndex} without consuming an orb`
+          : `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} began lowering sword field ${swordFieldTarget.swordFieldIndex} (${player.wisdomOrbs} remaining)`,
+      );
+      return;
+    }
+
     if (player.role === 'warden') {
-      console.warn(`[Room:${this.id}][WisdomOrb] REJECTED: ${playerId} is a warden`);
+      console.warn(
+        `[Room:${this.id}][WisdomOrb] REJECTED: ${playerId} is a warden with no nearby sword field`,
+      );
       return;
     }
     if (player.wisdomOrbs <= 0) {
       console.warn(
         `[Room:${this.id}][WisdomOrb] REJECTED: player ${playerId} has 0 orbs remaining`,
-      );
-      return;
-    }
-
-    const ws = this.sockets.get(playerId);
-    if (!ws) {
-      console.warn(
-        `[Room:${this.id}][WisdomOrb] REJECTED: socket not found for player ${playerId}`,
       );
       return;
     }
@@ -1042,6 +1098,7 @@ export class Room {
 
   private tick(): void {
     this.state.tick++;
+    this.advanceSwordFields();
 
     for (const player of this.state.players) {
       const queue = this.inputQueues.get(player.id);
@@ -1066,6 +1123,8 @@ export class Room {
           this.bridgeStates,
           this.swamps,
           this.chestDeadEnds,
+          this.swordFields,
+          this.swordFieldStates,
         );
         player.x = result.x;
         player.y = result.y;
@@ -1104,6 +1163,18 @@ export class Room {
       gameState: this.cloneState(),
     };
     this.broadcast(update);
+  }
+
+  private advanceSwordFields(): void {
+    for (const state of this.swordFieldStates) {
+      if (state.cleared || state.loweringStartedTick === null) continue;
+      const elapsedMs = (this.state.tick - state.loweringStartedTick) * SERVER_TICK_MS;
+      if (elapsedMs < SWORD_FIELD_LOWER_DURATION_MS) continue;
+      state.cleared = true;
+      console.info(
+        `[Room:${this.id}] Sword field ${state.swordFieldIndex} lowered; central collider removed`,
+      );
+    }
   }
 
   private getPlayerFeetCenter(player: Pick<PlayerInfo, 'x' | 'y'>): {
@@ -1728,6 +1799,7 @@ export class Room {
       })),
       bridgeStates: this.bridgeStates.map((bridgeState) => ({ ...bridgeState })),
       chestStates: this.chestStates.map((chestState) => ({ ...chestState })),
+      swordFieldStates: this.swordFieldStates.map((state) => ({ ...state })),
     };
   }
 

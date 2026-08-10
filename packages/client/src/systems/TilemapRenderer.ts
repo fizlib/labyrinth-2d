@@ -21,6 +21,8 @@ import type {
   PressurePlateInfo,
   BridgePlacement,
   SwampPlacement,
+  SwordFieldPlacement,
+  SwordFieldState,
   ChestDeadEndPlacement,
   ChestState,
   BridgeEntrySide,
@@ -52,16 +54,14 @@ import {
 import { addBridgeObstacles, type BridgeObstacleVisual } from './BridgeObstacle';
 import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
 import { addSwampObstacles, type SwampObstacleVisual } from './SwampObstacle';
-import {
-  addChestDeadEnds,
-  type ChestDeadEndVisual,
-} from './ChestDeadEnd';
+import { addSwordFields, type SwordFieldVisual } from './SwordField';
+import { addChestDeadEnds, type ChestDeadEndVisual } from './ChestDeadEnd';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
 export interface RunestoneSpriteData {
   sprite: Sprite;
-  index: number;  // 0, 1, or 2
+  index: number; // 0, 1, or 2
   tileX: number;
   tileY: number;
   activated: boolean;
@@ -109,16 +109,18 @@ function bridgeHidesForestPlacement(
   return bridges.some((bridge) => {
     const anchorX = bridge.tileX * tileSize;
     const anchorY = bridge.tileY * tileSize;
-    return BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES.some((hidden) =>
-      placement.assetId === hidden.assetId &&
-      placement.x === anchorX + hidden.x * scale &&
-      placement.y === anchorY + hidden.y * scale &&
-      placement.width === hidden.w * scale &&
-      placement.height === hidden.h * scale &&
-      placement.zIndex === hidden.z &&
-      placement.direction === hidden.direction &&
-      placement.flipX === hidden.flipX &&
-      placement.flipY === hidden.flipY);
+    return BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES.some(
+      (hidden) =>
+        placement.assetId === hidden.assetId &&
+        placement.x === anchorX + hidden.x * scale &&
+        placement.y === anchorY + hidden.y * scale &&
+        placement.width === hidden.w * scale &&
+        placement.height === hidden.h * scale &&
+        placement.zIndex === hidden.z &&
+        placement.direction === hidden.direction &&
+        placement.flipX === hidden.flipX &&
+        placement.flipY === hidden.flipY,
+    );
   });
 }
 
@@ -237,7 +239,8 @@ function getForestGroundTexture(assets: GameAssets): Texture {
 }
 
 function usesGroundBackgroundTile(tileId: number): boolean {
-  return isForestWallTileId(tileId) ||
+  return (
+    isForestWallTileId(tileId) ||
     tileId === TILE_FLOOR ||
     tileId === TILE_FLOOR_SHADOW ||
     tileId === TILE_TREE ||
@@ -246,7 +249,8 @@ function usesGroundBackgroundTile(tileId: number): boolean {
     tileId === TILE_RUNESTONE_3 ||
     tileId === TILE_GATE_HORIZONTAL ||
     tileId === TILE_GATE_VERTICAL ||
-    tileId === TILE_PRESSURE_PLATE;
+    tileId === TILE_PRESSURE_PLATE
+  );
 }
 
 function isGateTileId(tileId: number): boolean {
@@ -254,16 +258,17 @@ function isGateTileId(tileId: number): boolean {
 }
 
 function usesGroundShadowOverlay(tileId: number): boolean {
-  return tileId === TILE_FLOOR ||
+  return (
+    tileId === TILE_FLOOR ||
     tileId === TILE_FLOOR_SHADOW ||
     tileId === TILE_GATE_HORIZONTAL ||
     tileId === TILE_GATE_VERTICAL ||
-    tileId === TILE_PRESSURE_PLATE;
+    tileId === TILE_PRESSURE_PLATE
+  );
 }
 
 function isSouthGroundShadowCasterTileId(tileId: number): boolean {
-  return tileId === TILE_GATE_HORIZONTAL ||
-    tileId === TILE_GATE_VERTICAL;
+  return tileId === TILE_GATE_HORIZONTAL || tileId === TILE_GATE_VERTICAL;
 }
 
 function isEastGroundShadowCasterTileId(tileId: number): boolean {
@@ -337,7 +342,14 @@ function getGroundTexture(
   assets: GameAssets,
 ): Texture {
   if (dirtMask[y * map.width + x] === 1) {
-    return getDirtTexture(x, y, dirtMask, map.width, map.height, assets.forestPathTextures);
+    return getDirtTexture(
+      x,
+      y,
+      dirtMask,
+      map.width,
+      map.height,
+      assets.forestPathTextures,
+    );
   }
 
   const tileId = map.data[y * map.width + x];
@@ -381,6 +393,10 @@ export class TilemapRenderer {
   readonly swampForegroundSprites: Sprite[];
   /** Firm-ground route reveals in generated swamp-index order. */
   readonly swampVisuals: SwampObstacleVisual[];
+  /** Fences, graves, swords, and magic that Y-sort with players. */
+  readonly swordFieldSprites: Container[];
+  /** Stateful sword lowering visuals in generated placement order. */
+  readonly swordFieldVisuals: SwordFieldVisual[];
   /** Authored tree backing and collidable props in treasure dead ends. */
   readonly chestDeadEndSprites: Container[];
   /** Stateful closed/open chest visuals in generated placement order. */
@@ -397,6 +413,7 @@ export class TilemapRenderer {
     pressurePlates: PressurePlateInfo[],
     bridges: BridgePlacement[],
     swamps: SwampPlacement[],
+    swordFields: SwordFieldPlacement[],
     chestDeadEnds: ChestDeadEndPlacement[],
     dirtMask: Uint8Array,
     assets: GameAssets,
@@ -446,12 +463,13 @@ export class TilemapRenderer {
             // ── Background tile ──────────────────────────────────
             if (usesGroundBackgroundTile(tileId)) {
               const forestTile = isForestWallTileId(tileId);
-              const forestGroundInUnderlayLayer = forestTile &&
-                getForestGroundZIndex(x, y, map) > 0;
+              const forestGroundInUnderlayLayer =
+                forestTile && getForestGroundZIndex(x, y, map) > 0;
               const underlayAssetId = getForestGroundUnderlayAssetId(x, y, map);
-              const underlayTexture = underlayAssetId === null
-                ? undefined
-                : getForestStyleTexture(underlayAssetId, assets);
+              const underlayTexture =
+                underlayAssetId === null
+                  ? undefined
+                  : getForestStyleTexture(underlayAssetId, assets);
               if (underlayTexture) {
                 const underlay = new Sprite(underlayTexture);
                 underlay.x = localX;
@@ -572,7 +590,7 @@ export class TilemapRenderer {
             target: forestUnderlayChunk,
             frame: chunkFrame,
             resolution: 1,
-            antialias: false
+            antialias: false,
           });
           texture.source.style.scaleMode = 'nearest';
           texture.source.style.update();
@@ -607,7 +625,7 @@ export class TilemapRenderer {
             target: shadowChunk,
             frame: shadowFrame,
             resolution: 1,
-            antialias: false
+            antialias: false,
           });
           tex.source.style.scaleMode = 'nearest';
           tex.source.style.update();
@@ -655,11 +673,12 @@ export class TilemapRenderer {
           const localX = (x - startX) * ts;
 
           // Keep simple gates visible when the full front-gate atlas is absent.
-          const gateTexture = tileId === TILE_GATE_VERTICAL
-            ? assets.gateVerticalTexture
-            : tileId === TILE_GATE_HORIZONTAL && renderSimpleHorizontalGates
-              ? assets.gateHorizontalTexture
-              : null;
+          const gateTexture =
+            tileId === TILE_GATE_VERTICAL
+              ? assets.gateVerticalTexture
+              : tileId === TILE_GATE_HORIZONTAL && renderSimpleHorizontalGates
+                ? assets.gateHorizontalTexture
+                : null;
           if (gateTexture) {
             const gateSprite = new Sprite(gateTexture);
             gateSprite.x = localX;
@@ -669,7 +688,6 @@ export class TilemapRenderer {
             northRowContainer.addChild(gateSprite);
             northHasContent = true;
           }
-
         }
 
         // Add this row's exact template pieces, preserving the JSON z-order.
@@ -683,7 +701,8 @@ export class TilemapRenderer {
           const texture = getForestStyleTexture(placement.assetId, assets);
           if (!texture) continue;
 
-          const groundDetail = placement.direction === 'ground' || placement.direction === 'terrain';
+          const groundDetail =
+            placement.direction === 'ground' || placement.direction === 'terrain';
           const northWall = placement.direction === 'north';
           const module = new Sprite(texture);
           module.anchor.set(0.5);
@@ -774,6 +793,14 @@ export class TilemapRenderer {
     );
     this.swampForegroundSprites = swampRender.foregroundSprites;
     this.swampVisuals = swampRender.visuals;
+    const swordFieldRender = addSwordFields(
+      swordFields,
+      ts,
+      assets.swordFieldTextures,
+      this.groundDetailLayer,
+    );
+    this.swordFieldSprites = swordFieldRender.entities;
+    this.swordFieldVisuals = swordFieldRender.visuals;
     const chestRender = addChestDeadEnds(
       chestDeadEnds,
       ts,
@@ -790,9 +817,12 @@ export class TilemapRenderer {
         const tileId = map.data[y * map.width + x];
 
         if (tileId === TILE_TREE) {
-          const treeTex = assets.forestTreeTextures[positionHash(x, y, 23) % assets.forestTreeTextures.length];
+          const treeTex =
+            assets.forestTreeTextures[
+              positionHash(x, y, 23) % assets.forestTreeTextures.length
+            ];
           const treeHeight = 112;
-          const treeWidth = Math.round(treeTex.width * treeHeight / treeTex.height);
+          const treeWidth = Math.round((treeTex.width * treeHeight) / treeTex.height);
           const treeShadow = new Sprite(assets.forestShadowTexture);
           treeShadow.anchor.set(0.5);
           treeShadow.x = x * ts + ts / 2;
@@ -812,8 +842,13 @@ export class TilemapRenderer {
           this.treeSprites.push(treeSprite);
         }
 
-        if (tileId === TILE_RUNESTONE_1 || tileId === TILE_RUNESTONE_2 || tileId === TILE_RUNESTONE_3) {
-          const rsIdx = tileId === TILE_RUNESTONE_1 ? 0 : tileId === TILE_RUNESTONE_2 ? 1 : 2;
+        if (
+          tileId === TILE_RUNESTONE_1 ||
+          tileId === TILE_RUNESTONE_2 ||
+          tileId === TILE_RUNESTONE_3
+        ) {
+          const rsIdx =
+            tileId === TILE_RUNESTONE_1 ? 0 : tileId === TILE_RUNESTONE_2 ? 1 : 2;
           const rsTex = assets.runestoneTextures[rsIdx][0]; // start inactive
           const rsSprite = new Sprite(rsTex);
           rsSprite.anchor.set(0.5, 1.0);
@@ -873,7 +908,9 @@ export class TilemapRenderer {
     if (assets.frontGateTextures) {
       for (const gate of gates) {
         if (gate.orientation !== 'horizontal') continue;
-        this.gateSprites.push(createFrontGateSprite(gate, assets.frontGateTextures, renderer, ts));
+        this.gateSprites.push(
+          createFrontGateSprite(gate, assets.frontGateTextures, renderer, ts),
+        );
       }
     }
   }
@@ -900,13 +937,34 @@ export class TilemapRenderer {
   updateBridgeAnimations(dt: number): void {
     for (const bridge of this.bridgeVisuals) bridge.update(dt);
     for (const swamp of this.swampVisuals) swamp.update(dt);
+    for (const swordField of this.swordFieldVisuals) swordField.update(dt);
     for (const chest of this.chestDeadEndVisuals) chest.update(dt);
+  }
+
+  /** Apply the authoritative lowering/cleared state for every sword field. */
+  syncSwordFieldStates(
+    states: readonly SwordFieldState[],
+    currentTick: number,
+    animate: boolean,
+  ): void {
+    for (const visual of this.swordFieldVisuals) {
+      const state = states.find(
+        (candidate) => candidate.swordFieldIndex === visual.index,
+      );
+      visual.syncState(state, currentTick, animate);
+    }
+  }
+
+  beginSwordFieldLowering(swordFieldIndex: number): void {
+    this.swordFieldVisuals[swordFieldIndex]?.playFromStart();
   }
 
   /** Apply authoritative opened state to every deterministic treasure chest. */
   syncChestStates(chestStates: readonly ChestState[], animate: boolean): void {
     for (const visual of this.chestDeadEndVisuals) {
-      const state = chestStates.find((candidate) => candidate.chestIndex === visual.index);
+      const state = chestStates.find(
+        (candidate) => candidate.chestIndex === visual.index,
+      );
       visual.syncOpened(state?.opened ?? false, animate);
     }
   }
@@ -963,8 +1021,10 @@ export class TilemapRenderer {
     for (let i = 0; i < this.allChunks.length; i++) {
       const chunk = this.allChunks[i];
       const isVisible =
-        chunk.worldRight >= viewL && chunk.worldLeft <= viewR &&
-        chunk.worldBottom >= viewT && chunk.worldTop <= viewB;
+        chunk.worldRight >= viewL &&
+        chunk.worldLeft <= viewR &&
+        chunk.worldBottom >= viewT &&
+        chunk.worldTop <= viewB;
       if (chunk.isVisible !== isVisible) {
         chunk.isVisible = isVisible;
         chunk.container.visible = isVisible;
@@ -1002,6 +1062,11 @@ export class TilemapRenderer {
       sprite.destroy();
     }
 
+    for (const sprite of this.swordFieldSprites) {
+      sprite.parent?.removeChild(sprite);
+      sprite.destroy({ children: true });
+    }
+
     for (const sprite of this.chestDeadEndSprites) {
       sprite.parent?.removeChild(sprite);
       sprite.destroy({ children: true });
@@ -1028,6 +1093,8 @@ export class TilemapRenderer {
     this.treeSprites.length = 0;
     this.swampForegroundSprites.length = 0;
     this.swampVisuals.length = 0;
+    this.swordFieldSprites.length = 0;
+    this.swordFieldVisuals.length = 0;
     this.chestDeadEndSprites.length = 0;
     this.chestDeadEndVisuals.length = 0;
     this.runestoneSprites.length = 0;

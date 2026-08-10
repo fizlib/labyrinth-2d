@@ -94,6 +94,17 @@ export interface SwampPlacement {
   tileY: number;
 }
 
+/** Authored sword barrier spanning one open east-west wall passage. */
+export interface SwordFieldPlacement {
+  /** Cell immediately west of the blocked passage. */
+  westCellX: number;
+  /** Shared cell row. */
+  cellY: number;
+  /** Top-left tile of the 12×6 authored sword-field composition. */
+  tileX: number;
+  tileY: number;
+}
+
 /** Authored treasure-cell prefab placed in a maze dead end. */
 export type ChestCount = 1 | 2 | 3;
 export type ChestSlot = 0 | 1 | 2;
@@ -126,6 +137,8 @@ export interface GeneratedMazeLayout {
   bridges: BridgePlacement[];
   /** Walkable swamps placed in qualifying horizontal passages. */
   swamps: SwampPlacement[];
+  /** Role-interactive sword barriers placed in qualifying horizontal passages. */
+  swordFields: SwordFieldPlacement[];
   /** Independently openable treasure instances placed in every maze dead end. */
   chestDeadEnds: ChestDeadEndPlacement[];
   /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
@@ -218,7 +231,10 @@ export interface HubTileBounds {
   bottom: number;
 }
 
-export function getHubTileBounds(width: number = MAP_WIDTH, height: number = MAP_HEIGHT): HubTileBounds {
+export function getHubTileBounds(
+  width: number = MAP_WIDTH,
+  height: number = MAP_HEIGHT,
+): HubTileBounds {
   const left = Math.floor((width - HUB_SIZE) / 2);
   const top = Math.floor((height - HUB_SIZE) / 2);
   return {
@@ -234,7 +250,8 @@ export function isGateTileId(tile: number): boolean {
 }
 
 export function isSolidTileId(tile: number): boolean {
-  return tile === TILE_WALL_FACE ||
+  return (
+    tile === TILE_WALL_FACE ||
     tile === TILE_WALL_TOP ||
     tile === TILE_WALL_INTERIOR ||
     tile === TILE_WALL_SIDE_LEFT ||
@@ -249,7 +266,8 @@ export function isSolidTileId(tile: number): boolean {
     tile === TILE_RUNESTONE_1 ||
     tile === TILE_RUNESTONE_2 ||
     tile === TILE_RUNESTONE_3 ||
-    isGateTileId(tile);
+    isGateTileId(tile)
+  );
 }
 
 // ── Seeded PRNG (mulberry32) ────────────────────────────────────────────────
@@ -268,8 +286,8 @@ function mulberry32(seed: number): () => number {
 
 const DIRS = [
   { dx: 0, dy: -1 }, // north
-  { dx: 1, dy: 0 },  // east
-  { dx: 0, dy: 1 },  // south
+  { dx: 1, dy: 0 }, // east
+  { dx: 0, dy: 1 }, // south
   { dx: -1, dy: 0 }, // west
 ] as const;
 
@@ -299,7 +317,13 @@ function carveCell(data: number[], cx: number, cy: number): void {
   }
 }
 
-function carvePassage(data: number[], cx1: number, cy1: number, cx2: number, cy2: number): void {
+function carvePassage(
+  data: number[],
+  cx1: number,
+  cy1: number,
+  cx2: number,
+  cy2: number,
+): void {
   const { tx: tx1, ty: ty1 } = cellToTile(cx1, cy1);
   const { tx: tx2, ty: ty2 } = cellToTile(cx2, cy2);
 
@@ -331,7 +355,12 @@ function getHubCells(hubTileX: number, hubTileY: number, hubSize: number): Set<s
       const cellBottom = ty + CELL_SIZE - 1;
       const hubRight = hubTileX + hubSize - 1;
       const hubBottom = hubTileY + hubSize - 1;
-      if (tx <= hubRight && cellRight >= hubTileX && ty <= hubBottom && cellBottom >= hubTileY) {
+      if (
+        tx <= hubRight &&
+        cellRight >= hubTileX &&
+        ty <= hubBottom &&
+        cellBottom >= hubTileY
+      ) {
         cells.add(`${cx},${cy}`);
       }
     }
@@ -388,7 +417,13 @@ function generateMazeData(seed: number): number[] {
     for (const dir of DIRS) {
       const nx = cx + dir.dx;
       const ny = cy + dir.dy;
-      if (nx >= 0 && nx < GRID_CELLS && ny >= 0 && ny < GRID_CELLS && !visited[ny * GRID_CELLS + nx]) {
+      if (
+        nx >= 0 &&
+        nx < GRID_CELLS &&
+        ny >= 0 &&
+        ny < GRID_CELLS &&
+        !visited[ny * GRID_CELLS + nx]
+      ) {
         neighbors.push({ cx: nx, cy: ny });
       }
     }
@@ -531,7 +566,6 @@ function generateMazeData(seed: number): number[] {
 
       // If this tile is solid rock, but the tile directly south is walkable floor
       if (snapshot[thisIdx] === TILE_WALL_INTERIOR && snapshot[belowIdx] === TILE_FLOOR) {
-
         data[thisIdx] = TILE_WALL_FACE; // Base of the wall face
 
         // Extend the face upwards for a chunky 2-tile high appearance
@@ -613,7 +647,7 @@ function generateMazeData(seed: number): number[] {
 
     // 3 runestones in a semi-circle in front of (below) the tree
     data[(hubCy + 3) * MAP_WIDTH + (hubCx - 6)] = TILE_RUNESTONE_1; // obelisk — left
-    data[(hubCy + 4) * MAP_WIDTH + hubCx]       = TILE_RUNESTONE_2; // shrine  — center
+    data[(hubCy + 4) * MAP_WIDTH + hubCx] = TILE_RUNESTONE_2; // shrine  — center
     data[(hubCy + 3) * MAP_WIDTH + (hubCx + 6)] = TILE_RUNESTONE_3; // jagged  — right
   }
 
@@ -636,6 +670,11 @@ const SWAMP_DENSITY = 0.12;
 const MIN_SWAMPS = 4;
 const MAX_SWAMPS = 10;
 const SWAMP_RANDOM_SALT = 0x2c1b3c6d;
+// Keeps seed 44's editor fixture at the authored passage between cells (5,10) and (6,10).
+const SWORD_FIELD_RANDOM_SALT = 0x11;
+const SWORD_FIELD_DENSITY = 0.05;
+const MIN_EXTRA_SWORD_FIELDS = 1;
+const MAX_EXTRA_SWORD_FIELDS = 3;
 const CHEST_RANDOM_SALT = 0x3c6ef017;
 const CHEST_DEAD_END_SELECTION_SALT = 0x9e3779b9;
 export const CHEST_DEAD_END_DENSITY = 0.6;
@@ -650,8 +689,18 @@ function isWalkableTileId(tile: number): boolean {
 function spawnPointToCell(spawnPoint: SpawnPoint): CellCoord {
   return {
     cx: Math.round((spawnPoint.x - Math.floor(CELL_SIZE / 2) - WALL_WIDTH) / CELL_STEP_X),
-    cy: Math.round((spawnPoint.y - Math.floor(CELL_SIZE / 2) - WALL_HEIGHT) / CELL_STEP_Y),
+    cy: Math.round(
+      (spawnPoint.y - Math.floor(CELL_SIZE / 2) - WALL_HEIGHT) / CELL_STEP_Y,
+    ),
   };
+}
+
+function occupySwordFieldCells(
+  occupiedCells: Set<string>,
+  swordField: Pick<SwordFieldPlacement, 'westCellX' | 'cellY'>,
+): void {
+  occupiedCells.add(`${swordField.westCellX},${swordField.cellY}`);
+  occupiedCells.add(`${swordField.westCellX + 1},${swordField.cellY}`);
 }
 
 function findSafeSpawnPoint(data: number[], requested: SpawnPoint): SpawnPoint {
@@ -673,9 +722,10 @@ function findSafeSpawnPoint(data: number[], requested: SpawnPoint): SpawnPoint {
 
   for (const candidate of candidates) {
     const feetTile = data[candidate.y * MAP_WIDTH + candidate.x];
-    const bodyTile = candidate.y > 0
-      ? data[(candidate.y - 1) * MAP_WIDTH + candidate.x]
-      : TILE_WALL_INTERIOR;
+    const bodyTile =
+      candidate.y > 0
+        ? data[(candidate.y - 1) * MAP_WIDTH + candidate.x]
+        : TILE_WALL_INTERIOR;
     if (isWalkableTileId(feetTile) && isWalkableTileId(bodyTile)) {
       return { x: candidate.x, y: candidate.y };
     }
@@ -697,7 +747,11 @@ function findSafeSpawnPoint(data: number[], requested: SpawnPoint): SpawnPoint {
   return closest ?? requested;
 }
 
-function getGateOrientationForCell(data: number[], cx: number, cy: number): GateOrientation | null {
+function getGateOrientationForCell(
+  data: number[],
+  cx: number,
+  cy: number,
+): GateOrientation | null {
   const northOpen = cy > 0 && areCellsConnected(data, cx, cy, cx, cy - 1);
   const eastOpen = cx < GRID_CELLS - 1 && areCellsConnected(data, cx, cy, cx + 1, cy);
   const southOpen = cy < GRID_CELLS - 1 && areCellsConnected(data, cx, cy, cx, cy + 1);
@@ -741,7 +795,8 @@ function findPathToHub(
     for (const dir of DIRS) {
       const nextCx = current.cx + dir.dx;
       const nextCy = current.cy + dir.dy;
-      if (nextCx < 0 || nextCx >= GRID_CELLS || nextCy < 0 || nextCy >= GRID_CELLS) continue;
+      if (nextCx < 0 || nextCx >= GRID_CELLS || nextCy < 0 || nextCy >= GRID_CELLS)
+        continue;
       if (!areCellsConnected(data, current.cx, current.cy, nextCx, nextCy)) continue;
 
       const nextKey = `${nextCx},${nextCy}`;
@@ -756,7 +811,13 @@ function findPathToHub(
   return null;
 }
 
-function createGatePlacement(teamIndex: number, cellX: number, cellY: number, orientation: GateOrientation, spawnDirection: GateSpawnDirection): GatePlacement {
+function createGatePlacement(
+  teamIndex: number,
+  cellX: number,
+  cellY: number,
+  orientation: GateOrientation,
+  spawnDirection: GateSpawnDirection,
+): GatePlacement {
   const { tx, ty } = cellToTile(cellX, cellY);
 
   if (orientation === 'horizontal') {
@@ -824,7 +885,10 @@ function stampGateDirtBand(dirtMask: Uint8Array, gate: GatePlacement): void {
   stampDirtRect(dirtMask, gate.tileX - 1, gate.tileY, 3, CELL_SIZE);
 }
 
-function computeGatePlacements(data: number[], spawnPoints: SpawnPoint[]): GatePlacement[] {
+function computeGatePlacements(
+  data: number[],
+  spawnPoints: SpawnPoint[],
+): GatePlacement[] {
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
   const usedCells = new Set<string>();
@@ -846,9 +910,12 @@ function computeGatePlacements(data: number[], spawnPoints: SpawnPoint[]): GateP
       // Determine spawn direction: the previous cell in the path (closer to spawn)
       // tells us which side of the gate the spawn is on.
       const prevCell = pathToHub[i - 1];
-      const spawnDirection: GateSpawnDirection = prevCell.cy < cell.cy ? 'north' : 'south';
+      const spawnDirection: GateSpawnDirection =
+        prevCell.cy < cell.cy ? 'north' : 'south';
 
-      gates.push(createGatePlacement(teamIndex, cell.cx, cell.cy, orientation, spawnDirection));
+      gates.push(
+        createGatePlacement(teamIndex, cell.cx, cell.cy, orientation, spawnDirection),
+      );
       usedCells.add(cellKey);
       break;
     }
@@ -942,6 +1009,7 @@ function computeBridgePlacements(
   data: number[],
   spawnPoints: SpawnPoint[],
   seed: number,
+  reservedSwordFields: readonly SwordFieldPlacement[] = [],
 ): BridgePlacement[] {
   type BridgeCandidate = Omit<BridgePlacement, 'safeTileMask'>;
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
@@ -952,6 +1020,10 @@ function computeBridgePlacements(
       return `${cell.cx},${cell.cy}`;
     }),
   );
+  const reservedCells = new Set<string>();
+  for (const swordField of reservedSwordFields) {
+    occupySwordFieldCells(reservedCells, swordField);
+  }
   const candidates: BridgeCandidate[] = [];
 
   for (let northCellY = 0; northCellY < GRID_CELLS - 1; northCellY++) {
@@ -960,6 +1032,7 @@ function computeBridgePlacements(
       const southKey = `${cellX},${northCellY + 1}`;
       if (hubCells.has(northKey) || hubCells.has(southKey)) continue;
       if (spawnCells.has(northKey) || spawnCells.has(southKey)) continue;
+      if (reservedCells.has(northKey) || reservedCells.has(southKey)) continue;
       if (!isEmptyObstacleCell(data, cellX, northCellY)) continue;
       if (!isEmptyObstacleCell(data, cellX, northCellY + 1)) continue;
       if (!areCellsConnected(data, cellX, northCellY, cellX, northCellY + 1)) continue;
@@ -1024,7 +1097,11 @@ function supportsSwampPassage(data: number[], westCellX: number, cellY: number):
   return true;
 }
 
-function supportsSwampInteriorCell(data: number[], cellX: number, cellY: number): boolean {
+function supportsSwampInteriorCell(
+  data: number[],
+  cellX: number,
+  cellY: number,
+): boolean {
   const { tx, ty } = cellToTile(cellX, cellY);
 
   for (let dx = 0; dx < CELL_SIZE; dx++) {
@@ -1063,6 +1140,7 @@ function computeSwampPlacements(
   spawnPoints: SpawnPoint[],
   bridges: readonly BridgePlacement[],
   seed: number,
+  reservedSwordFields: readonly SwordFieldPlacement[] = [],
 ): SwampPlacement[] {
   interface SwampCandidate {
     westCellX: number;
@@ -1086,6 +1164,9 @@ function computeSwampPlacements(
     occupiedCells.add(`${bridge.cellX},${bridge.northCellY}`);
     occupiedCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
   }
+  for (const swordField of reservedSwordFields) {
+    occupySwordFieldCells(occupiedCells, swordField);
+  }
 
   const candidateRand = mulberry32(seed ^ SWAMP_RANDOM_SALT);
   const candidates: SwampCandidate[] = [];
@@ -1102,7 +1183,12 @@ function computeSwampPlacements(
         if (eastCellX >= GRID_CELLS) break;
 
         const eastKey = `${eastCellX},${cellY}`;
-        if (hubCells.has(eastKey) || spawnCells.has(eastKey) || occupiedCells.has(eastKey)) break;
+        if (
+          hubCells.has(eastKey) ||
+          spawnCells.has(eastKey) ||
+          occupiedCells.has(eastKey)
+        )
+          break;
         if (!isEmptyObstacleCell(data, eastCellX, cellY)) break;
 
         if (lengthCells === MIN_SWAMP_LENGTH_CELLS) {
@@ -1183,6 +1269,245 @@ function computeSwampPlacements(
   return swamps;
 }
 
+interface SwordFieldCandidate extends SwordFieldPlacement {
+  rank: number;
+}
+
+function getSwordFieldRank(seed: number, westCellX: number, cellY: number): number {
+  let mixedSeed = seed ^ SWORD_FIELD_RANDOM_SALT;
+  mixedSeed = Math.imul(mixedSeed ^ (westCellX + 1), 0x45d9f3b);
+  mixedSeed = Math.imul(mixedSeed ^ (cellY + 1), 0x119de1f3);
+  mixedSeed ^= mixedSeed >>> 16;
+  return mulberry32(mixedSeed)();
+}
+
+function collectSwordFieldCandidates(
+  data: number[],
+  occupiedCells: ReadonlySet<string>,
+  seed: number,
+): SwordFieldCandidate[] {
+  const candidates: SwordFieldCandidate[] = [];
+  for (let cellY = 0; cellY < GRID_CELLS; cellY++) {
+    for (let westCellX = 0; westCellX < GRID_CELLS - 1; westCellX++) {
+      const westKey = `${westCellX},${cellY}`;
+      const eastKey = `${westCellX + 1},${cellY}`;
+      if (occupiedCells.has(westKey) || occupiedCells.has(eastKey)) continue;
+      if (!isEmptyObstacleCell(data, westCellX, cellY)) continue;
+      if (!isEmptyObstacleCell(data, westCellX + 1, cellY)) continue;
+      if (!areCellsConnected(data, westCellX, cellY, westCellX + 1, cellY)) continue;
+      if (!supportsSwampPassage(data, westCellX, cellY)) continue;
+
+      const { tx, ty } = cellToTile(westCellX, cellY);
+      candidates.push({
+        westCellX,
+        cellY,
+        tileX: tx + CELL_SIZE,
+        tileY: ty,
+        rank: getSwordFieldRank(seed, westCellX, cellY),
+      });
+    }
+  }
+  return candidates;
+}
+
+function swordFieldCandidateKey(
+  placement: Pick<SwordFieldPlacement, 'westCellX' | 'cellY'>,
+): string {
+  return `${placement.westCellX},${placement.cellY}`;
+}
+
+/**
+ * Reserve non-overlapping east-west barriers on the generated route from every
+ * team spawn to the hub. These reservations are made before other authored
+ * obstacles so later placement cannot steal the required passages.
+ */
+export function computeTeamRouteSwordFieldPlacements(
+  data: number[],
+  spawnPoints: readonly SpawnPoint[],
+  seed: number,
+): SwordFieldPlacement[] {
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
+  const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+  const occupiedCells = new Set(hubCells);
+  for (const spawnPoint of spawnPoints) {
+    const { cx, cy } = spawnPointToCell(spawnPoint);
+    occupiedCells.add(`${cx},${cy}`);
+  }
+
+  const candidates = collectSwordFieldCandidates(data, occupiedCells, seed);
+  const candidateIndexByKey = new Map(
+    candidates.map((candidate, index) => [swordFieldCandidateKey(candidate), index]),
+  );
+  const teamCandidatePositions = spawnPoints.map((spawnPoint) => {
+    const path = findPathToHub(data, spawnPointToCell(spawnPoint), hubCells);
+    const positions = new Map<number, number>();
+    if (!path) return positions;
+
+    for (let pathIndex = 0; pathIndex < path.length - 1; pathIndex++) {
+      const from = path[pathIndex];
+      const to = path[pathIndex + 1];
+      if (from.cy !== to.cy) continue;
+      const candidateIndex = candidateIndexByKey.get(
+        `${Math.min(from.cx, to.cx)},${from.cy}`,
+      );
+      if (candidateIndex !== undefined) positions.set(candidateIndex, pathIndex);
+    }
+    return positions;
+  });
+
+  const selectedCandidateIndices: number[] = [];
+  const usedCells = new Set<string>();
+  const allTeamsMask = (1 << spawnPoints.length) - 1;
+
+  const candidateCoverageMask = candidates.map((_, candidateIndex) => {
+    let mask = 0;
+    for (let teamIndex = 0; teamIndex < teamCandidatePositions.length; teamIndex++) {
+      if (teamCandidatePositions[teamIndex].has(candidateIndex)) {
+        mask |= 1 << teamIndex;
+      }
+    }
+    return mask;
+  });
+
+  const overlapsSelected = (candidate: SwordFieldCandidate): boolean =>
+    usedCells.has(`${candidate.westCellX},${candidate.cellY}`) ||
+    usedCells.has(`${candidate.westCellX + 1},${candidate.cellY}`);
+
+  const search = (coveredTeamsMask: number): boolean => {
+    if (coveredTeamsMask === allTeamsMask) return true;
+
+    let nextTeamIndex = -1;
+    let nextTeamOptions: number[] = [];
+    for (let teamIndex = 0; teamIndex < teamCandidatePositions.length; teamIndex++) {
+      if ((coveredTeamsMask & (1 << teamIndex)) !== 0) continue;
+      const options = [...teamCandidatePositions[teamIndex].keys()].filter(
+        (candidateIndex) =>
+          (candidateCoverageMask[candidateIndex] & coveredTeamsMask) === 0 &&
+          !overlapsSelected(candidates[candidateIndex]),
+      );
+      if (nextTeamIndex === -1 || options.length < nextTeamOptions.length) {
+        nextTeamIndex = teamIndex;
+        nextTeamOptions = options;
+      }
+    }
+
+    if (nextTeamIndex === -1 || nextTeamOptions.length === 0) return false;
+    nextTeamOptions.sort((a, b) => {
+      const aNewCoverage = candidateCoverageMask[a] & ~coveredTeamsMask;
+      const bNewCoverage = candidateCoverageMask[b] & ~coveredTeamsMask;
+      const aCoverageCount = aNewCoverage.toString(2).replaceAll('0', '').length;
+      const bCoverageCount = bNewCoverage.toString(2).replaceAll('0', '').length;
+      if (bCoverageCount !== aCoverageCount) return bCoverageCount - aCoverageCount;
+      const aPosition = teamCandidatePositions[nextTeamIndex].get(a) ?? Infinity;
+      const bPosition = teamCandidatePositions[nextTeamIndex].get(b) ?? Infinity;
+      return aPosition - bPosition || candidates[a].rank - candidates[b].rank;
+    });
+
+    for (const candidateIndex of nextTeamOptions) {
+      const candidate = candidates[candidateIndex];
+      selectedCandidateIndices.push(candidateIndex);
+      occupySwordFieldCells(usedCells, candidate);
+      if (search(coveredTeamsMask | candidateCoverageMask[candidateIndex])) return true;
+      selectedCandidateIndices.pop();
+      usedCells.delete(`${candidate.westCellX},${candidate.cellY}`);
+      usedCells.delete(`${candidate.westCellX + 1},${candidate.cellY}`);
+    }
+    return false;
+  };
+
+  if (!search(0)) return [];
+  return selectedCandidateIndices.map((candidateIndex) => {
+    const candidate = candidates[candidateIndex];
+    return {
+      westCellX: candidate.westCellX,
+      cellY: candidate.cellY,
+      tileX: candidate.tileX,
+      tileY: candidate.tileY,
+    };
+  });
+}
+
+/** Add deterministic scattered barriers without overlapping authored obstacles. */
+export function computeSwordFieldPlacements(
+  data: number[],
+  spawnPoints: readonly SpawnPoint[],
+  bridges: readonly BridgePlacement[],
+  swamps: readonly SwampPlacement[],
+  chestDeadEnds: readonly ChestDeadEndPlacement[],
+  portalPosition: SpawnPoint | null,
+  seed: number,
+  requiredPlacements: readonly SwordFieldPlacement[] = [],
+): SwordFieldPlacement[] {
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
+  const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+  const occupiedCells = new Set(hubCells);
+  const directRoutePassages = new Set<string>();
+
+  for (const spawnPoint of spawnPoints) {
+    const { cx, cy } = spawnPointToCell(spawnPoint);
+    occupiedCells.add(`${cx},${cy}`);
+    const path = findPathToHub(data, { cx, cy }, hubCells);
+    if (!path) continue;
+    for (let pathIndex = 0; pathIndex < path.length - 1; pathIndex++) {
+      const from = path[pathIndex];
+      const to = path[pathIndex + 1];
+      if (from.cy !== to.cy) continue;
+      directRoutePassages.add(`${Math.min(from.cx, to.cx)},${from.cy}`);
+    }
+  }
+  for (const bridge of bridges) {
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY}`);
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
+  }
+  for (const swamp of swamps) {
+    for (let offset = 0; offset < swamp.lengthCells; offset++) {
+      occupiedCells.add(`${swamp.westCellX + offset},${swamp.cellY}`);
+    }
+  }
+  for (const chest of chestDeadEnds) {
+    occupiedCells.add(`${chest.cellX},${chest.cellY}`);
+  }
+  if (portalPosition) {
+    const portalCellX = Math.round(
+      (portalPosition.x - CELL_SIZE / 2 - WALL_WIDTH) / CELL_STEP_X,
+    );
+    const portalCellY = Math.round((portalPosition.y + 0.75 - WALL_HEIGHT) / CELL_STEP_Y);
+    occupiedCells.add(`${portalCellX},${portalCellY}`);
+    occupiedCells.add(`${portalCellX},${portalCellY - 1}`);
+  }
+  const placements = requiredPlacements.map((placement) => ({ ...placement }));
+  for (const placement of placements) occupySwordFieldCells(occupiedCells, placement);
+
+  const candidates = collectSwordFieldCandidates(data, occupiedCells, seed).filter(
+    (candidate) => !directRoutePassages.has(swordFieldCandidateKey(candidate)),
+  );
+  candidates.sort(
+    (a, b) => a.rank - b.rank || a.cellY - b.cellY || a.westCellX - b.westCellX,
+  );
+  const desiredExtraCount = Math.min(
+    MAX_EXTRA_SWORD_FIELDS,
+    candidates.length,
+    Math.max(MIN_EXTRA_SWORD_FIELDS, Math.round(candidates.length * SWORD_FIELD_DENSITY)),
+  );
+
+  for (const candidate of candidates) {
+    if (placements.length >= requiredPlacements.length + desiredExtraCount) break;
+    const westKey = `${candidate.westCellX},${candidate.cellY}`;
+    const eastKey = `${candidate.westCellX + 1},${candidate.cellY}`;
+    if (occupiedCells.has(westKey) || occupiedCells.has(eastKey)) continue;
+    placements.push({
+      westCellX: candidate.westCellX,
+      cellY: candidate.cellY,
+      tileX: candidate.tileX,
+      tileY: candidate.tileY,
+    });
+    occupySwordFieldCells(occupiedCells, candidate);
+  }
+
+  placements.sort((a, b) => a.cellY - b.cellY || a.westCellX - b.westCellX);
+  return placements;
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 export const MAZE_WIDTH = MAP_WIDTH;
@@ -1208,22 +1533,62 @@ export function generateMazeLayout(
 
   // Stamp pressure plate tiles into map data
   for (const plate of pressurePlates) {
-    if (plate.tileX >= 0 && plate.tileX < MAP_WIDTH && plate.tileY >= 0 && plate.tileY < MAP_HEIGHT) {
+    if (
+      plate.tileX >= 0 &&
+      plate.tileX < MAP_WIDTH &&
+      plate.tileY >= 0 &&
+      plate.tileY < MAP_HEIGHT
+    ) {
       gatedData[plate.tileY * MAP_WIDTH + plate.tileX] = TILE_PRESSURE_PLATE;
     }
   }
 
-  const bridges = computeBridgePlacements(gatedData, spawnPoints, seed);
-  const swamps = computeSwampPlacements(gatedData, spawnPoints, bridges, seed);
   const safeSpawnPoints = spawnPoints.map((spawnPoint) =>
-    findSafeSpawnPoint(gatedData, spawnPoint));
+    findSafeSpawnPoint(gatedData, spawnPoint),
+  );
+  const requiredSwordFields = computeTeamRouteSwordFieldPlacements(
+    gatedData,
+    safeSpawnPoints,
+    seed,
+  );
+  const bridges = computeBridgePlacements(
+    gatedData,
+    spawnPoints,
+    seed,
+    requiredSwordFields,
+  );
+  const swamps = computeSwampPlacements(
+    gatedData,
+    spawnPoints,
+    bridges,
+    seed,
+    requiredSwordFields,
+  );
   let chestDeadEnds = computeChestDeadEndPlacements(
     gatedData,
     seed,
     safeSpawnPoints,
+    CHEST_DEAD_END_DENSITY,
+    requiredSwordFields,
   );
-  if (!computePortalPosition(gatedData, spawnDistance, bridges, swamps, chestDeadEnds)) {
-    const fallbackPortal = computePortalPosition(gatedData, spawnDistance, bridges, swamps);
+  if (
+    !computePortalPosition(
+      gatedData,
+      spawnDistance,
+      bridges,
+      swamps,
+      chestDeadEnds,
+      requiredSwordFields,
+    )
+  ) {
+    const fallbackPortal = computePortalPosition(
+      gatedData,
+      spawnDistance,
+      bridges,
+      swamps,
+      [],
+      requiredSwordFields,
+    );
     if (fallbackPortal) {
       const portalCellX = Math.round(
         (fallbackPortal.x - CELL_SIZE / 2 - WALL_WIDTH) / CELL_STEP_X,
@@ -1238,6 +1603,24 @@ export function generateMazeLayout(
       );
     }
   }
+  const portalPosition = computePortalPosition(
+    gatedData,
+    spawnDistance,
+    bridges,
+    swamps,
+    chestDeadEnds,
+    requiredSwordFields,
+  );
+  const swordFields = computeSwordFieldPlacements(
+    gatedData,
+    safeSpawnPoints,
+    bridges,
+    swamps,
+    chestDeadEnds,
+    portalPosition,
+    seed,
+    requiredSwordFields,
+  );
 
   return {
     map: {
@@ -1251,13 +1634,18 @@ export function generateMazeLayout(
     pressurePlates,
     bridges,
     swamps,
+    swordFields,
     chestDeadEnds,
     dirtMask,
   };
 }
 
 export function generateMaze(seed: number): TileMapData {
-  return generateMazeLayout(seed, DEFAULT_LAYOUT_SPAWN_DISTANCE, DEFAULT_LAYOUT_TEAM_COUNT).map;
+  return generateMazeLayout(
+    seed,
+    DEFAULT_LAYOUT_SPAWN_DISTANCE,
+    DEFAULT_LAYOUT_TEAM_COUNT,
+  ).map;
 }
 
 // ── BFS-Based Equidistant Spawn Point Computation ───────────────────────────
@@ -1269,8 +1657,10 @@ export function generateMaze(seed: number): TileMapData {
  */
 function areCellsConnected(
   data: number[],
-  cx1: number, cy1: number,
-  cx2: number, cy2: number,
+  cx1: number,
+  cy1: number,
+  cx2: number,
+  cy2: number,
 ): boolean {
   const { tx: tx1, ty: ty1 } = cellToTile(cx1, cy1);
 
@@ -1310,7 +1700,11 @@ export function chooseChestCount(seed: number, cellX: number, cellY: number): Ch
   return 3;
 }
 
-function getChestDeadEndSelectionRank(seed: number, cellX: number, cellY: number): number {
+function getChestDeadEndSelectionRank(
+  seed: number,
+  cellX: number,
+  cellY: number,
+): number {
   let mixedSeed = seed ^ CHEST_DEAD_END_SELECTION_SALT;
   mixedSeed = Math.imul(mixedSeed ^ (cellX + 1), 0x27d4eb2d);
   mixedSeed = Math.imul(mixedSeed ^ (cellY + 1), 0x165667b1);
@@ -1341,6 +1735,7 @@ export function computeChestDeadEndPlacements(
   seed: number,
   excludedSpawnPoints: readonly SpawnPoint[] = [],
   density: number = CHEST_DEAD_END_DENSITY,
+  excludedSwordFields: readonly SwordFieldPlacement[] = [],
 ): ChestDeadEndPlacement[] {
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
@@ -1350,6 +1745,9 @@ export function computeChestDeadEndPlacements(
       return `${cx},${cy}`;
     }),
   );
+  for (const swordField of excludedSwordFields) {
+    occupySwordFieldCells(spawnCells, swordField);
+  }
   const candidates: Array<{
     cellX: number;
     cellY: number;
@@ -1364,14 +1762,14 @@ export function computeChestDeadEndPlacements(
       const cellKey = `${cellX},${cellY}`;
       if (hubCells.has(cellKey) || spawnCells.has(cellKey)) continue;
 
-      const northOpen = cellY > 0 &&
-        areCellsConnected(data, cellX, cellY, cellX, cellY - 1);
-      const eastOpen = cellX < GRID_CELLS - 1 &&
-        areCellsConnected(data, cellX, cellY, cellX + 1, cellY);
-      const southOpen = cellY < GRID_CELLS - 1 &&
-        areCellsConnected(data, cellX, cellY, cellX, cellY + 1);
-      const westOpen = cellX > 0 &&
-        areCellsConnected(data, cellX, cellY, cellX - 1, cellY);
+      const northOpen =
+        cellY > 0 && areCellsConnected(data, cellX, cellY, cellX, cellY - 1);
+      const eastOpen =
+        cellX < GRID_CELLS - 1 && areCellsConnected(data, cellX, cellY, cellX + 1, cellY);
+      const southOpen =
+        cellY < GRID_CELLS - 1 && areCellsConnected(data, cellX, cellY, cellX, cellY + 1);
+      const westOpen =
+        cellX > 0 && areCellsConnected(data, cellX, cellY, cellX - 1, cellY);
 
       const openDirections: ChestDeadEndDirection[] = [];
       if (northOpen) openDirections.push('north');
@@ -1533,7 +1931,9 @@ export function computeSpawnPoints(
         const aDist = Math.abs(cellDist[a.cy * GRID_CELLS + a.cx] - distance);
         const bDist = Math.abs(cellDist[b.cy * GRID_CELLS + b.cx] - distance);
         if (aDist !== bDist) return aDist < bDist ? a : b;
-        return angleDiff(a.angle, sectorCenter) < angleDiff(b.angle, sectorCenter) ? a : b;
+        return angleDiff(a.angle, sectorCenter) < angleDiff(b.angle, sectorCenter)
+          ? a
+          : b;
       });
     }
 
@@ -1596,6 +1996,7 @@ export function computePortalPosition(
   bridges: readonly BridgePlacement[] = [],
   swamps: readonly SwampPlacement[] = [],
   chestDeadEnds: readonly ChestDeadEndPlacement[] = [],
+  swordFields: readonly SwordFieldPlacement[] = [],
 ): SpawnPoint | null {
   const obstacleCells = new Set<string>();
   for (const bridge of bridges) {
@@ -1610,10 +2011,14 @@ export function computePortalPosition(
   for (const chestDeadEnd of chestDeadEnds) {
     obstacleCells.add(`${chestDeadEnd.cellX},${chestDeadEnd.cellY}`);
   }
+  for (const swordField of swordFields) {
+    occupySwordFieldCells(obstacleCells, swordField);
+  }
 
   const supportsPortalPlatform = (cx: number, cy: number): boolean => {
     if (cy < 2) return false;
-    if (obstacleCells.has(`${cx},${cy}`) || obstacleCells.has(`${cx},${cy - 1}`)) return false;
+    if (obstacleCells.has(`${cx},${cy}`) || obstacleCells.has(`${cx},${cy - 1}`))
+      return false;
     const lowerNorthWall = !areCellsConnected(data, cx, cy, cx, cy - 1);
     const upperNorthWall = !areCellsConnected(data, cx, cy - 1, cx, cy - 2);
     return lowerNorthWall && upperNorthWall;
@@ -1658,7 +2063,12 @@ export function computePortalPosition(
   const hubCenterX = MAP_WIDTH / 2;
   const hubCenterY = MAP_HEIGHT / 2;
 
-  interface Candidate { cx: number; cy: number; dist: number; angle: number }
+  interface Candidate {
+    cx: number;
+    cy: number;
+    dist: number;
+    angle: number;
+  }
   let candidates: Candidate[] = [];
 
   for (let cy = 0; cy < GRID_CELLS; cy++) {

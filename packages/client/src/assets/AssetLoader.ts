@@ -35,10 +35,8 @@ import { PORTAL_PLATFORM_ASSET_PATHS } from '../systems/PortalPlatformLayout';
 import { BRIDGE_OBSTACLE_ASSET_PATHS } from '../systems/BridgeObstacleLayout';
 import { SWAMP_OBSTACLE_ASSET_PATHS } from '../systems/SwampObstacleLayout';
 import { CHEST_DEAD_END_ASSET_PATHS } from '../systems/ChestDeadEndLayout';
-import {
-  CHARACTER_ATLAS_MANIFEST,
-  CHARACTER_ATLAS_PATH,
-} from './characterAtlasManifest';
+import { SWORD_FIELD_ASSET_PATHS } from '../systems/SwordFieldLayout';
+import { CHARACTER_ATLAS_MANIFEST, CHARACTER_ATLAS_PATH } from './characterAtlasManifest';
 import { getFiorwoodsRuntimeAssetPath } from './runtimeAssetPaths';
 
 export interface FrontGateTextures {
@@ -185,6 +183,8 @@ export interface GameAssets {
   bridgeObstacleTextures: ReadonlyMap<string, Texture>;
   /** Authored terrain, lilies, and vegetation used by swamp obstacles. */
   swampObstacleTextures: ReadonlyMap<string, Texture>;
+  /** Authored ground, fence, graves, and swords used by sword fields. */
+  swordFieldTextures: ReadonlyMap<string, Texture>;
   /** Authored tree backing, chest, and rock used by treasure dead ends. */
   chestDeadEndTextures: ReadonlyMap<string, Texture>;
   /** Number of activation frames (the rest are active idle frames). */
@@ -258,6 +258,7 @@ export async function loadAssets(
   let portalPlatformTextures = new Map<string, Texture>();
   let bridgeObstacleTextures = new Map<string, Texture>();
   let swampObstacleTextures = new Map<string, Texture>();
+  let swordFieldTextures = new Map<string, Texture>();
   let chestDeadEndTextures = new Map<string, Texture>();
   let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
@@ -761,14 +762,18 @@ export async function loadAssets(
     characterAtlas = await Assets.load<Texture>(CHARACTER_ATLAS_PATH);
     characterAtlas.source.scaleMode = 'nearest';
     const animationSetCount = CHARACTER_ATLAS_MANIFEST.reduce(
-      (total, character) => total + (character.defaultFrames ? 1 : 0) + SQUAD_COLORS.length,
+      (total, character) =>
+        total + (character.defaultFrames ? 1 : 0) + SQUAD_COLORS.length,
       0,
     );
     console.info(
       `[Assets] Loaded character spritesheet (${animationSetCount} animation sets, 612 frames)`,
     );
   } catch (error) {
-    console.warn('[Assets] Character spritesheet unavailable — using fallback art', error);
+    console.warn(
+      '[Assets] Character spritesheet unavailable — using fallback art',
+      error,
+    );
   }
 
   for (const character of CHARACTER_ATLAS_MANIFEST) {
@@ -963,6 +968,25 @@ export async function loadAssets(
     console.warn('[Assets] Swamp obstacle modules unavailable', error);
   }
 
+  // ── Authored sword-field modules ────────────────────────────────────────
+  try {
+    swordFieldTextures = new Map(
+      await Promise.all(
+        SWORD_FIELD_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded sword fields (${swordFieldTextures.size} source modules)`,
+    );
+  } catch (error) {
+    swordFieldTextures.clear();
+    console.warn('[Assets] Sword-field modules unavailable', error);
+  }
+
   // ── Authored chest dead-end modules ─────────────────────────────────────
   try {
     chestDeadEndTextures = new Map(
@@ -1104,6 +1128,7 @@ export async function loadAssets(
     portalPlatformTextures,
     bridgeObstacleTextures,
     swampObstacleTextures,
+    swordFieldTextures,
     chestDeadEndTextures,
     portalActivationCount,
     wisdomOrbTexture,

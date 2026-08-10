@@ -8,6 +8,7 @@
 // ── Re-export physics module ────────────────────────────────────────────────
 import type { HubDirection } from './navigation.js';
 import type { BridgeEntrySide, BridgeState } from './bridge.js';
+import type { SwordFieldState } from './sword-field.js';
 
 export {
   PLAYER_SPEED,
@@ -79,6 +80,20 @@ export {
   type SwampWisdomHintTarget,
 } from './swamp.js';
 
+export {
+  SWORD_FIELD_AUTHORING_TILE_SIZE,
+  SWORD_FIELD_WIDTH,
+  SWORD_FIELD_HEIGHT,
+  SWORD_FIELD_INTERACTION_RANGE,
+  SWORD_FIELD_LOWER_DURATION_MS,
+  getSwordFieldCollisionBounds,
+  getSwordFieldEntrancePoints,
+  findSwordFieldWisdomTarget,
+  type SwordFieldState,
+  type SwordFieldCollisionBounds,
+  type SwordFieldWisdomTarget,
+} from './sword-field.js';
+
 // ── Re-export map data ──────────────────────────────────────────────────────
 export {
   TILE_FLOOR,
@@ -117,6 +132,8 @@ export {
   chooseChestCount,
   getChestDeadEndVariant,
   computeChestDeadEndPlacements,
+  computeSwordFieldPlacements,
+  computeTeamRouteSwordFieldPlacements,
   generateMazeLayout,
   generateMaze,
   type TileMapData,
@@ -127,6 +144,7 @@ export {
   type PressurePlateInfo,
   type BridgePlacement,
   type SwampPlacement,
+  type SwordFieldPlacement,
   type ChestCount,
   type ChestSlot,
   type ChestDeadEndDirection,
@@ -434,7 +452,7 @@ export interface WisdomOrbGrantedMessage {
   wisdomOrbs: number;
 }
 
-/** Private result of consuming a wisdom orb. */
+/** Private result of accepted wisdom use or an orb-free warden sword clear. */
 export type WisdomOrbHint =
   | {
       kind: 'direction';
@@ -449,6 +467,10 @@ export type WisdomOrbHint =
   | {
       kind: 'swamp';
       swampIndex: number;
+    }
+  | {
+      kind: 'sword-field';
+      swordFieldIndex: number;
     };
 
 /** Private notification sent only to a player whose role changed through debug tools. */
@@ -530,6 +552,8 @@ export interface GameState {
   bridgeStates: BridgeState[];
   /** Per-chest opened state shared by the whole room. */
   chestStates: ChestState[];
+  /** Shared lowering/cleared state for each deterministic sword barrier. */
+  swordFieldStates: SwordFieldState[];
 }
 
 // ── Union Types ─────────────────────────────────────────────────────────────

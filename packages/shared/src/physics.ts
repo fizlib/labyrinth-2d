@@ -17,6 +17,7 @@ import {
   type ChestDeadEndPlacement,
   type ChestDeadEndVariant,
   type SwampPlacement,
+  type SwordFieldPlacement,
   type TileMapData,
 } from './maps/level1.js';
 import {
@@ -27,6 +28,7 @@ import {
   type BridgeState,
 } from './bridge.js';
 import { getPlayerSwampTerrain, SWAMP_SPEED_MULTIPLIER } from './swamp.js';
+import { getSwordFieldCollisionBounds, type SwordFieldState } from './sword-field.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -147,7 +149,10 @@ const CHEST_DEAD_END_BASE_COLLIDER_SPECS: Readonly<
 
 /** Count-specific chest colliders exported from the two supplied editor layouts. */
 const CHEST_COLLIDER_SPECS_BY_COUNT: Readonly<
-  Record<ChestDeadEndVariant, Readonly<Record<ChestCount, readonly ChestDeadEndColliderSpec[]>>>
+  Record<
+    ChestDeadEndVariant,
+    Readonly<Record<ChestCount, readonly ChestDeadEndColliderSpec[]>>
+  >
 > = {
   'north-west': {
     1: [{ kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' }],
@@ -175,7 +180,9 @@ const CHEST_COLLIDER_SPECS_BY_COUNT: Readonly<
   },
 };
 
-function getChestColliderSpec(placement: ChestDeadEndPlacement): ChestDeadEndColliderSpec {
+function getChestColliderSpec(
+  placement: ChestDeadEndPlacement,
+): ChestDeadEndColliderSpec {
   const spec =
     CHEST_COLLIDER_SPECS_BY_COUNT[placement.variant][placement.chestCount][
       placement.chestSlot
@@ -277,9 +284,13 @@ export function getChestDeadEndBounds(
   const anchorX = placement.tileX * tileSize;
   const anchorY = placement.tileY * tileSize;
 
-  const specs = placement.chestSlot === 0
-    ? [...CHEST_DEAD_END_BASE_COLLIDER_SPECS[placement.variant], getChestColliderSpec(placement)]
-    : [getChestColliderSpec(placement)];
+  const specs =
+    placement.chestSlot === 0
+      ? [
+          ...CHEST_DEAD_END_BASE_COLLIDER_SPECS[placement.variant],
+          getChestColliderSpec(placement),
+        ]
+      : [getChestColliderSpec(placement)];
 
   return specs.map((spec) => ({
     kind: spec.kind,
@@ -412,6 +423,8 @@ export function isPositionValid(
   bridges: readonly BridgePlacement[] = [],
   bridgeStates: readonly BridgeState[] = [],
   chestDeadEnds: readonly ChestDeadEndPlacement[] = [],
+  swordFields: readonly SwordFieldPlacement[] = [],
+  swordFieldStates: readonly SwordFieldState[] = [],
 ): boolean {
   const ts = map.tileSize;
 
@@ -454,6 +467,16 @@ export function isPositionValid(
 
   for (const chestDeadEnd of chestDeadEnds) {
     for (const bounds of getChestDeadEndBounds(chestDeadEnd, ts)) {
+      if (intersectsBounds(left, top, right, bottom, bounds)) return false;
+    }
+  }
+
+  for (let swordFieldIndex = 0; swordFieldIndex < swordFields.length; swordFieldIndex++) {
+    const state = swordFieldStates.find(
+      (candidate) => candidate.swordFieldIndex === swordFieldIndex,
+    );
+    for (const bounds of getSwordFieldCollisionBounds(swordFields[swordFieldIndex], ts)) {
+      if (bounds.kind === 'barrier' && state?.cleared) continue;
       if (intersectsBounds(left, top, right, bottom, bounds)) return false;
     }
   }
@@ -501,6 +524,8 @@ export function applyInputWithCollision(
   bridgeStates: readonly BridgeState[] = [],
   swamps: readonly SwampPlacement[] = [],
   chestDeadEnds: readonly ChestDeadEndPlacement[] = [],
+  swordFields: readonly SwordFieldPlacement[] = [],
+  swordFieldStates: readonly SwordFieldState[] = [],
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
@@ -516,14 +541,38 @@ export function applyInputWithCollision(
 
   if (dx !== 0) {
     const candidateX = x + dx;
-    if (isPositionValid(candidateX, y, map, portal, bridges, bridgeStates, chestDeadEnds)) {
+    if (
+      isPositionValid(
+        candidateX,
+        y,
+        map,
+        portal,
+        bridges,
+        bridgeStates,
+        chestDeadEnds,
+        swordFields,
+        swordFieldStates,
+      )
+    ) {
       newX = candidateX;
     }
   }
 
   if (dy !== 0) {
     const candidateY = y + dy;
-    if (isPositionValid(newX, candidateY, map, portal, bridges, bridgeStates, chestDeadEnds)) {
+    if (
+      isPositionValid(
+        newX,
+        candidateY,
+        map,
+        portal,
+        bridges,
+        bridgeStates,
+        chestDeadEnds,
+        swordFields,
+        swordFieldStates,
+      )
+    ) {
       newY = candidateY;
     }
   }
