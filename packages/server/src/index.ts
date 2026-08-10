@@ -150,6 +150,16 @@ uWS
             break;
           }
 
+          case MessageType.PressPressurePlate: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) {
+                room.handlePressPressurePlate(data.id, msg);
+              }
+            }
+            break;
+          }
+
           case MessageType.UseWisdomOrb: {
             if (data.roomId) {
               const room = rooms.get(data.roomId);

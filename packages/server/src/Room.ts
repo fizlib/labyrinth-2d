@@ -22,6 +22,8 @@ import {
   TILE_GATE_HORIZONTAL,
   CELL_SIZE,
   SPAWN_DISTANCE,
+  PRESSURE_PLATE_INTERACTION_RANGE,
+  GATE_OPEN_DURATION_MS,
   INITIAL_WISDOM_ORBS,
   getChestWisdomOrbReward,
   PLAYER_CHARACTER_COUNT,
@@ -59,6 +61,7 @@ import {
   type SpawnPoint,
   type GatePlacement,
   type PressurePlateInfo,
+  type PressurePlateState,
   type BridgePlacement,
   type ChestDeadEndPlacement,
   type SwampPlacement,
@@ -72,6 +75,7 @@ import {
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
   type OpenChestMessage,
+  type PressPressurePlateMessage,
   type DebugTeleportMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
@@ -294,6 +298,18 @@ export class Room {
   /** Per-gate open/closed state (true = open/passable). */
   private gateOpenStates: boolean[];
 
+  /** Gate buttons latched by wardens until that gate completes an open cycle. */
+  private readonly manuallyPressedPlateIds = new Set<number>();
+
+  /** Shared visual/activation state for every generated gate button. */
+  private readonly pressurePlateStates: PressurePlateState[];
+
+  /** Server time at which each open gate must close, or null while closed. */
+  private readonly gateCloseDeadlines: Array<number | null>;
+
+  /** Require every physically occupied button to be released after a timed reset. */
+  private readonly gateNeedsRelease: boolean[];
+
   /** Precomputed tile distances from every walkable tile to the hub. */
   private readonly hubDistanceField: NavigationDistanceField;
 
@@ -327,6 +343,13 @@ export class Room {
       repairInitialCollapsedTileMask: 0,
     }));
     this.gateOpenStates = new Array(this.gates.length).fill(false);
+    this.pressurePlateStates = this.pressurePlates.map((plate) => ({
+      plateId: plate.id,
+      pressed: false,
+      latched: false,
+    }));
+    this.gateCloseDeadlines = new Array<number | null>(this.gates.length).fill(null);
+    this.gateNeedsRelease = new Array(this.gates.length).fill(false);
     this.hubDistanceField = computeHubDistanceField(this.map);
     this.runestones = findRunestonePositions(this.map);
 
@@ -358,6 +381,7 @@ export class Room {
       runestones: this.runestones,
       portal: this.portalPosition,
       gateStates: this.gates.map((_, i) => ({ gateIndex: i, open: false })),
+      pressurePlateStates: this.pressurePlateStates,
       bridgeStates: this.bridgeStates,
       chestStates: this.chestStates,
     };
@@ -811,6 +835,42 @@ export class Room {
       rewardedWisdomOrbs === null
         ? `[Room:${this.id}] Chest ${msg.chestIndex} destroyed by warden ${playerId}`
         : `[Room:${this.id}] Chest ${msg.chestIndex} opened by ${playerId}; ${player.wisdomOrbs} wisdom orb(s)`,
+    );
+  }
+
+  /** Latch one nearby gate button when requested by a warden. */
+  handlePressPressurePlate(playerId: string, msg: PressPressurePlateMessage): void {
+    if (!Number.isInteger(msg.plateId)) return;
+
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    const plate = this.pressurePlates.find((candidate) => candidate.id === msg.plateId);
+    if (!player || player.role !== 'warden' || !plate) return;
+    if (
+      this.gateNeedsRelease[plate.gateIndex] ||
+      this.manuallyPressedPlateIds.has(plate.id)
+    ) {
+      return;
+    }
+
+    const plateCenterX = (plate.tileX + 0.5) * this.map.tileSize;
+    const plateCenterY = (plate.tileY + 0.5) * this.map.tileSize;
+    const dx = player.x - plateCenterX;
+    const dy = player.y - plateCenterY;
+    const interactionRangeSq =
+      PRESSURE_PLATE_INTERACTION_RANGE * PRESSURE_PLATE_INTERACTION_RANGE;
+    if (dx * dx + dy * dy > interactionRangeSq) return;
+
+    this.manuallyPressedPlateIds.add(plate.id);
+    const plateState = this.pressurePlateStates.find(
+      (candidate) => candidate.plateId === plate.id,
+    );
+    if (plateState) {
+      plateState.pressed = true;
+      plateState.latched = true;
+    }
+
+    console.info(
+      `[Room:${this.id}] Warden ${playerId} latched pressure plate ${plate.id} for gate ${plate.gateIndex}`,
     );
   }
 
@@ -1501,21 +1561,22 @@ export class Room {
   }
 
   /**
-   * Check pressure plate activation for each gate and open/close gates accordingly.
-   * - Spawn side: at least 2 distinct players standing on spawn-side plates.
-   * - Hub side: at least 1 player standing on the hub-side plate.
+   * Update physical and manually latched gate-button activation.
+   * - Physical occupancy is role-agnostic and retains the original hold-to-open rules.
+   * - A manual warden latch opens the gate for five seconds when its side is complete.
    */
   private updateGateStates(): void {
-    for (let gateIndex = 0; gateIndex < this.gates.length; gateIndex++) {
-      const gate = this.gates[gateIndex];
-      const gatePlates = this.pressurePlates.filter((p) => p.gateIndex === gateIndex);
+    const now = Date.now();
 
+    for (let gateIndex = 0; gateIndex < this.gates.length; gateIndex++) {
+      const gatePlates = this.pressurePlates.filter((p) => p.gateIndex === gateIndex);
       const spawnPlates = gatePlates.filter((p) => p.side === 'spawn');
       const hubPlates = gatePlates.filter((p) => p.side === 'hub');
 
-      // Check spawn side: count distinct players on ANY spawn-side plate
+      const occupiedPlateIds = new Set<number>();
       const playersOnSpawnPlates = new Set<string>();
-      for (const plate of spawnPlates) {
+      let playerOnHubPlate = false;
+      for (const plate of gatePlates) {
         for (const player of this.state.players) {
           if (
             isPlayerOnPlate(
@@ -1526,59 +1587,120 @@ export class Room {
               this.map.tileSize,
             )
           ) {
-            playersOnSpawnPlates.add(player.id);
+            occupiedPlateIds.add(plate.id);
+            if (plate.side === 'spawn') {
+              playersOnSpawnPlates.add(player.id);
+            } else {
+              playerOnHubPlate = true;
+            }
           }
         }
       }
-      const spawnSideActivated = playersOnSpawnPlates.size >= 2;
 
-      // Check hub side: at least 1 player on any hub-side plate
-      let hubSideActivated = false;
-      for (const plate of hubPlates) {
-        for (const player of this.state.players) {
-          if (
-            isPlayerOnPlate(
-              player.x,
-              player.y,
-              plate.tileX,
-              plate.tileY,
-              this.map.tileSize,
-            )
-          ) {
-            hubSideActivated = true;
-            break;
+      const closeDeadline = this.gateCloseDeadlines[gateIndex];
+      if (closeDeadline !== null) {
+        if (now >= closeDeadline) {
+          for (const plate of gatePlates) {
+            this.manuallyPressedPlateIds.delete(plate.id);
+            const plateState = this.pressurePlateStates.find(
+              (candidate) => candidate.plateId === plate.id,
+            );
+            if (plateState) {
+              plateState.pressed = false;
+              plateState.latched = false;
+            }
+          }
+          this.gateCloseDeadlines[gateIndex] = null;
+          this.gateNeedsRelease[gateIndex] = occupiedPlateIds.size > 0;
+          this.setGateOpen(gateIndex, false);
+          console.info(
+            `[Room:${this.id}] Gate ${gateIndex} CLOSED after ${GATE_OPEN_DURATION_MS}ms; buttons reset`,
+          );
+        } else {
+          for (const plate of gatePlates) {
+            const latched = this.manuallyPressedPlateIds.has(plate.id);
+            const plateState = this.pressurePlateStates.find(
+              (candidate) => candidate.plateId === plate.id,
+            );
+            if (plateState) {
+              plateState.pressed = latched || occupiedPlateIds.has(plate.id);
+              plateState.latched = latched;
+            }
           }
         }
-        if (hubSideActivated) break;
+        continue;
       }
 
-      const shouldBeOpen = spawnSideActivated || hubSideActivated;
-      const wasOpen = this.gateOpenStates[gateIndex];
-
-      if (shouldBeOpen !== wasOpen) {
-        this.gateOpenStates[gateIndex] = shouldBeOpen;
-        this.state.gateStates[gateIndex] = { gateIndex, open: shouldBeOpen };
-
-        // Update the tile data: swap gate tiles ↔ floor tiles
-        if (gate.orientation === 'horizontal') {
-          for (let dx = 0; dx < CELL_SIZE; dx++) {
-            const idx = gate.tileY * this.map.width + (gate.tileX + dx);
-            this.map.data[idx] = shouldBeOpen ? TILE_FLOOR : TILE_GATE_HORIZONTAL;
-          }
+      if (this.gateNeedsRelease[gateIndex]) {
+        if (occupiedPlateIds.size === 0) {
+          this.gateNeedsRelease[gateIndex] = false;
         }
+        continue;
+      }
 
-        const gateStateMsg: GateStateChangedMessage = {
-          type: MessageType.GateStateChanged,
-          gateIndex,
-          open: shouldBeOpen,
-        };
-        this.broadcast(gateStateMsg);
+      const activePlateIds = new Set(occupiedPlateIds);
+      for (const plate of gatePlates) {
+        if (this.manuallyPressedPlateIds.has(plate.id)) activePlateIds.add(plate.id);
+        const plateState = this.pressurePlateStates.find(
+          (candidate) => candidate.plateId === plate.id,
+        );
+        if (plateState) {
+          plateState.pressed = activePlateIds.has(plate.id);
+          plateState.latched = this.manuallyPressedPlateIds.has(plate.id);
+        }
+      }
 
+      const spawnButtonsComplete =
+        spawnPlates.length > 0 &&
+        spawnPlates.every((plate) => activePlateIds.has(plate.id));
+      const hubButtonActive = hubPlates.some((plate) => activePlateIds.has(plate.id));
+      const manualSpawnActivation =
+        spawnButtonsComplete &&
+        spawnPlates.some((plate) => this.manuallyPressedPlateIds.has(plate.id));
+      const manualHubActivation =
+        hubButtonActive &&
+        hubPlates.some((plate) => this.manuallyPressedPlateIds.has(plate.id));
+
+      if (manualSpawnActivation || manualHubActivation) {
+        this.gateCloseDeadlines[gateIndex] = now + GATE_OPEN_DURATION_MS;
+        this.setGateOpen(gateIndex, true);
         console.info(
-          `[Room:${this.id}] Gate ${gateIndex} ${shouldBeOpen ? 'OPENED' : 'CLOSED'} (spawn: ${playersOnSpawnPlates.size} players, hub: ${hubSideActivated})`,
+          `[Room:${this.id}] Gate ${gateIndex} OPENED for ${GATE_OPEN_DURATION_MS}ms by a warden latch`,
+        );
+        continue;
+      }
+
+      const physicallyActivated = playersOnSpawnPlates.size >= 2 || playerOnHubPlate;
+      if (physicallyActivated !== this.gateOpenStates[gateIndex]) {
+        this.setGateOpen(gateIndex, physicallyActivated);
+        console.info(
+          `[Room:${this.id}] Gate ${gateIndex} ${physicallyActivated ? 'OPENED' : 'CLOSED'} by physical occupancy (spawn players: ${playersOnSpawnPlates.size}, hub: ${playerOnHubPlate})`,
         );
       }
     }
+  }
+
+  /** Apply one authoritative gate transition to collision, room state, and clients. */
+  private setGateOpen(gateIndex: number, open: boolean): void {
+    const gate = this.gates[gateIndex];
+    if (!gate || this.gateOpenStates[gateIndex] === open) return;
+
+    this.gateOpenStates[gateIndex] = open;
+    this.state.gateStates[gateIndex] = { gateIndex, open };
+
+    if (gate.orientation === 'horizontal') {
+      for (let dx = 0; dx < CELL_SIZE; dx++) {
+        const idx = gate.tileY * this.map.width + (gate.tileX + dx);
+        this.map.data[idx] = open ? TILE_FLOOR : TILE_GATE_HORIZONTAL;
+      }
+    }
+
+    const gateStateMsg: GateStateChangedMessage = {
+      type: MessageType.GateStateChanged,
+      gateIndex,
+      open,
+    };
+    this.broadcast(gateStateMsg);
   }
 
   // ── Networking Helpers ────────────────────────────────────────────────
@@ -1601,6 +1723,9 @@ export class Room {
       runestones: this.runestones.map((r) => ({ ...r })),
       portal: this.portalPosition ? { ...this.portalPosition } : null,
       gateStates: this.state.gateStates.map((g) => ({ ...g })),
+      pressurePlateStates: this.pressurePlateStates.map((plateState) => ({
+        ...plateState,
+      })),
       bridgeStates: this.bridgeStates.map((bridgeState) => ({ ...bridgeState })),
       chestStates: this.chestStates.map((chestState) => ({ ...chestState })),
     };

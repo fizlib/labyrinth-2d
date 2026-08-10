@@ -17,6 +17,7 @@ import {
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
   type OpenChestMessage,
+  type PressPressurePlateMessage,
   type UseWisdomOrbMessage,
   type DebugTeleportMessage,
   type DebugPlayerAction,
@@ -298,6 +299,15 @@ export class NetworkManager {
     const msg: OpenChestMessage = {
       type: MessageType.OpenChest,
       chestIndex,
+    };
+    this.send(msg);
+  }
+
+  /** Ask the server to latch one nearby gate button as a warden. */
+  sendPressPressurePlate(plateId: number): void {
+    const msg: PressPressurePlateMessage = {
+      type: MessageType.PressPressurePlate,
+      plateId,
     };
     this.send(msg);
   }

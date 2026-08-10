@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-07-20 - Authenticated and guest frontend navigation
+Last updated: 2026-08-10 - Warden gate-button interaction and timed gate reset
 
 ## Project Overview
 
@@ -70,6 +70,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `PLAYER_INPUT` | Send one frame of movement intent plus `sequenceNumber` |
 | `ACTIVATE_RUNESTONE` | Request activation of a nearby runestone |
 | `OPEN_CHEST` | Request opening a nearby unopened treasure chest |
+| `PRESS_PRESSURE_PLATE` | Warden-only request to latch a nearby gate button |
 | `USE_WISDOM_ORB` | Spend one orb to request a hub-direction hint |
 | `DEBUG_TELEPORT` | Debug-only teleport helper used by developer tooling |
 
@@ -100,7 +101,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `teamId` | `number` | Team assignment used for spawn grouping |
 | `spriteIndex` | `number` | Client sprite-sheet selection |
 | `x`, `y` | `number` | Bottom-center feet position in world pixels |
-| `facing` | `'up' | 'down' | 'left' | 'right'` | Authoritative sprite facing |
+| `facing` | `'up' \| 'down' \| 'left' \| 'right'` | Authoritative sprite facing |
 | `isMoving` | `boolean` | Current movement animation state |
 | `lastProcessedInput` | `number` | Highest acknowledged local input sequence |
 
@@ -124,6 +125,8 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
 | `bridgeStates` | `BridgeState[]` | Authoritative missing-stone mask for every generated bridge |
 | `chestStates` | `ChestState[]` | Authoritative opened/unopened state for every generated treasure chest |
+| `gateStates` | `GateState[]` | Authoritative open/closed state for every generated gate |
+| `pressurePlateStates` | `PressurePlateState[]` | Authoritative physical-press and warden-latch state for every gate button |
 
 ## Shared Gameplay Systems
 
@@ -133,6 +136,8 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Both client and server use the same feet-based collision logic.
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
+- Physical button occupancy treats wardens and survivors identically: two distinct players on the spawn-side buttons or one player on the hub-side button hold the gate open only while that physical requirement remains satisfied.
+- Wardens can separately latch nearby buttons with `E`; when a latch completes one side's button requirement, the gate opens for five seconds, resets every associated button, and requires occupied buttons to be released before another activation cycle.
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
 - South-opening treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
@@ -337,7 +342,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - appears after a successful orb use
   - follows the player briefly while keeping the server-returned direction fixed
 - Runestone/chest interaction prompt
-  - world-space `[E]` prompt shown above nearby eligible inactive runestones or unopened treasure chests
+  - world-space `[E]` prompt shown above nearby eligible inactive runestones, unopened treasure chests, or unlatched gate buttons for wardens
+  - the prompt is white for survivors and red for wardens across all supported interactions
 
 ### Input Handling
 
@@ -346,6 +352,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Intro dialogue skip: `E`, the clickable arrow button, or the mobile `E` button while the current page is still typing
 - Runestone interaction: `E` or the mobile `E` button after the intro dialogue is dismissed
 - Chest interaction: `E` or the mobile `E` button while near an unopened chest; survivors must carry fewer than three wisdom orbs, while wardens destroy the chest without a reward
+- Gate-button interaction: wardens can press `E` or the mobile `E` button near an unlatched button to latch it until that gate's next timed reset
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
 - Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.
 - Debug-only tools can enable scroll zoom, zoom toggling, and click teleport

@@ -202,6 +202,12 @@ export const INITIAL_WISDOM_ORBS = 1;
 /** Maximum number of wisdom orbs a survivor can carry. */
 export const MAX_WISDOM_ORBS = 3;
 
+/** Maximum feet-to-button-center distance for a warden's manual gate-button press. */
+export const PRESSURE_PLATE_INTERACTION_RANGE = 28;
+
+/** How long an activated gate remains open before its buttons reset. */
+export const GATE_OPEN_DURATION_MS = 5_000;
+
 /** Return the post-chest inventory, or null when the survivor is already full. */
 export function getChestWisdomOrbReward(wisdomOrbs: number): number | null {
   if (!Number.isInteger(wisdomOrbs) || wisdomOrbs < 0 || wisdomOrbs >= MAX_WISDOM_ORBS) {
@@ -234,6 +240,7 @@ export enum MessageType {
   PlayerInput = 'PLAYER_INPUT',
   ActivateRunestone = 'ACTIVATE_RUNESTONE',
   OpenChest = 'OPEN_CHEST',
+  PressPressurePlate = 'PRESS_PRESSURE_PLATE',
   UseWisdomOrb = 'USE_WISDOM_ORB',
   DebugTeleport = 'DEBUG_TELEPORT',
   DebugPlayerAction = 'DEBUG_PLAYER_ACTION',
@@ -282,6 +289,12 @@ export interface OpenChestMessage {
   type: MessageType.OpenChest;
   /** Index into the deterministic chest-dead-end placement array. */
   chestIndex: number;
+}
+
+export interface PressPressurePlateMessage {
+  type: MessageType.PressPressurePlate;
+  /** Unique deterministic pressure-plate ID from the generated layout. */
+  plateId: number;
 }
 
 export interface UseWisdomOrbMessage {
@@ -483,6 +496,14 @@ export interface GateState {
   open: boolean;
 }
 
+/** Shared pressed/neutral state for one deterministic gate pressure plate. */
+export interface PressurePlateState {
+  plateId: number;
+  pressed: boolean;
+  /** Whether a warden explicitly latched this plate with the interaction key. */
+  latched: boolean;
+}
+
 /** Shared opened/unopened state for one deterministic treasure placement. */
 export interface ChestState {
   chestIndex: number;
@@ -499,6 +520,8 @@ export interface GameState {
   portal: { x: number; y: number } | null;
   /** Per-gate open/closed state. */
   gateStates: GateState[];
+  /** Per-pressure-plate pressed/neutral state. */
+  pressurePlateStates: PressurePlateState[];
   /** Per-bridge collapsed walkway state shared by the whole room. */
   bridgeStates: BridgeState[];
   /** Per-chest opened state shared by the whole room. */
@@ -512,6 +535,7 @@ export type ClientToServerMessage =
   | PlayerInputMessage
   | ActivateRunestoneMessage
   | OpenChestMessage
+  | PressPressurePlateMessage
   | UseWisdomOrbMessage
   | DebugTeleportMessage
   | DebugPlayerActionMessage;

@@ -31,10 +31,9 @@ import {
   SPAWN_DISTANCE,
   MAX_WISDOM_ORBS,
   CHEST_INTERACTION_RANGE,
+  PRESSURE_PLATE_INTERACTION_RANGE,
   PLAYER_CHARACTER_NAMES,
   SQUAD_COLORS,
-  FEET_HITBOX_W,
-  FEET_HITBOX_H,
   generateMazeLayout,
   applyInputWithCollision,
   getPlayerSwampTerrain,
@@ -183,8 +182,17 @@ let currentLayout: GeneratedMazeLayout | null = null;
 /** Pressure plate animation speed (frames per second). */
 const PLATE_ANIM_SPEED = 12;
 
+const SURVIVOR_INTERACT_PROMPT_COLOR = '#ffffff';
+const WARDEN_INTERACT_PROMPT_COLOR = '#ef3434';
+
 /** Floating "Press E" interaction prompt */
 let interactPrompt: Text | null = null;
+
+function getInteractPromptColor(role: PlayerRole | null): string {
+  return role === 'warden'
+    ? WARDEN_INTERACT_PROMPT_COLOR
+    : SURVIVOR_INTERACT_PROMPT_COLOR;
+}
 
 /** Portal instance, present from the beginning and lit after rune activation. */
 let portal: Portal | null = null;
@@ -1186,33 +1194,11 @@ function updateGateSlideAnimations(dt: number): void {
 
 // ── Pressure Plate Animation ────────────────────────────────────────────────
 
-/**
- * Check if a player's feet AABB overlaps a pressure plate tile (client-side mirror of server logic).
- */
-function isPlayerOnPlateTile(
-  playerX: number,
-  playerY: number,
-  plateTileX: number,
-  plateTileY: number,
-): boolean {
-  const pLeft = playerX - FEET_HITBOX_W / 2;
-  const pTop = playerY - FEET_HITBOX_H;
-  const pRight = pLeft + FEET_HITBOX_W - 1;
-  const pBottom = playerY - 1;
-
-  const tLeft = plateTileX * TILE_SIZE;
-  const tTop = plateTileY * TILE_SIZE;
-  const tRight = tLeft + TILE_SIZE - 1;
-  const tBottom = tTop + TILE_SIZE - 1;
-
-  return pLeft <= tRight && pRight >= tLeft && pTop <= tBottom && pBottom >= tTop;
-}
-
 /** Per-plate animation timer tracking. */
 const plateAnimTimers: Map<number, number> = new Map();
 
 /**
- * Update pressure plate animations based on whether any player is standing on each plate.
+ * Update pressure plate animations from the server-authoritative pressed state.
  * Step on: frame 0 → 1 → 2, stop at 2.
  * Step off: frame 2 → 1 → 0, stop at 0.
  */
@@ -1222,25 +1208,14 @@ function updatePressurePlateAnimations(
   dt: number,
 ): void {
   const frameInterval = 1 / PLATE_ANIM_SPEED;
+  const pressedPlateIds = new Set(
+    serverState.pressurePlateStates
+      .filter((plateState) => plateState.pressed)
+      .map((plateState) => plateState.plateId),
+  );
 
   for (const plate of renderer.pressurePlateSprites) {
-    // Check if any player is standing on this plate
-    let occupied = false;
-    for (const player of serverState.players) {
-      if (isPlayerOnPlateTile(player.x, player.y, plate.tileX, plate.tileY)) {
-        occupied = true;
-        break;
-      }
-    }
-
-    // Also check local predicted position for immediate feedback
-    if (!occupied && localPlayerInitialized) {
-      if (isPlayerOnPlateTile(localX, localY, plate.tileX, plate.tileY)) {
-        occupied = true;
-      }
-    }
-
-    const targetFrame = occupied ? 2 : 0;
+    const targetFrame = pressedPlateIds.has(plate.plateId) ? 2 : 0;
     if (plate.currentFrame === targetFrame) {
       plateAnimTimers.delete(plate.plateId);
       continue;
@@ -1927,7 +1902,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         style: new TextStyle({
           fontFamily: 'PixelOperator8',
           fontSize: 64, // Render huge so the canvas draws it perfectly sharp
-          fill: '#ffffff',
+          fill: getInteractPromptColor(role),
           // A sharp, blocky drop shadow instead of a bubbly round stroke
           dropShadow: {
             alpha: 1,
@@ -2248,6 +2223,36 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       return;
     }
 
+    if (localPlayerRole === 'warden' && latestServerState) {
+      const latchedPlateIds = new Set(
+        latestServerState.pressurePlateStates
+          .filter((plateState) => plateState.latched)
+          .map((plateState) => plateState.plateId),
+      );
+      const plateRangeSq =
+        PRESSURE_PLATE_INTERACTION_RANGE * PRESSURE_PLATE_INTERACTION_RANGE;
+      let nearestPlateId: number | null = null;
+      let nearestPlateDistSq = Infinity;
+
+      for (const plate of tilemapRenderer.pressurePlateSprites) {
+        if (latchedPlateIds.has(plate.plateId)) continue;
+        const plateCenterX = (plate.tileX + 0.5) * TILE_SIZE;
+        const plateCenterY = (plate.tileY + 0.5) * TILE_SIZE;
+        const dx = localX - plateCenterX;
+        const dy = localY - plateCenterY;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= plateRangeSq && distSq < nearestPlateDistSq) {
+          nearestPlateId = plate.plateId;
+          nearestPlateDistSq = distSq;
+        }
+      }
+
+      if (nearestPlateId !== null) {
+        net.sendPressPressurePlate(nearestPlateId);
+        return;
+      }
+    }
+
     if (!canLocalPlayerOpenChest()) return;
     const chestRangeSq = CHEST_INTERACTION_RANGE * CHEST_INTERACTION_RANGE;
     let nearestChestIndex: number | null = null;
@@ -2282,6 +2287,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   applyLocalRoleUi = (role, wisdomOrbs, showIntroDialogue) => {
     localPlayerRole = role;
     localWisdomOrbs = wisdomOrbs;
+    if (interactPrompt) interactPrompt.style.fill = getInteractPromptColor(role);
     if (!currentMap || !currentLayout) return;
 
     tilemapRenderer?.setWardenBridgeWisdomHints(
@@ -2542,7 +2548,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     // ── 4e. Gate slide animations ────────────────────────────────────
     updateGateSlideAnimations(dtSeconds);
 
-    // ── 5. Runestone/chest interaction prompt ───────────────────────
+    // ── 5. Runestone/chest/gate-button interaction prompt ───────────
     if (interactPrompt && tilemapRenderer) {
       let nearestDistSq = Infinity;
       let promptX = 0;
@@ -2578,6 +2584,30 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
             nearestDistSq = distSq;
             promptX = chest.promptX;
             promptY = chest.promptY;
+          }
+        }
+      }
+
+      if (localPlayerRole === 'warden' && latestServerState) {
+        const latchedPlateIds = new Set(
+          latestServerState.pressurePlateStates
+            .filter((plateState) => plateState.latched)
+            .map((plateState) => plateState.plateId),
+        );
+        const plateRangeSq =
+          PRESSURE_PLATE_INTERACTION_RANGE * PRESSURE_PLATE_INTERACTION_RANGE;
+
+        for (const plate of tilemapRenderer.pressurePlateSprites) {
+          if (latchedPlateIds.has(plate.plateId)) continue;
+          const plateCenterX = (plate.tileX + 0.5) * TILE_SIZE;
+          const plateCenterY = (plate.tileY + 0.5) * TILE_SIZE;
+          const dx = localX - plateCenterX;
+          const dy = localY - plateCenterY;
+          const distSq = dx * dx + dy * dy;
+          if (distSq <= plateRangeSq && distSq < nearestDistSq) {
+            nearestDistSq = distSq;
+            promptX = plate.sprite.x + plate.sprite.width / 2;
+            promptY = plate.sprite.y - 3;
           }
         }
       }
