@@ -94,9 +94,11 @@ export interface SwampPlacement {
   tileY: number;
 }
 
-/** Authored treasure-cell prefab placed in a south-opening maze dead end. */
+/** Authored treasure-cell prefab placed in a maze dead end. */
 export type ChestCount = 1 | 2 | 3;
 export type ChestSlot = 0 | 1 | 2;
+export type ChestDeadEndDirection = 'north' | 'east' | 'south' | 'west';
+export type ChestDeadEndVariant = 'north-west' | 'south-east';
 
 export interface ChestDeadEndPlacement {
   cellX: number;
@@ -104,8 +106,10 @@ export interface ChestDeadEndPlacement {
   /** Top-left tile of the 6×6 walkable dead-end cell. */
   tileX: number;
   tileY: number;
-  /** The current prefab is authored only for the north-backed, south-opening topology. */
-  openDirection: 'south';
+  /** The cell's sole opening toward the rest of the maze. */
+  openDirection: ChestDeadEndDirection;
+  /** Authored art/collider family selected from the opening direction. */
+  variant: ChestDeadEndVariant;
   /** Number of independently openable chests authored into this dead-end cell. */
   chestCount: ChestCount;
   /** Position of this chest within the count-specific authored arrangement. */
@@ -122,7 +126,7 @@ export interface GeneratedMazeLayout {
   bridges: BridgePlacement[];
   /** Walkable swamps placed in qualifying horizontal passages. */
   swamps: SwampPlacement[];
-  /** Independently openable treasure instances placed in matching south-opening dead ends. */
+  /** Independently openable treasure instances placed in every maze dead end. */
   chestDeadEnds: ChestDeadEndPlacement[];
   /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
   dirtMask: Uint8Array;
@@ -633,6 +637,8 @@ const MIN_SWAMPS = 4;
 const MAX_SWAMPS = 10;
 const SWAMP_RANDOM_SALT = 0x2c1b3c6d;
 const CHEST_RANDOM_SALT = 0x3c6ef017;
+const CHEST_DEAD_END_SELECTION_SALT = 0x9e3779b9;
+export const CHEST_DEAD_END_DENSITY = 0.6;
 export const MIN_SWAMP_LENGTH_CELLS = 2;
 export const MAX_SWAMP_LENGTH_CELLS = 5;
 const SWAMP_LENGTH_WEIGHT_MULTIPLIER = 6;
@@ -1209,10 +1215,29 @@ export function generateMazeLayout(
 
   const bridges = computeBridgePlacements(gatedData, spawnPoints, seed);
   const swamps = computeSwampPlacements(gatedData, spawnPoints, bridges, seed);
-  const chestDeadEnds = computeChestDeadEndPlacements(gatedData, seed);
-
   const safeSpawnPoints = spawnPoints.map((spawnPoint) =>
     findSafeSpawnPoint(gatedData, spawnPoint));
+  let chestDeadEnds = computeChestDeadEndPlacements(
+    gatedData,
+    seed,
+    safeSpawnPoints,
+  );
+  if (!computePortalPosition(gatedData, spawnDistance, bridges, swamps, chestDeadEnds)) {
+    const fallbackPortal = computePortalPosition(gatedData, spawnDistance, bridges, swamps);
+    if (fallbackPortal) {
+      const portalCellX = Math.round(
+        (fallbackPortal.x - CELL_SIZE / 2 - WALL_WIDTH) / CELL_STEP_X,
+      );
+      const portalCellY = Math.round(
+        (fallbackPortal.y + 0.75 - WALL_HEIGHT) / CELL_STEP_Y,
+      );
+      chestDeadEnds = chestDeadEnds.filter(
+        (placement) =>
+          placement.cellX !== portalCellX ||
+          (placement.cellY !== portalCellY && placement.cellY !== portalCellY - 1),
+      );
+    }
+  }
 
   return {
     map: {
@@ -1285,24 +1310,59 @@ export function chooseChestCount(seed: number, cellX: number, cellY: number): Ch
   return 3;
 }
 
+function getChestDeadEndSelectionRank(seed: number, cellX: number, cellY: number): number {
+  let mixedSeed = seed ^ CHEST_DEAD_END_SELECTION_SALT;
+  mixedSeed = Math.imul(mixedSeed ^ (cellX + 1), 0x27d4eb2d);
+  mixedSeed = Math.imul(mixedSeed ^ (cellY + 1), 0x165667b1);
+  mixedSeed ^= mixedSeed >>> 15;
+  return mulberry32(mixedSeed)();
+}
+
 /**
- * Find every maze cell matching the authored chest prefab's topology.
- *
- * The source composition has a tree facade across its north edge and can only
- * be reused without breaking the game's 2.5D perspective when south is the
- * cell's sole opening.
+ * `openDirection` points back into the maze, so the dead end itself extends in
+ * the opposite direction. North/west dead ends use the original prefab;
+ * south/east dead ends use the new right-side prefab.
+ */
+export function getChestDeadEndVariant(
+  openDirection: ChestDeadEndDirection,
+): ChestDeadEndVariant {
+  return openDirection === 'north' || openDirection === 'west'
+    ? 'south-east'
+    : 'north-west';
+}
+
+/**
+ * Find every eligible non-hub maze cell with exactly one connection, select a
+ * deterministic share of them, and expand each count-specific authored chest
+ * arrangement into independently indexed chests.
  */
 export function computeChestDeadEndPlacements(
   data: number[],
   seed: number,
+  excludedSpawnPoints: readonly SpawnPoint[] = [],
+  density: number = CHEST_DEAD_END_DENSITY,
 ): ChestDeadEndPlacement[] {
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
-  const placements: ChestDeadEndPlacement[] = [];
+  const spawnCells = new Set(
+    excludedSpawnPoints.map((spawnPoint) => {
+      const { cx, cy } = spawnPointToCell(spawnPoint);
+      return `${cx},${cy}`;
+    }),
+  );
+  const candidates: Array<{
+    cellX: number;
+    cellY: number;
+    tileX: number;
+    tileY: number;
+    openDirection: ChestDeadEndDirection;
+    rank: number;
+  }> = [];
 
   for (let cellY = 0; cellY < GRID_CELLS; cellY++) {
     for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
-      if (hubCells.has(`${cellX},${cellY}`)) continue;
+      const cellKey = `${cellX},${cellY}`;
+      if (hubCells.has(cellKey) || spawnCells.has(cellKey)) continue;
 
       const northOpen = cellY > 0 &&
         areCellsConnected(data, cellX, cellY, cellX, cellY - 1);
@@ -1313,20 +1373,52 @@ export function computeChestDeadEndPlacements(
       const westOpen = cellX > 0 &&
         areCellsConnected(data, cellX, cellY, cellX - 1, cellY);
 
-      if (northOpen || eastOpen || !southOpen || westOpen) continue;
+      const openDirections: ChestDeadEndDirection[] = [];
+      if (northOpen) openDirections.push('north');
+      if (eastOpen) openDirections.push('east');
+      if (southOpen) openDirections.push('south');
+      if (westOpen) openDirections.push('west');
+      if (openDirections.length !== 1) continue;
+
+      const openDirection = openDirections[0];
       const { tx, ty } = cellToTile(cellX, cellY);
-      const chestCount = chooseChestCount(seed, cellX, cellY);
-      for (let slot = 0; slot < chestCount; slot++) {
-        placements.push({
-          cellX,
-          cellY,
-          tileX: tx,
-          tileY: ty,
-          openDirection: 'south',
-          chestCount,
-          chestSlot: slot as ChestSlot,
-        });
-      }
+      candidates.push({
+        cellX,
+        cellY,
+        tileX: tx,
+        tileY: ty,
+        openDirection,
+        rank: getChestDeadEndSelectionRank(seed, cellX, cellY),
+      });
+    }
+  }
+
+  const clampedDensity = Math.max(0, Math.min(1, density));
+  const selectedCellCount = Math.round(candidates.length * clampedDensity);
+  const selectedCells = new Set(
+    [...candidates]
+      .sort((a, b) => a.rank - b.rank || a.cellY - b.cellY || a.cellX - b.cellX)
+      .slice(0, selectedCellCount)
+      .map(({ cellX, cellY }) => `${cellX},${cellY}`),
+  );
+  const placements: ChestDeadEndPlacement[] = [];
+
+  for (const candidate of candidates) {
+    const { cellX, cellY, tileX, tileY, openDirection } = candidate;
+    if (!selectedCells.has(`${cellX},${cellY}`)) continue;
+
+    const chestCount = chooseChestCount(seed, cellX, cellY);
+    for (let slot = 0; slot < chestCount; slot++) {
+      placements.push({
+        cellX,
+        cellY,
+        tileX,
+        tileY,
+        openDirection,
+        variant: getChestDeadEndVariant(openDirection),
+        chestCount,
+        chestSlot: slot as ChestSlot,
+      });
     }
   }
 

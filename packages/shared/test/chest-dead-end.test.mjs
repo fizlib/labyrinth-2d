@@ -5,6 +5,7 @@ import {
   CELL_SIZE,
   CELL_STEP_X,
   CELL_STEP_Y,
+  CHEST_DEAD_END_DENSITY,
   CHEST_INTERACTION_RANGE,
   FEET_HITBOX_H,
   MAX_WISDOM_ORBS,
@@ -16,6 +17,7 @@ import {
   computePortalPosition,
   generateMazeLayout,
   getChestDeadEndBounds,
+  getChestDeadEndVariant,
   getChestInteractionPoint,
   getChestWisdomOrbReward,
   isPositionValid,
@@ -24,25 +26,103 @@ import {
 test('seed-44 retains the authored south-opening chest dead end', () => {
   const layout = generateMazeLayout(44, 10, 3);
 
-  assert.deepEqual(layout.chestDeadEnds, computeChestDeadEndPlacements(layout.map.data, 44));
+  assert.deepEqual(
+    layout.chestDeadEnds,
+    computeChestDeadEndPlacements(layout.map.data, 44, layout.spawnPoints),
+  );
   const fixture = layout.chestDeadEnds.filter(
     (placement) => placement.cellX === 2 && placement.cellY === 9,
   );
   assert.deepEqual(
-    fixture.map(({ chestCount, chestSlot }) => ({ chestCount, chestSlot })),
+    fixture.map(({ openDirection, variant, chestCount, chestSlot }) => ({
+      openDirection,
+      variant,
+      chestCount,
+      chestSlot,
+    })),
     [
-      { chestCount: 3, chestSlot: 0 },
-      { chestCount: 3, chestSlot: 1 },
-      { chestCount: 3, chestSlot: 2 },
+      { openDirection: 'south', variant: 'north-west', chestCount: 3, chestSlot: 0 },
+      { openDirection: 'south', variant: 'north-west', chestCount: 3, chestSlot: 1 },
+      { openDirection: 'south', variant: 'north-west', chestCount: 3, chestSlot: 2 },
     ],
     'the style-editor fixture must retain its authored three-chest arrangement',
   );
 
   for (const placement of layout.chestDeadEnds) {
-    assert.equal(placement.openDirection, 'south');
+    assert.equal(placement.variant, getChestDeadEndVariant(placement.openDirection));
     assert.equal(placement.tileX, WALL_WIDTH + placement.cellX * CELL_STEP_X);
     assert.equal(placement.tileY, WALL_HEIGHT + placement.cellY * CELL_STEP_Y);
     assert.ok(placement.chestSlot < placement.chestCount);
+  }
+
+  assert.deepEqual(
+    [...new Set(layout.chestDeadEnds.map((placement) => placement.openDirection))].sort(),
+    ['east', 'north', 'south', 'west'],
+  );
+  // The stored direction is the opening back into the maze, opposite the
+  // direction in which the dead end extends.
+  assert.equal(getChestDeadEndVariant('south'), 'north-west'); // north dead end
+  assert.equal(getChestDeadEndVariant('east'), 'north-west'); // west dead end
+  assert.equal(getChestDeadEndVariant('north'), 'south-east'); // south dead end
+  assert.equal(getChestDeadEndVariant('west'), 'south-east'); // east dead end
+});
+
+test('player spawn cells never become chest cells', () => {
+  for (let seed = 0; seed < 100; seed += 1) {
+    const layout = generateMazeLayout(seed, 10, 3);
+    const spawnCells = new Set(
+      layout.spawnPoints.map((spawnPoint) => {
+        const cellX = Math.round(
+          (spawnPoint.x - CELL_SIZE / 2 - WALL_WIDTH) / CELL_STEP_X,
+        );
+        const cellY = Math.round(
+          (spawnPoint.y - CELL_SIZE / 2 - WALL_HEIGHT) / CELL_STEP_Y,
+        );
+        return `${cellX},${cellY}`;
+      }),
+    );
+
+    for (const placement of layout.chestDeadEnds) {
+      assert.equal(
+        spawnCells.has(`${placement.cellX},${placement.cellY}`),
+        false,
+        `seed ${seed}: spawn cell ${placement.cellX},${placement.cellY} contains a chest`,
+      );
+    }
+  }
+});
+
+test('chest cells occupy exactly 60% of eligible non-spawn dead ends', () => {
+  assert.equal(CHEST_DEAD_END_DENSITY, 0.6);
+
+  for (let seed = 0; seed < 100; seed += 1) {
+    const layout = generateMazeLayout(seed, 10, 3);
+    const allEligiblePlacements = computeChestDeadEndPlacements(
+      layout.map.data,
+      seed,
+      layout.spawnPoints,
+      1,
+    );
+    const selectedPlacements = computeChestDeadEndPlacements(
+      layout.map.data,
+      seed,
+      layout.spawnPoints,
+    );
+    const allEligibleCells = new Set(
+      allEligiblePlacements.map(({ cellX, cellY }) => `${cellX},${cellY}`),
+    );
+    const selectedCells = new Set(
+      selectedPlacements.map(({ cellX, cellY }) => `${cellX},${cellY}`),
+    );
+    const generatedLayoutCells = new Set(
+      layout.chestDeadEnds.map(({ cellX, cellY }) => `${cellX},${cellY}`),
+    );
+    const expectedCount = Math.round(
+      allEligibleCells.size * CHEST_DEAD_END_DENSITY,
+    );
+
+    assert.equal(selectedCells.size, expectedCount, `selection for seed ${seed}`);
+    assert.equal(generatedLayoutCells.size, expectedCount, `layout for seed ${seed}`);
   }
 });
 
@@ -57,7 +137,7 @@ test('chest-count selection follows deterministic 70/24/6 weighting', () => {
 });
 
 test('portal placement excludes cells reserved by chest dead ends', () => {
-  for (let seed = 0; seed < 40; seed++) {
+  for (let seed = 0; seed < 100; seed++) {
     const layout = generateMazeLayout(seed, 10, 3);
     const portal = computePortalPosition(
       layout.map.data,
@@ -66,7 +146,7 @@ test('portal placement excludes cells reserved by chest dead ends', () => {
       layout.swamps,
       layout.chestDeadEnds,
     );
-    if (!portal) continue;
+    assert.ok(portal, `seed ${seed} must retain a portal after directional chest placement`);
 
     const portalCellX = Math.round((portal.x - CELL_SIZE / 2 - WALL_WIDTH) / CELL_STEP_X);
     const portalCellY = Math.round((portal.y + 0.75 - WALL_HEIGHT) / CELL_STEP_Y);
@@ -92,6 +172,7 @@ test('all three exported chest-cell rectangles block player feet', () => {
     tileX: 4,
     tileY: 4,
     openDirection: 'south',
+    variant: 'north-west',
     chestCount: 1,
     chestSlot: 0,
   };
@@ -161,6 +242,7 @@ test('two- and three-chest arrangements retain every exported collider', () => {
       tileX: 4,
       tileY: 4,
       openDirection: 'south',
+      variant: 'north-west',
       chestCount,
       chestSlot,
     }));
@@ -178,6 +260,39 @@ test('two- and three-chest arrangements retain every exported collider', () => {
   }
 });
 
+test('new south/east variation retains its exported tree wall and three chest colliders', () => {
+  const placements = Array.from({ length: 3 }, (_, chestSlot) => ({
+    cellX: 0,
+    cellY: 0,
+    tileX: 4,
+    tileY: 4,
+    openDirection: 'south',
+    variant: 'south-east',
+    chestCount: 3,
+    chestSlot,
+  }));
+  const anchorX = 4 * 16;
+  const anchorY = 4 * 16;
+  const bounds = placements.flatMap((placement) => getChestDeadEndBounds(placement, 16));
+
+  assert.deepEqual(
+    bounds.map(({ kind, left, top, right, bottom }) => ({
+      kind,
+      x: left - anchorX,
+      y: top - anchorY,
+      width: right - left + 1,
+      height: bottom - top + 1,
+    })),
+    [
+      { kind: 'backdrop', x: 74, y: 8, width: 17, height: 55 },
+      { kind: 'rock', x: 60, y: 25, width: 13, height: 12 },
+      { kind: 'chest', x: 17, y: 24, width: 10, height: 9 },
+      { kind: 'chest', x: 41, y: 19, width: 10, height: 9 },
+      { kind: 'chest', x: 61, y: 40, width: 10, height: 9 },
+    ],
+  );
+});
+
 test('chest interaction point and wisdom-orb cap stay shared', () => {
   const placement = {
     cellX: 0,
@@ -185,6 +300,7 @@ test('chest interaction point and wisdom-orb cap stay shared', () => {
     tileX: 4,
     tileY: 4,
     openDirection: 'south',
+    variant: 'north-west',
     chestCount: 1,
     chestSlot: 0,
   };
@@ -204,6 +320,16 @@ test('chest interaction point and wisdom-orb cap stay shared', () => {
   });
   assert.deepEqual(getChestInteractionPoint({ ...threeChestPlacement, chestSlot: 2 }, 16), {
     x: 136,
+    y: 113,
+  });
+
+  const southEastPlacement = { ...threeChestPlacement, variant: 'south-east' };
+  assert.deepEqual(getChestInteractionPoint({ ...southEastPlacement, chestSlot: 0 }, 16), {
+    x: 87,
+    y: 97,
+  });
+  assert.deepEqual(getChestInteractionPoint({ ...southEastPlacement, chestSlot: 2 }, 16), {
+    x: 131,
     y: 113,
   });
 });

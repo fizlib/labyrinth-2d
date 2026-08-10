@@ -1,4 +1,4 @@
-import type { ChestCount, ChestSlot } from '@labyrinth/shared';
+import type { ChestCount, ChestDeadEndVariant, ChestSlot } from '@labyrinth/shared';
 import { getFiorwoodsRuntimeAssetPath } from '../assets/runtimeAssetPaths';
 
 export type ChestDeadEndAsset = keyof typeof CHEST_DEAD_END_ASSET_PATH_BY_ID;
@@ -44,9 +44,18 @@ const CHEST_DEAD_END_ASSET_PATH_BY_ID = {
   f1629: getFiorwoodsRuntimeAssetPath(1629),
   f1630: getFiorwoodsRuntimeAssetPath(1630),
   f1631: getFiorwoodsRuntimeAssetPath(1631),
+  f1677: getFiorwoodsRuntimeAssetPath(1677),
+  f1678: getFiorwoodsRuntimeAssetPath(1678),
+  f1727: getFiorwoodsRuntimeAssetPath(1727),
+  f1728: getFiorwoodsRuntimeAssetPath(1728),
+  f1777: getFiorwoodsRuntimeAssetPath(1777),
+  f1778: getFiorwoodsRuntimeAssetPath(1778),
+  f1827: getFiorwoodsRuntimeAssetPath(1827),
+  f1828: getFiorwoodsRuntimeAssetPath(1828),
+  goldflowers9: '/assets/chest-dead-end/goldflowers_9.png',
 } as const;
 
-/** Exact south-opening dead-end composition exported from the style editor. */
+/** Common terrain plus the original north/west dead-end scenery. */
 export const CHEST_DEAD_END_SPRITES = [
   {
     asset: 'f1112',
@@ -314,6 +323,143 @@ export const CHEST_DEAD_END_SPRITES = [
   },
 ] as const satisfies readonly ChestDeadEndSpriteSpec[];
 
+const NORTH_WEST_BACKDROP_ASSETS = new Set<ChestDeadEndAsset>([
+  'f1577',
+  'f1578',
+  'f1579',
+  'f1580',
+  'f1581',
+  'f1627',
+  'f1628',
+  'f1629',
+  'f1630',
+  'f1631',
+]);
+
+const COMMON_CHEST_DEAD_END_SPRITES = CHEST_DEAD_END_SPRITES.filter(
+  (spec) => !NORTH_WEST_BACKDROP_ASSETS.has(spec.asset),
+);
+
+/** Exact right-side tree and flower assembly from the south/east editor export. */
+export const SOUTH_EAST_CHEST_DEAD_END_SPRITES = [
+  {
+    asset: 'f1677',
+    name: 'Sprite_Fiorwoods_1677',
+    nativeWidth: 24,
+    nativeHeight: 20,
+    x: 71,
+    y: 6,
+    w: 12,
+    h: 10,
+    z: 1,
+    layer: 'backdrop',
+  },
+  {
+    asset: 'f1678',
+    name: 'Sprite_Fiorwoods_1678',
+    nativeWidth: 17,
+    nativeHeight: 18,
+    x: 82,
+    y: 7,
+    w: 9,
+    h: 9,
+    z: 1,
+    layer: 'backdrop',
+  },
+  {
+    asset: 'f1727',
+    name: 'Sprite_Fiorwoods_1727',
+    nativeWidth: 29,
+    nativeHeight: 32,
+    x: 68,
+    y: 16,
+    w: 15,
+    h: 16,
+    z: 1,
+    layer: 'backdrop',
+  },
+  {
+    asset: 'f1728',
+    name: 'Sprite_Fiorwoods_1728',
+    nativeWidth: 19,
+    nativeHeight: 32,
+    x: 83,
+    y: 16,
+    w: 10,
+    h: 16,
+    z: 1,
+    layer: 'backdrop',
+  },
+  {
+    asset: 'f1777',
+    name: 'Sprite_Fiorwoods_1777',
+    nativeWidth: 29,
+    nativeHeight: 32,
+    x: 68,
+    y: 32,
+    w: 15,
+    h: 16,
+    z: 1,
+    layer: 'backdrop',
+  },
+  {
+    asset: 'f1778',
+    name: 'Sprite_Fiorwoods_1778',
+    nativeWidth: 31,
+    nativeHeight: 32,
+    x: 83,
+    y: 32,
+    w: 16,
+    h: 16,
+    z: 1,
+    layer: 'backdrop',
+  },
+  {
+    asset: 'f1827',
+    name: 'Sprite_Fiorwoods_1827',
+    nativeWidth: 25,
+    nativeHeight: 29,
+    x: 71,
+    y: 47,
+    w: 12,
+    h: 16,
+    z: 1,
+    layer: 'backdrop',
+  },
+  {
+    asset: 'f1828',
+    name: 'Sprite_Fiorwoods_1828',
+    nativeWidth: 32,
+    nativeHeight: 32,
+    x: 83,
+    y: 48,
+    w: 16,
+    h: 16,
+    z: 1,
+    layer: 'backdrop',
+  },
+  {
+    asset: 'goldflowers9',
+    name: 'goldflowers_9',
+    nativeWidth: 31,
+    nativeHeight: 13,
+    x: 75,
+    y: 58,
+    w: 16,
+    h: 6,
+    z: 500,
+    layer: 'prop',
+  },
+] as const satisfies readonly ChestDeadEndSpriteSpec[];
+
+export function getChestDeadEndScenerySprites(
+  variant: ChestDeadEndVariant,
+): readonly ChestDeadEndSpriteSpec[] {
+  return variant === 'north-west'
+    ? CHEST_DEAD_END_SPRITES
+    : [...COMMON_CHEST_DEAD_END_SPRITES, ...SOUTH_EAST_CHEST_DEAD_END_SPRITES];
+}
+
 function chestSpritePair(x: number, y: number): ChestDeadEndChestSpritePair {
   return {
     closed: {
@@ -345,19 +491,34 @@ function chestSpritePair(x: number, y: number): ChestDeadEndChestSpritePair {
 
 /** Exact one-, two-, and three-chest arrangements exported from the style editor. */
 export const CHEST_DEAD_END_CHEST_LAYOUTS: Readonly<
-  Record<ChestCount, readonly ChestDeadEndChestSpritePair[]>
+  Record<
+    ChestDeadEndVariant,
+    Readonly<Record<ChestCount, readonly ChestDeadEndChestSpritePair[]>>
+  >
 > = {
-  1: [chestSpritePair(34, 23)],
-  2: [chestSpritePair(34, 23), chestSpritePair(59, 38)],
-  3: [chestSpritePair(20, 22), chestSpritePair(44, 22), chestSpritePair(64, 38)],
+  'north-west': {
+    1: [chestSpritePair(34, 23)],
+    2: [chestSpritePair(34, 23), chestSpritePair(59, 38)],
+    3: [chestSpritePair(20, 22), chestSpritePair(44, 22), chestSpritePair(64, 38)],
+  },
+  'south-east': {
+    1: [chestSpritePair(34, 23)],
+    2: [chestSpritePair(34, 23), chestSpritePair(59, 38)],
+    3: [chestSpritePair(15, 22), chestSpritePair(39, 17), chestSpritePair(59, 38)],
+  },
 };
 
 export function getChestDeadEndChestSpritePair(
+  variant: ChestDeadEndVariant,
   chestCount: ChestCount,
   chestSlot: ChestSlot,
 ): ChestDeadEndChestSpritePair {
-  const pair = CHEST_DEAD_END_CHEST_LAYOUTS[chestCount][chestSlot];
-  if (!pair) throw new Error(`Missing chest sprites for count ${chestCount}, slot ${chestSlot}`);
+  const pair = CHEST_DEAD_END_CHEST_LAYOUTS[variant][chestCount][chestSlot];
+  if (!pair) {
+    throw new Error(
+      `Missing ${variant} chest sprites for count ${chestCount}, slot ${chestSlot}`,
+    );
+  }
   return pair;
 }
 

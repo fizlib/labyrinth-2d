@@ -15,6 +15,7 @@ import {
   type BridgePlacement,
   type ChestCount,
   type ChestDeadEndPlacement,
+  type ChestDeadEndVariant,
   type SwampPlacement,
   type TileMapData,
 } from './maps/level1.js';
@@ -131,29 +132,54 @@ type ChestDeadEndColliderSpec = PortalCollisionSpec & {
   kind: ChestDeadEndCollisionBounds['kind'];
 };
 
-const CHEST_DEAD_END_BASE_COLLIDER_SPECS: readonly ChestDeadEndColliderSpec[] = [
-  { kind: 'backdrop', x: 17, y: -3, width: 70, height: 16, shape: 'rectangle' },
-  { kind: 'rock', x: 60, y: 25, width: 13, height: 12, shape: 'rectangle' },
-];
-
-/** Count-specific chest colliders exported from the two supplied editor layouts. */
-const CHEST_COLLIDER_SPECS_BY_COUNT: Readonly<
-  Record<ChestCount, readonly ChestDeadEndColliderSpec[]>
+const CHEST_DEAD_END_BASE_COLLIDER_SPECS: Readonly<
+  Record<ChestDeadEndVariant, readonly ChestDeadEndColliderSpec[]>
 > = {
-  1: [{ kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' }],
-  2: [
-    { kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' },
-    { kind: 'chest', x: 61, y: 40, width: 10, height: 9, shape: 'rectangle' },
+  'north-west': [
+    { kind: 'backdrop', x: 17, y: -3, width: 70, height: 16, shape: 'rectangle' },
+    { kind: 'rock', x: 60, y: 25, width: 13, height: 12, shape: 'rectangle' },
   ],
-  3: [
-    { kind: 'chest', x: 22, y: 24, width: 10, height: 9, shape: 'rectangle' },
-    { kind: 'chest', x: 46, y: 24, width: 10, height: 9, shape: 'rectangle' },
-    { kind: 'chest', x: 66, y: 40, width: 10, height: 9, shape: 'rectangle' },
+  'south-east': [
+    { kind: 'backdrop', x: 74, y: 8, width: 17, height: 55, shape: 'rectangle' },
+    { kind: 'rock', x: 60, y: 25, width: 13, height: 12, shape: 'rectangle' },
   ],
 };
 
+/** Count-specific chest colliders exported from the two supplied editor layouts. */
+const CHEST_COLLIDER_SPECS_BY_COUNT: Readonly<
+  Record<ChestDeadEndVariant, Readonly<Record<ChestCount, readonly ChestDeadEndColliderSpec[]>>>
+> = {
+  'north-west': {
+    1: [{ kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' }],
+    2: [
+      { kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' },
+      { kind: 'chest', x: 61, y: 40, width: 10, height: 9, shape: 'rectangle' },
+    ],
+    3: [
+      { kind: 'chest', x: 22, y: 24, width: 10, height: 9, shape: 'rectangle' },
+      { kind: 'chest', x: 46, y: 24, width: 10, height: 9, shape: 'rectangle' },
+      { kind: 'chest', x: 66, y: 40, width: 10, height: 9, shape: 'rectangle' },
+    ],
+  },
+  'south-east': {
+    1: [{ kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' }],
+    2: [
+      { kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' },
+      { kind: 'chest', x: 61, y: 40, width: 10, height: 9, shape: 'rectangle' },
+    ],
+    3: [
+      { kind: 'chest', x: 17, y: 24, width: 10, height: 9, shape: 'rectangle' },
+      { kind: 'chest', x: 41, y: 19, width: 10, height: 9, shape: 'rectangle' },
+      { kind: 'chest', x: 61, y: 40, width: 10, height: 9, shape: 'rectangle' },
+    ],
+  },
+};
+
 function getChestColliderSpec(placement: ChestDeadEndPlacement): ChestDeadEndColliderSpec {
-  const spec = CHEST_COLLIDER_SPECS_BY_COUNT[placement.chestCount][placement.chestSlot];
+  const spec =
+    CHEST_COLLIDER_SPECS_BY_COUNT[placement.variant][placement.chestCount][
+      placement.chestSlot
+    ];
   if (!spec) {
     throw new Error(
       `Missing chest collider for count ${placement.chestCount}, slot ${placement.chestSlot}`,
@@ -242,7 +268,7 @@ export function getBridgeBounds(
   }));
 }
 
-/** Rectangle colliders exported with the authored south-opening treasure cell. */
+/** Rectangle colliders exported with the authored directional treasure cells. */
 export function getChestDeadEndBounds(
   placement: ChestDeadEndPlacement,
   tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
@@ -252,7 +278,7 @@ export function getChestDeadEndBounds(
   const anchorY = placement.tileY * tileSize;
 
   const specs = placement.chestSlot === 0
-    ? [...CHEST_DEAD_END_BASE_COLLIDER_SPECS, getChestColliderSpec(placement)]
+    ? [...CHEST_DEAD_END_BASE_COLLIDER_SPECS[placement.variant], getChestColliderSpec(placement)]
     : [getChestColliderSpec(placement)];
 
   return specs.map((spec) => ({

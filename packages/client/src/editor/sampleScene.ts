@@ -54,9 +54,9 @@ import {
   type SwampObstacleAsset,
 } from '../systems/SwampObstacleLayout';
 import {
-  CHEST_DEAD_END_SPRITES,
   getChestDeadEndChestSpritePair,
   getChestDeadEndAssetPath,
+  getChestDeadEndScenerySprites,
 } from '../systems/ChestDeadEndLayout';
 import type { EditorCollider, EditorElement, SemanticRole, StyleEditorDocumentV1 } from './types';
 
@@ -596,7 +596,7 @@ function addChestDeadEndElements(
 
   const localX = (placement.tileX - CROP_TILE_X) * TILE;
   const localY = (placement.tileY - CROP_TILE_Y) * TILE;
-  for (const spec of CHEST_DEAD_END_SPRITES) {
+  for (const spec of getChestDeadEndScenerySprites(placement.variant)) {
     if (spec.layer === 'terrain') {
       const x = localX + spec.x;
       const y = localY + spec.y;
@@ -618,7 +618,7 @@ function addChestDeadEndElements(
 
     elements.push(assetElement(
       spec.name,
-      'ground.grass',
+      spec.asset === 'goldflowers9' ? 'bush' : 'ground.grass',
       getChestDeadEndAssetPath(spec.asset),
       spec.nativeWidth,
       spec.nativeHeight,
@@ -632,6 +632,7 @@ function addChestDeadEndElements(
 
   for (const chestPlacement of chestPlacements) {
     const chestSprites = getChestDeadEndChestSpritePair(
+      chestPlacement.variant,
       chestPlacement.chestCount,
       chestPlacement.chestSlot,
     );
@@ -1089,7 +1090,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
       'The portal section is anchored between seed-44 cells (8,13) and (8,14), which both have intact north forest walls. It includes the exact editable clearing, raised stone platform, inactive portal frame, split wall opening, portal hitbox, and six authored platform-edge colliders; the central stairway remains walkable.',
       'The bridge obstacle is anchored between seed-44 cells (5,11) and (5,12), with forest banks on both sides and open north/south cells. It includes the exact water repaint, stone walkway, bank decorations, and six authored colliders.',
       'The swamp obstacle spans seed-44 cells (2,5) and (3,5), with its exact authored water, banks, lilies, reeds, and cattails preserved as the editor reference.',
-      'The chest cell at seed-44 cell (2,9) is the reusable three-chest south-opening dead-end prefab, including its tree backing, closed and opened chest states, terrain stamp, rock, and count-specific authored colliders.',
+      'The chest cell at seed-44 cell (2,9) is the reusable three-chest south/east dead-end prefab, including its right-side tree and flowers, closed and opened chest states, terrain stamp, rock, and count-specific authored colliders.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',

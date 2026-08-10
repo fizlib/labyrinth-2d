@@ -139,7 +139,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Physical button occupancy treats wardens and survivors identically: two distinct players on the spawn-side buttons or one player on the hub-side button hold the gate open only while that physical requirement remains satisfied.
 - Wardens can separately latch nearby buttons with `E`; when a latch completes one side's button requirement, the gate opens for five seconds, resets every associated button, and requires occupied buttons to be released before another activation cycle.
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
-- South-opening treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
+- Directional treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
 
 ### Runestones and Portal Flow
@@ -171,7 +171,8 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 
 ### Treasure Chests
 
-- Every matching south-opening dead end deterministically selects one, two, or three independently indexed chests. The weighted split is 70% one chest, 24% two, and 6% three.
+- Exactly 60% (rounded to the nearest whole cell) of eligible non-spawn maze dead ends are deterministically selected as chest cells. Each selected cell then chooses one, two, or three independently indexed chests with a 70% / 24% / 6% weighted split.
+- Dead ends extending south or east use the new right-side tree-and-flower variant; dead ends extending north or west use the original north-side variant. The stored opening direction points back into the maze and is therefore the opposite compass direction.
 - Two- and three-chest cells use their exact style-editor arrangements and matching colliders rather than offsetting the one-chest prefab at runtime.
 - The server validates the opener's role-specific eligibility, distance, current inventory, and the chest's unopened state before accepting `OPEN_CHEST`. Survivors receive one orb; wardens only consume the chest.
 - Opening swaps all clients to the authored `chest01 16` sprite and plays a short blue wisdom-magic burst.
@@ -207,7 +208,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 9. Stamp a visual-only dirt mask around each closed gate so the client can render short dirt approaches that transition back into grass.
 10. Select up to 12 bridge passages across the whole maze, independently of spawn-to-hub routes. Each bridge connects two empty 6×6 cells, retains forest walls along its west and east banks, excludes spawn/hub/gate cells, and never shares either adjacent cell with another bridge.
 11. Assign every bridge a distinct deterministic hidden route through its 2×6 central-stone walkway. The permanent stair tiles at both ends are outside the puzzle. Routes have one safe tile at each endpoint and one or two non-adjacent rows where the route crosses between columns.
-12. Identify every south-opening dead end, deterministically select its weighted one-, two-, or three-chest arrangement, and attach the authored chest-cell prefab. Portal placement excludes those reserved cells.
+12. Exclude actual safe player spawn cells, identify every dead end in all four orientations, deterministically select 60% of the eligible cells, then attach each cell's weighted one-, two-, or three-chest direction-mapped prefab. Portal placement excludes those reserved cells.
 
 ### Spawns and Objective Placement
 
@@ -307,6 +308,7 @@ The loader attempts to load authored PNG assets first and falls back to generate
 - `assets/portal-platform/` (the authored Tormund masonry modules used by the portal stairs and platform)
 - `assets/chest-dead-end/chest01_0.png`
 - `assets/chest-dead-end/chest01_16.png`
+- `assets/chest-dead-end/goldflowers_9.png`
 - `assets/wisdom_orb.png`
 - `assets/expand_button.png`
 - `assets/contract_button.png`

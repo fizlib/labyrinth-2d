@@ -4,9 +4,9 @@ import {
   type ChestDeadEndPlacement,
 } from '@labyrinth/shared';
 import {
-  CHEST_DEAD_END_SPRITES,
   getChestDeadEndChestSpritePair,
   getChestDeadEndAssetPath,
+  getChestDeadEndScenerySprites,
 } from './ChestDeadEndLayout';
 
 const AUTHORING_TILE_SIZE = 16;
@@ -46,6 +46,7 @@ export class ChestDeadEndVisual {
     const scale = tileSize / AUTHORING_TILE_SIZE;
     this.renderScale = scale;
     const { closed: closedSpec, open: openSpec } = getChestDeadEndChestSpritePair(
+      placement.variant,
       placement.chestCount,
       placement.chestSlot,
     );
@@ -186,7 +187,7 @@ export function addChestDeadEnds(
       backdrop.y = anchorY;
       backdrop.zIndex = Math.round(anchorY + 16 * scale);
 
-      for (const spec of CHEST_DEAD_END_SPRITES) {
+      for (const spec of getChestDeadEndScenerySprites(placement.variant)) {
         const texture = textures.get(getChestDeadEndAssetPath(spec.asset));
         if (!texture) continue;
 
