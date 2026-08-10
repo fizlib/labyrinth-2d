@@ -1,3 +1,4 @@
+import type { ChestCount, ChestSlot } from '@labyrinth/shared';
 import { getFiorwoodsRuntimeAssetPath } from '../assets/runtimeAssetPaths';
 
 export type ChestDeadEndAsset = keyof typeof CHEST_DEAD_END_ASSET_PATH_BY_ID;
@@ -13,6 +14,11 @@ export interface ChestDeadEndSpriteSpec {
   h: number;
   z: number;
   layer: 'terrain' | 'backdrop' | 'prop';
+}
+
+export interface ChestDeadEndChestSpritePair {
+  closed: ChestDeadEndSpriteSpec;
+  open: ChestDeadEndSpriteSpec;
 }
 
 const CHEST_DEAD_END_ASSET_PATH_BY_ID = {
@@ -295,18 +301,6 @@ export const CHEST_DEAD_END_SPRITES = [
     layer: 'backdrop',
   },
   {
-    asset: 'chest',
-    name: 'chest01 0',
-    nativeWidth: 30,
-    nativeHeight: 25,
-    x: 34,
-    y: 23,
-    w: 15,
-    h: 13,
-    z: 500,
-    layer: 'prop',
-  },
-  {
     asset: 'f1285',
     name: 'Sprite_Fiorwoods_1285',
     nativeWidth: 31,
@@ -320,19 +314,52 @@ export const CHEST_DEAD_END_SPRITES = [
   },
 ] as const satisfies readonly ChestDeadEndSpriteSpec[];
 
-/** Exact opened-chest state exported from the style editor. */
-export const CHEST_DEAD_END_OPEN_SPRITE = {
-  asset: 'chestOpen',
-  name: 'chest01 16',
-  nativeWidth: 30,
-  nativeHeight: 37,
-  x: 34,
-  y: 18,
-  w: 15,
-  h: 18,
-  z: 501,
-  layer: 'prop',
-} as const satisfies ChestDeadEndSpriteSpec;
+function chestSpritePair(x: number, y: number): ChestDeadEndChestSpritePair {
+  return {
+    closed: {
+      asset: 'chest',
+      name: 'chest01 0',
+      nativeWidth: 30,
+      nativeHeight: 25,
+      x,
+      y,
+      w: 15,
+      h: 13,
+      z: 500,
+      layer: 'prop',
+    },
+    open: {
+      asset: 'chestOpen',
+      name: 'chest01 16',
+      nativeWidth: 30,
+      nativeHeight: 37,
+      x,
+      y: y - 5,
+      w: 15,
+      h: 18,
+      z: 501,
+      layer: 'prop',
+    },
+  };
+}
+
+/** Exact one-, two-, and three-chest arrangements exported from the style editor. */
+export const CHEST_DEAD_END_CHEST_LAYOUTS: Readonly<
+  Record<ChestCount, readonly ChestDeadEndChestSpritePair[]>
+> = {
+  1: [chestSpritePair(34, 23)],
+  2: [chestSpritePair(34, 23), chestSpritePair(59, 38)],
+  3: [chestSpritePair(20, 22), chestSpritePair(44, 22), chestSpritePair(64, 38)],
+};
+
+export function getChestDeadEndChestSpritePair(
+  chestCount: ChestCount,
+  chestSlot: ChestSlot,
+): ChestDeadEndChestSpritePair {
+  const pair = CHEST_DEAD_END_CHEST_LAYOUTS[chestCount][chestSlot];
+  if (!pair) throw new Error(`Missing chest sprites for count ${chestCount}, slot ${chestSlot}`);
+  return pair;
+}
 
 export function getChestDeadEndAssetPath(asset: ChestDeadEndAsset): string {
   return CHEST_DEAD_END_ASSET_PATH_BY_ID[asset];

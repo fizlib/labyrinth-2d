@@ -13,6 +13,7 @@
 import {
   isSolidTileId,
   type BridgePlacement,
+  type ChestCount,
   type ChestDeadEndPlacement,
   type SwampPlacement,
   type TileMapData,
@@ -73,11 +74,8 @@ export interface ChestDeadEndCollisionBounds extends PortalBounds {
 
 const BRIDGE_AUTHORING_TILE_SIZE = 16;
 
-/** Pixel radius within which a survivor may open a treasure chest. */
+/** Pixel radius within which a player may open a treasure chest. */
 export const CHEST_INTERACTION_RANGE = 28;
-
-const CHEST_INTERACTION_X = 42;
-const CHEST_INTERACTION_Y = 34;
 
 /** Collider geometry exported from the authored bridge-obstacle sample. */
 const BRIDGE_COLLIDER_SPECS: readonly PortalCollisionSpec[] = [
@@ -129,13 +127,40 @@ const PORTAL_PLATFORM_COLLIDER_SPECS: readonly PortalCollisionSpec[] = [
   },
 ];
 
-const CHEST_DEAD_END_COLLIDER_SPECS: readonly (PortalCollisionSpec & {
+type ChestDeadEndColliderSpec = PortalCollisionSpec & {
   kind: ChestDeadEndCollisionBounds['kind'];
-})[] = [
+};
+
+const CHEST_DEAD_END_BASE_COLLIDER_SPECS: readonly ChestDeadEndColliderSpec[] = [
   { kind: 'backdrop', x: 17, y: -3, width: 70, height: 16, shape: 'rectangle' },
   { kind: 'rock', x: 60, y: 25, width: 13, height: 12, shape: 'rectangle' },
-  { kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' },
 ];
+
+/** Count-specific chest colliders exported from the two supplied editor layouts. */
+const CHEST_COLLIDER_SPECS_BY_COUNT: Readonly<
+  Record<ChestCount, readonly ChestDeadEndColliderSpec[]>
+> = {
+  1: [{ kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' }],
+  2: [
+    { kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' },
+    { kind: 'chest', x: 61, y: 40, width: 10, height: 9, shape: 'rectangle' },
+  ],
+  3: [
+    { kind: 'chest', x: 22, y: 24, width: 10, height: 9, shape: 'rectangle' },
+    { kind: 'chest', x: 46, y: 24, width: 10, height: 9, shape: 'rectangle' },
+    { kind: 'chest', x: 66, y: 40, width: 10, height: 9, shape: 'rectangle' },
+  ],
+};
+
+function getChestColliderSpec(placement: ChestDeadEndPlacement): ChestDeadEndColliderSpec {
+  const spec = CHEST_COLLIDER_SPECS_BY_COUNT[placement.chestCount][placement.chestSlot];
+  if (!spec) {
+    throw new Error(
+      `Missing chest collider for count ${placement.chestCount}, slot ${placement.chestSlot}`,
+    );
+  }
+  return spec;
+}
 
 export const PLAYER_SPEED = 80;
 export const FEET_HITBOX_W = 8;
@@ -226,7 +251,11 @@ export function getChestDeadEndBounds(
   const anchorX = placement.tileX * tileSize;
   const anchorY = placement.tileY * tileSize;
 
-  return CHEST_DEAD_END_COLLIDER_SPECS.map((spec) => ({
+  const specs = placement.chestSlot === 0
+    ? [...CHEST_DEAD_END_BASE_COLLIDER_SPECS, getChestColliderSpec(placement)]
+    : [getChestColliderSpec(placement)];
+
+  return specs.map((spec) => ({
     kind: spec.kind,
     left: anchorX + spec.x * scale,
     top: anchorY + spec.y * scale,
@@ -235,15 +264,16 @@ export function getChestDeadEndBounds(
   }));
 }
 
-/** Authored chest center used by matching client and server interaction checks. */
+/** Authored chest interaction point used by matching client and server checks. */
 export function getChestInteractionPoint(
   placement: ChestDeadEndPlacement,
   tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
 ): { x: number; y: number } {
   const scale = tileSize / BRIDGE_AUTHORING_TILE_SIZE;
+  const spec = getChestColliderSpec(placement);
   return {
-    x: placement.tileX * tileSize + CHEST_INTERACTION_X * scale,
-    y: placement.tileY * tileSize + CHEST_INTERACTION_Y * scale,
+    x: placement.tileX * tileSize + (spec.x + spec.width / 2 + 1) * scale,
+    y: placement.tileY * tileSize + (spec.y + spec.height) * scale,
   };
 }
 

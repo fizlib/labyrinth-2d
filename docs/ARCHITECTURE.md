@@ -134,7 +134,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
-- South-opening treasure dead ends use the same three authored rectangle colliders on the client and server for their tree backing, rock, and chest.
+- South-opening treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
 
 ### Runestones and Portal Flow
@@ -166,7 +166,8 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 
 ### Treasure Chests
 
-- Every matching south-opening dead end owns one deterministic shared chest index.
+- Every matching south-opening dead end deterministically selects one, two, or three independently indexed chests. The weighted split is 70% one chest, 24% two, and 6% three.
+- Two- and three-chest cells use their exact style-editor arrangements and matching colliders rather than offsetting the one-chest prefab at runtime.
 - The server validates the opener's role-specific eligibility, distance, current inventory, and the chest's unopened state before accepting `OPEN_CHEST`. Survivors receive one orb; wardens only consume the chest.
 - Opening swaps all clients to the authored `chest01 16` sprite and plays a short blue wisdom-magic burst.
 - Open state persists in `GameState.chestStates`, so late joiners see the correct sprite without replaying the opening effect.
@@ -201,7 +202,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 9. Stamp a visual-only dirt mask around each closed gate so the client can render short dirt approaches that transition back into grass.
 10. Select up to 12 bridge passages across the whole maze, independently of spawn-to-hub routes. Each bridge connects two empty 6×6 cells, retains forest walls along its west and east banks, excludes spawn/hub/gate cells, and never shares either adjacent cell with another bridge.
 11. Assign every bridge a distinct deterministic hidden route through its 2×6 central-stone walkway. The permanent stair tiles at both ends are outside the puzzle. Routes have one safe tile at each endpoint and one or two non-adjacent rows where the route crosses between columns.
-12. Identify every south-opening dead end and attach the authored chest-cell prefab. Portal placement excludes those reserved cells.
+12. Identify every south-opening dead end, deterministically select its weighted one-, two-, or three-chest arrangement, and attach the authored chest-cell prefab. Portal placement excludes those reserved cells.
 
 ### Spawns and Objective Placement
 

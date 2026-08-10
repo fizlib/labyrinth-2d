@@ -11,6 +11,7 @@ import {
   TILE_FLOOR,
   WALL_HEIGHT,
   WALL_WIDTH,
+  chooseChestCount,
   computeChestDeadEndPlacements,
   computePortalPosition,
   generateMazeLayout,
@@ -23,19 +24,36 @@ import {
 test('seed-44 retains the authored south-opening chest dead end', () => {
   const layout = generateMazeLayout(44, 10, 3);
 
-  assert.deepEqual(layout.chestDeadEnds, computeChestDeadEndPlacements(layout.map.data));
-  assert.ok(
-    layout.chestDeadEnds.some(
-      (placement) => placement.cellX === 2 && placement.cellY === 9,
-    ),
-    'the style-editor fixture must remain anchored to cell 2,9',
+  assert.deepEqual(layout.chestDeadEnds, computeChestDeadEndPlacements(layout.map.data, 44));
+  const fixture = layout.chestDeadEnds.filter(
+    (placement) => placement.cellX === 2 && placement.cellY === 9,
+  );
+  assert.deepEqual(
+    fixture.map(({ chestCount, chestSlot }) => ({ chestCount, chestSlot })),
+    [
+      { chestCount: 3, chestSlot: 0 },
+      { chestCount: 3, chestSlot: 1 },
+      { chestCount: 3, chestSlot: 2 },
+    ],
+    'the style-editor fixture must retain its authored three-chest arrangement',
   );
 
   for (const placement of layout.chestDeadEnds) {
     assert.equal(placement.openDirection, 'south');
     assert.equal(placement.tileX, WALL_WIDTH + placement.cellX * CELL_STEP_X);
     assert.equal(placement.tileY, WALL_HEIGHT + placement.cellY * CELL_STEP_Y);
+    assert.ok(placement.chestSlot < placement.chestCount);
   }
+});
+
+test('chest-count selection follows deterministic 70/24/6 weighting', () => {
+  const counts = [0, 0, 0, 0];
+  for (let seed = 0; seed < 10_000; seed++) counts[chooseChestCount(seed, 4, 7)]++;
+
+  assert.ok(counts[1] > 6_700 && counts[1] < 7_300, `one chest: ${counts[1]}`);
+  assert.ok(counts[2] > 2_100 && counts[2] < 2_700, `two chests: ${counts[2]}`);
+  assert.ok(counts[3] > 400 && counts[3] < 800, `three chests: ${counts[3]}`);
+  assert.equal(chooseChestCount(44, 2, 9), 3);
 });
 
 test('portal placement excludes cells reserved by chest dead ends', () => {
@@ -74,6 +92,8 @@ test('all three exported chest-cell rectangles block player feet', () => {
     tileX: 4,
     tileY: 4,
     openDirection: 'south',
+    chestCount: 1,
+    chestSlot: 0,
   };
   const bounds = getChestDeadEndBounds(placement, map.tileSize);
 
@@ -119,6 +139,45 @@ test('all three exported chest-cell rectangles block player feet', () => {
   );
 });
 
+test('two- and three-chest arrangements retain every exported collider', () => {
+  const expectedByCount = {
+    2: [
+      { x: 36, y: 25, width: 10, height: 9 },
+      { x: 61, y: 40, width: 10, height: 9 },
+    ],
+    3: [
+      { x: 22, y: 24, width: 10, height: 9 },
+      { x: 46, y: 24, width: 10, height: 9 },
+      { x: 66, y: 40, width: 10, height: 9 },
+    ],
+  };
+
+  for (const chestCount of [2, 3]) {
+    const anchorX = 4 * 16;
+    const anchorY = 4 * 16;
+    const placements = Array.from({ length: chestCount }, (_, chestSlot) => ({
+      cellX: 0,
+      cellY: 0,
+      tileX: 4,
+      tileY: 4,
+      openDirection: 'south',
+      chestCount,
+      chestSlot,
+    }));
+    const chestBounds = placements
+      .flatMap((placement) => getChestDeadEndBounds(placement, 16))
+      .filter((bounds) => bounds.kind === 'chest')
+      .map(({ left, top, right, bottom }) => ({
+        x: left - anchorX,
+        y: top - anchorY,
+        width: right - left + 1,
+        height: bottom - top + 1,
+      }));
+
+    assert.deepEqual(chestBounds, expectedByCount[chestCount]);
+  }
+});
+
 test('chest interaction point and wisdom-orb cap stay shared', () => {
   const placement = {
     cellX: 0,
@@ -126,6 +185,8 @@ test('chest interaction point and wisdom-orb cap stay shared', () => {
     tileX: 4,
     tileY: 4,
     openDirection: 'south',
+    chestCount: 1,
+    chestSlot: 0,
   };
 
   assert.deepEqual(getChestInteractionPoint(placement, 16), { x: 106, y: 98 });
@@ -135,4 +196,14 @@ test('chest interaction point and wisdom-orb cap stay shared', () => {
   assert.equal(getChestWisdomOrbReward(2), 3);
   assert.equal(getChestWisdomOrbReward(3), null);
   assert.equal(getChestWisdomOrbReward(4), null);
+
+  const threeChestPlacement = { ...placement, chestCount: 3 };
+  assert.deepEqual(getChestInteractionPoint({ ...threeChestPlacement, chestSlot: 0 }, 16), {
+    x: 92,
+    y: 97,
+  });
+  assert.deepEqual(getChestInteractionPoint({ ...threeChestPlacement, chestSlot: 2 }, 16), {
+    x: 136,
+    y: 113,
+  });
 });

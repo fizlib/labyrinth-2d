@@ -54,8 +54,8 @@ import {
   type SwampObstacleAsset,
 } from '../systems/SwampObstacleLayout';
 import {
-  CHEST_DEAD_END_OPEN_SPRITE,
   CHEST_DEAD_END_SPRITES,
+  getChestDeadEndChestSpritePair,
   getChestDeadEndAssetPath,
 } from '../systems/ChestDeadEndLayout';
 import type { EditorCollider, EditorElement, SemanticRole, StyleEditorDocumentV1 } from './types';
@@ -584,11 +584,12 @@ function addChestDeadEndElements(
   elements: EditorElement[],
   colliders: EditorCollider[],
 ): void {
-  const placement = layout.chestDeadEnds.find(
+  const chestPlacements = layout.chestDeadEnds.filter(
     (candidate) =>
       candidate.cellX === CHEST_SAMPLE_CELL_X &&
       candidate.cellY === CHEST_SAMPLE_CELL_Y,
   );
+  const placement = chestPlacements[0];
   if (!placement) {
     throw new Error('Seed-44 chest dead-end fixture is missing at cell 2,9');
   }
@@ -617,7 +618,7 @@ function addChestDeadEndElements(
 
     elements.push(assetElement(
       spec.name,
-      spec.asset === 'chest' ? 'decoration' : 'ground.grass',
+      'ground.grass',
       getChestDeadEndAssetPath(spec.asset),
       spec.nativeWidth,
       spec.nativeHeight,
@@ -629,31 +630,40 @@ function addChestDeadEndElements(
     ));
   }
 
-  const openChest = CHEST_DEAD_END_OPEN_SPRITE;
-  elements.push(assetElement(
-    openChest.name,
-    'decoration',
-    getChestDeadEndAssetPath(openChest.asset),
-    openChest.nativeWidth,
-    openChest.nativeHeight,
-    localX + openChest.x,
-    localY + openChest.y,
-    openChest.w,
-    openChest.h,
-    openChest.z,
-  ));
+  for (const chestPlacement of chestPlacements) {
+    const chestSprites = getChestDeadEndChestSpritePair(
+      chestPlacement.chestCount,
+      chestPlacement.chestSlot,
+    );
+    for (const chest of [chestSprites.closed, chestSprites.open]) {
+      elements.push(assetElement(
+        chest.name,
+        'decoration',
+        getChestDeadEndAssetPath(chest.asset),
+        chest.nativeWidth,
+        chest.nativeHeight,
+        localX + chest.x,
+        localY + chest.y,
+        chest.w,
+        chest.h,
+        chest.z,
+      ));
+    }
+  }
 
   const cropPixelX = CROP_TILE_X * TILE;
   const cropPixelY = CROP_TILE_Y * TILE;
-  for (const bounds of getChestDeadEndBounds(placement, TILE)) {
-    colliders.push(collider(
-      `Chest dead end · ${bounds.kind}`,
-      bounds.left - cropPixelX,
-      bounds.top - cropPixelY,
-      bounds.right - bounds.left + 1,
-      bounds.bottom - bounds.top + 1,
-      'freeform',
-    ));
+  for (const chestPlacement of chestPlacements) {
+    for (const bounds of getChestDeadEndBounds(chestPlacement, TILE)) {
+      colliders.push(collider(
+        `Chest dead end · ${bounds.kind}`,
+        bounds.left - cropPixelX,
+        bounds.top - cropPixelY,
+        bounds.right - bounds.left + 1,
+        bounds.bottom - bounds.top + 1,
+        'freeform',
+      ));
+    }
   }
 }
 
@@ -1079,7 +1089,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
       'The portal section is anchored between seed-44 cells (8,13) and (8,14), which both have intact north forest walls. It includes the exact editable clearing, raised stone platform, inactive portal frame, split wall opening, portal hitbox, and six authored platform-edge colliders; the central stairway remains walkable.',
       'The bridge obstacle is anchored between seed-44 cells (5,11) and (5,12), with forest banks on both sides and open north/south cells. It includes the exact water repaint, stone walkway, bank decorations, and six authored colliders.',
       'The swamp obstacle spans seed-44 cells (2,5) and (3,5), with its exact authored water, banks, lilies, reeds, and cattails preserved as the editor reference.',
-      'The chest cell at seed-44 cell (2,9) is the reusable south-opening dead-end prefab, including its tree backing, closed and opened chest states, terrain stamp, rock, and three authored rectangle colliders.',
+      'The chest cell at seed-44 cell (2,9) is the reusable three-chest south-opening dead-end prefab, including its tree backing, closed and opened chest states, terrain stamp, rock, and count-specific authored colliders.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',

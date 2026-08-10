@@ -4,8 +4,8 @@ import {
   type ChestDeadEndPlacement,
 } from '@labyrinth/shared';
 import {
-  CHEST_DEAD_END_OPEN_SPRITE,
   CHEST_DEAD_END_SPRITES,
+  getChestDeadEndChestSpritePair,
   getChestDeadEndAssetPath,
 } from './ChestDeadEndLayout';
 
@@ -32,6 +32,7 @@ export class ChestDeadEndVisual {
   private readonly magic: Container;
   private readonly aura: Graphics;
   private readonly particles: MagicParticle[] = [];
+  private readonly renderScale: number;
   private opened = false;
   private magicElapsed = MAGIC_DURATION;
 
@@ -43,8 +44,11 @@ export class ChestDeadEndVisual {
     openTexture: Texture,
   ) {
     const scale = tileSize / AUTHORING_TILE_SIZE;
-    const closedSpec = CHEST_DEAD_END_SPRITES.find((spec) => spec.asset === 'chest');
-    if (!closedSpec) throw new Error('Chest dead-end closed sprite is missing');
+    this.renderScale = scale;
+    const { closed: closedSpec, open: openSpec } = getChestDeadEndChestSpritePair(
+      placement.chestCount,
+      placement.chestSlot,
+    );
 
     const anchorX = placement.tileX * tileSize;
     const anchorY = placement.tileY * tileSize;
@@ -52,7 +56,7 @@ export class ChestDeadEndVisual {
     this.interactionX = interaction.x;
     this.interactionY = interaction.y;
     this.promptX = interaction.x;
-    this.promptY = anchorY + (CHEST_DEAD_END_OPEN_SPRITE.y - 2) * scale;
+    this.promptY = anchorY + (openSpec.y - 2) * scale;
 
     this.container = new Container();
     this.container.sortableChildren = true;
@@ -70,7 +74,6 @@ export class ChestDeadEndVisual {
     this.closedSprite.zIndex = closedSpec.z;
     this.container.addChild(this.closedSprite);
 
-    const openSpec = CHEST_DEAD_END_OPEN_SPRITE;
     this.openSprite = new Sprite(openTexture);
     this.openSprite.x = openSpec.x * scale;
     this.openSprite.y = openSpec.y * scale;
@@ -143,9 +146,8 @@ export class ChestDeadEndVisual {
       const progress = (durationProgress * 1.65 + particle.phase) % 1;
       particle.graphic.x =
         (particle.drift + Math.sin((progress + particle.phase) * Math.PI * 2) * 2) *
-        (this.openSprite.width / CHEST_DEAD_END_OPEN_SPRITE.w);
-      particle.graphic.y =
-        -progress * 24 * (this.openSprite.height / CHEST_DEAD_END_OPEN_SPRITE.h);
+        this.renderScale;
+      particle.graphic.y = -progress * 24 * this.renderScale;
       particle.graphic.alpha = Math.sin(progress * Math.PI) * fade;
       const particleScale = 0.65 + (1 - progress) * 0.45;
       particle.graphic.scale.set(particleScale);
@@ -172,53 +174,58 @@ export function addChestDeadEnds(
   for (const [index, placement] of placements.entries()) {
     const anchorX = placement.tileX * tileSize;
     const anchorY = placement.tileY * tileSize;
-    const terrain = new Container();
-    terrain.sortableChildren = true;
-    terrain.x = anchorX;
-    terrain.y = anchorY;
-    terrain.zIndex = -1;
-    const backdrop = new Container();
-    backdrop.sortableChildren = true;
-    backdrop.x = anchorX;
-    backdrop.y = anchorY;
-    backdrop.zIndex = Math.round(anchorY + 16 * scale);
+    if (placement.chestSlot === 0) {
+      const terrain = new Container();
+      terrain.sortableChildren = true;
+      terrain.x = anchorX;
+      terrain.y = anchorY;
+      terrain.zIndex = -1;
+      const backdrop = new Container();
+      backdrop.sortableChildren = true;
+      backdrop.x = anchorX;
+      backdrop.y = anchorY;
+      backdrop.zIndex = Math.round(anchorY + 16 * scale);
 
-    for (const spec of CHEST_DEAD_END_SPRITES) {
-      if (spec.asset === 'chest') continue;
-      const texture = textures.get(getChestDeadEndAssetPath(spec.asset));
-      if (!texture) continue;
+      for (const spec of CHEST_DEAD_END_SPRITES) {
+        const texture = textures.get(getChestDeadEndAssetPath(spec.asset));
+        if (!texture) continue;
 
-      const sprite = new Sprite(texture);
-      sprite.width = spec.w * scale;
-      sprite.height = spec.h * scale;
+        const sprite = new Sprite(texture);
+        sprite.width = spec.w * scale;
+        sprite.height = spec.h * scale;
 
-      if (spec.layer === 'terrain') {
-        sprite.x = spec.x * scale;
-        sprite.y = spec.y * scale;
-        sprite.zIndex = spec.z;
-        terrain.addChild(sprite);
-        continue;
+        if (spec.layer === 'terrain') {
+          sprite.x = spec.x * scale;
+          sprite.y = spec.y * scale;
+          sprite.zIndex = spec.z;
+          terrain.addChild(sprite);
+          continue;
+        }
+
+        if (spec.layer === 'backdrop') {
+          sprite.x = spec.x * scale;
+          sprite.y = spec.y * scale;
+          sprite.zIndex = spec.z;
+          backdrop.addChild(sprite);
+          continue;
+        }
+
+        sprite.x = anchorX + spec.x * scale;
+        sprite.y = anchorY + spec.y * scale;
+        sprite.zIndex = Math.round(anchorY + (spec.y + spec.h) * scale);
+        entities.push(sprite);
       }
 
-      if (spec.layer === 'backdrop') {
-        sprite.x = spec.x * scale;
-        sprite.y = spec.y * scale;
-        sprite.zIndex = spec.z;
-        backdrop.addChild(sprite);
-        continue;
-      }
-
-      sprite.x = anchorX + spec.x * scale;
-      sprite.y = anchorY + spec.y * scale;
-      sprite.zIndex = Math.round(anchorY + (spec.y + spec.h) * scale);
-      entities.push(sprite);
+      if (terrain.children.length > 0) terrainParent.addChild(terrain);
+      else terrain.destroy();
+      if (backdrop.children.length > 0) entities.push(backdrop);
+      else backdrop.destroy();
     }
 
     const closedTexture = textures.get(getChestDeadEndAssetPath('chest'));
     if (closedTexture) {
       const openTexture =
-        textures.get(getChestDeadEndAssetPath(CHEST_DEAD_END_OPEN_SPRITE.asset)) ??
-        closedTexture;
+        textures.get(getChestDeadEndAssetPath('chestOpen')) ?? closedTexture;
       const visual = new ChestDeadEndVisual(
         index,
         placement,
@@ -229,11 +236,6 @@ export function addChestDeadEnds(
       visuals.push(visual);
       entities.push(visual.container);
     }
-
-    if (terrain.children.length > 0) terrainParent.addChild(terrain);
-    else terrain.destroy();
-    if (backdrop.children.length > 0) entities.push(backdrop);
-    else backdrop.destroy();
   }
 
   return { entities, visuals };
