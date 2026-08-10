@@ -152,6 +152,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Each survivor starts with `1` wisdom orb; wardens start with `0` and server-side role validation rejects their orb requests.
 - Survivors may carry at most `3` wisdom orbs. Opening a nearby unopened chest grants one orb only when the survivor is below that cap. Wardens can instead open and permanently consume a chest without granting an orb to anyone.
 - Roles and wisdom orbs are server-authoritative private room state. They are never included in broadcast `GameState` snapshots.
+- Nearby bridge and swamp route reveals are tracked privately per player. The first orb reveals that obstacle's safe route; later orb uses near the same revealed obstacle return normal hub/portal direction guidance instead of replaying the reveal.
 - Shared phase-aware guidance lives in `packages/shared/src/navigation.ts`.
 - `computeHubDistanceField()` builds the phase 1 pathfield toward the central hub.
 - `computePortalDistanceField()` builds the phase 2 pathfield toward walkable portal-approach tiles around the blocked portal collider.

@@ -276,6 +276,12 @@ export class Room {
   /** Current bridge attempt for each player. */
   private readonly bridgeTraversals = new Map<string, BridgeTraversalState>();
 
+  /** Bridge routes privately revealed to each player by wisdom orbs. */
+  private readonly revealedWisdomBridges = new Map<string, Set<number>>();
+
+  /** Swamp routes privately revealed to each player by wisdom orbs. */
+  private readonly revealedWisdomSwamps = new Map<string, Set<number>>();
+
   /** Expiry time for each bridge's short wrong-stone visual marker. */
   private readonly bridgeFailureFeedbackExpirations = new Map<number, number>();
 
@@ -418,6 +424,8 @@ export class Room {
 
     this.sockets.set(playerId, ws);
     this.inputQueues.set(playerId, []);
+    this.revealedWisdomBridges.set(playerId, new Set());
+    this.revealedWisdomSwamps.set(playerId, new Set());
 
     // Each team spawns at its corresponding dynamic spawn point
     const spawnTile = this.spawnPoints[assignedTeam] ?? this.spawnPoints[0];
@@ -488,6 +496,8 @@ export class Room {
     this.inputQueues.delete(playerId);
     this.bridgeTraversals.delete(playerId);
     this.bridgeRepairOccupancy.delete(playerId);
+    this.revealedWisdomBridges.delete(playerId);
+    this.revealedWisdomSwamps.delete(playerId);
     this.state.players = this.state.players.filter((p) => p.id !== playerId);
 
     const leftMsg: PlayerLeftMessage = {
@@ -843,45 +853,63 @@ export class Room {
     );
     if (bridgeHintTarget) {
       const bridge = this.bridges[bridgeHintTarget.bridgeIndex];
-      player.wisdomOrbs--;
-      const orbUsedMsg: WisdomOrbUsedMessage = {
-        type: MessageType.WisdomOrbUsed,
-        hint: {
-          kind: 'bridge',
-          bridgeIndex: bridgeHintTarget.bridgeIndex,
-          entrySide: bridgeHintTarget.entrySide,
-          safeTileMask: bridge.safeTileMask,
-        },
-        remainingWisdomOrbs: player.wisdomOrbs,
-      };
-      this.send(ws, orbUsedMsg);
+      const revealedBridges = this.revealedWisdomBridges.get(playerId);
+      if (!revealedBridges?.has(bridgeHintTarget.bridgeIndex)) {
+        player.wisdomOrbs--;
+        revealedBridges?.add(bridgeHintTarget.bridgeIndex);
+        const orbUsedMsg: WisdomOrbUsedMessage = {
+          type: MessageType.WisdomOrbUsed,
+          hint: {
+            kind: 'bridge',
+            bridgeIndex: bridgeHintTarget.bridgeIndex,
+            entrySide: bridgeHintTarget.entrySide,
+            safeTileMask: bridge.safeTileMask,
+          },
+          remainingWisdomOrbs: player.wisdomOrbs,
+        };
+        this.send(ws, orbUsedMsg);
+        console.info(
+          `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} -> private bridge ${bridgeHintTarget.bridgeIndex} route from ${bridgeHintTarget.entrySide} (${player.wisdomOrbs} remaining)`,
+        );
+        return;
+      }
+
       console.info(
-        `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} -> private bridge ${bridgeHintTarget.bridgeIndex} route from ${bridgeHintTarget.entrySide} (${player.wisdomOrbs} remaining)`,
+        `[Room:${this.id}][WisdomOrb] Bridge ${bridgeHintTarget.bridgeIndex} is already revealed to ${playerId}; using directional guidance instead`,
       );
-      return;
     }
 
-    const swampHintTarget = findSwampWisdomHintTarget(
-      this.swamps,
-      player.x,
-      player.y,
-      this.map.tileSize,
-    );
-    if (swampHintTarget) {
-      player.wisdomOrbs--;
-      const orbUsedMsg: WisdomOrbUsedMessage = {
-        type: MessageType.WisdomOrbUsed,
-        hint: {
-          kind: 'swamp',
-          swampIndex: swampHintTarget.swampIndex,
-        },
-        remainingWisdomOrbs: player.wisdomOrbs,
-      };
-      this.send(ws, orbUsedMsg);
-      console.info(
-        `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} -> private swamp ${swampHintTarget.swampIndex} firm-ground route (${player.wisdomOrbs} remaining)`,
+    if (!bridgeHintTarget) {
+      const swampHintTarget = findSwampWisdomHintTarget(
+        this.swamps,
+        player.x,
+        player.y,
+        this.map.tileSize,
       );
-      return;
+      if (swampHintTarget) {
+        const revealedSwamps = this.revealedWisdomSwamps.get(playerId);
+        if (!revealedSwamps?.has(swampHintTarget.swampIndex)) {
+          player.wisdomOrbs--;
+          revealedSwamps?.add(swampHintTarget.swampIndex);
+          const orbUsedMsg: WisdomOrbUsedMessage = {
+            type: MessageType.WisdomOrbUsed,
+            hint: {
+              kind: 'swamp',
+              swampIndex: swampHintTarget.swampIndex,
+            },
+            remainingWisdomOrbs: player.wisdomOrbs,
+          };
+          this.send(ws, orbUsedMsg);
+          console.info(
+            `[Room:${this.id}][WisdomOrb] SUCCESS: ${playerId} -> private swamp ${swampHintTarget.swampIndex} firm-ground route (${player.wisdomOrbs} remaining)`,
+          );
+          return;
+        }
+
+        console.info(
+          `[Room:${this.id}][WisdomOrb] Swamp ${swampHintTarget.swampIndex} is already revealed to ${playerId}; using directional guidance instead`,
+        );
+      }
     }
 
     const activeTarget = this.portalActivated ? 'portal' : 'hub';
@@ -1583,6 +1611,8 @@ export class Room {
     this.sockets.clear();
     this.inputQueues.clear();
     this.bridgeTraversals.clear();
+    this.revealedWisdomBridges.clear();
+    this.revealedWisdomSwamps.clear();
     this.bridgeFailureFeedbackExpirations.clear();
     this.bridgeRepairOccupancy.clear();
     this.state.players = [];
