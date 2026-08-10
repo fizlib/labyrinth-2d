@@ -14,6 +14,7 @@ import { Container, Sprite, Texture, Graphics, Rectangle } from 'pixi.js';
 import type {
   BridgePlacement,
   ChestDeadEndPlacement,
+  SwordFieldPlacement,
   SwampPlacement,
   TileMapData,
 } from '@labyrinth/shared';
@@ -75,6 +76,10 @@ const COL_SWAMP_DOT: readonly number[] = [104, 156, 72, 255]; // marsh vegetatio
 const COL_CHEST_OUTLINE: readonly number[] = [58, 32, 18, 255]; // dark iron/wood edge
 const COL_CHEST_WOOD: readonly number[] = [181, 91, 39, 255]; // warm chest boards
 const COL_CHEST_GOLD: readonly number[] = [255, 202, 61, 255]; // trim and latch
+const COL_SWORD_GRIP: readonly number[] = [139, 48, 52, 255]; // red leather handles
+const COL_SWORD_GUARD: readonly number[] = [235, 177, 61, 255]; // warm gold crossguards
+const COL_SWORD_BLADE: readonly number[] = [190, 205, 216, 255]; // cool steel
+const COL_SWORD_HIGHLIGHT: readonly number[] = [244, 249, 250, 255]; // blade shine/tip
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
 const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot center
@@ -85,6 +90,7 @@ export interface MinimapOptions {
   isWarden?: boolean;
   bridges?: readonly BridgePlacement[];
   swamps?: readonly SwampPlacement[];
+  swordFields?: readonly SwordFieldPlacement[];
   chestDeadEnds?: readonly ChestDeadEndPlacement[];
   expandButtonTexture?: Texture | null;
   contractButtonTexture?: Texture | null;
@@ -121,6 +127,7 @@ export class Minimap {
   private dirtMask: Uint8Array;
   private bridgeMask: Uint8Array;
   private swampMask: Uint8Array;
+  private swordFieldMask: Uint8Array;
   private chestMask: Uint8Array;
   private fog: Uint8Array;
 
@@ -153,6 +160,7 @@ export class Minimap {
     this.dirtMask = dirtMask;
     this.bridgeMask = this.createBridgeMask(options.bridges ?? []);
     this.swampMask = this.createSwampMask(options.swamps ?? []);
+    this.swordFieldMask = this.createSwordFieldMask(options.swordFields ?? []);
     this.chestMask = this.createChestMask(options.chestDeadEnds ?? []);
     this.isWarden = options.isWarden ?? false;
     this.expandButtonTexture = options.expandButtonTexture ?? null;
@@ -441,6 +449,42 @@ export class Minimap {
           tileY < this.mapData.height
         ) {
           mask[tileY * this.mapData.width + tileX] = 2;
+        }
+      }
+    }
+
+    return mask;
+  }
+
+  /** Stamp three tiny swords with their grips up and blade tips pointing down. */
+  private createSwordFieldMask(
+    swordFields: readonly SwordFieldPlacement[],
+  ): Uint8Array {
+    const mask = new Uint8Array(this.mapData.width * this.mapData.height);
+    const glyph = [
+      [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+      [2, 2, 2, 0, 2, 2, 2, 0, 2, 2, 2],
+      [0, 4, 0, 0, 0, 4, 0, 0, 0, 4, 0],
+      [0, 3, 0, 0, 0, 3, 0, 0, 0, 3, 0],
+      [0, 3, 0, 0, 0, 3, 0, 0, 0, 3, 0],
+      [0, 4, 0, 0, 0, 4, 0, 0, 0, 4, 0],
+    ] as const;
+
+    for (const placement of swordFields) {
+      for (let localY = 0; localY < glyph.length; localY++) {
+        for (let localX = 0; localX < glyph[localY].length; localX++) {
+          const value = glyph[localY][localX];
+          if (value === 0) continue;
+          const tileX = placement.tileX + localX;
+          const tileY = placement.tileY + localY;
+          if (
+            tileX >= 0 &&
+            tileX < this.mapData.width &&
+            tileY >= 0 &&
+            tileY < this.mapData.height
+          ) {
+            mask[tileY * this.mapData.width + tileX] = value;
+          }
         }
       }
     }
@@ -809,6 +853,10 @@ export class Minimap {
 
   /** Get the minimap colour for a given tile ID. */
   private tileColor(tileIndex: number, id: number): readonly number[] {
+    if (this.swordFieldMask[tileIndex] === 4) return COL_SWORD_HIGHLIGHT;
+    if (this.swordFieldMask[tileIndex] === 3) return COL_SWORD_BLADE;
+    if (this.swordFieldMask[tileIndex] === 2) return COL_SWORD_GUARD;
+    if (this.swordFieldMask[tileIndex] === 1) return COL_SWORD_GRIP;
     if (this.chestMask[tileIndex] === 3) return COL_CHEST_GOLD;
     if (this.chestMask[tileIndex] === 2) return COL_CHEST_WOOD;
     if (this.chestMask[tileIndex] === 1) return COL_CHEST_OUTLINE;
