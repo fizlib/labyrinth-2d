@@ -21,6 +21,7 @@ import type {
   PressurePlateInfo,
   BridgePlacement,
   SwampPlacement,
+  ChestDeadEndPlacement,
   BridgeEntrySide,
   BridgeState,
 } from '@labyrinth/shared';
@@ -50,6 +51,7 @@ import {
 import { addBridgeObstacles, type BridgeObstacleVisual } from './BridgeObstacle';
 import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
 import { addSwampObstacles, type SwampObstacleVisual } from './SwampObstacle';
+import { addChestDeadEnds } from './ChestDeadEnd';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -375,6 +377,8 @@ export class TilemapRenderer {
   readonly swampForegroundSprites: Sprite[];
   /** Firm-ground route reveals in generated swamp-index order. */
   readonly swampVisuals: SwampObstacleVisual[];
+  /** Authored tree backing and collidable props in treasure dead ends. */
+  readonly chestDeadEndSprites: Container[];
 
   // ── Internal tracking for culling + cleanup ────────────────────────────
   private allChunks: ChunkMeta[] = [];
@@ -387,6 +391,7 @@ export class TilemapRenderer {
     pressurePlates: PressurePlateInfo[],
     bridges: BridgePlacement[],
     swamps: SwampPlacement[],
+    chestDeadEnds: ChestDeadEndPlacement[],
     dirtMask: Uint8Array,
     assets: GameAssets,
     renderer: Renderer,
@@ -763,6 +768,12 @@ export class TilemapRenderer {
     );
     this.swampForegroundSprites = swampRender.foregroundSprites;
     this.swampVisuals = swampRender.visuals;
+    this.chestDeadEndSprites = addChestDeadEnds(
+      chestDeadEnds,
+      ts,
+      assets.chestDeadEndTextures,
+      this.forestUnderlayLayer,
+    );
 
     // ── Step 3: Extract Special Entities ──────────────────────────────
 
@@ -974,6 +985,11 @@ export class TilemapRenderer {
       sprite.destroy();
     }
 
+    for (const sprite of this.chestDeadEndSprites) {
+      sprite.parent?.removeChild(sprite);
+      sprite.destroy({ children: true });
+    }
+
     for (const rs of this.runestoneSprites) {
       rs.sprite.parent?.removeChild(rs.sprite);
       rs.sprite.destroy();
@@ -995,6 +1011,7 @@ export class TilemapRenderer {
     this.treeSprites.length = 0;
     this.swampForegroundSprites.length = 0;
     this.swampVisuals.length = 0;
+    this.chestDeadEndSprites.length = 0;
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;
     this.pressurePlateSprites.length = 0;

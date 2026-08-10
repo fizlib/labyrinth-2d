@@ -13,6 +13,7 @@
 import {
   isSolidTileId,
   type BridgePlacement,
+  type ChestDeadEndPlacement,
   type SwampPlacement,
   type TileMapData,
 } from './maps/level1.js';
@@ -66,6 +67,10 @@ interface PortalCollisionSpec {
   flipY?: boolean;
 }
 
+export interface ChestDeadEndCollisionBounds extends PortalBounds {
+  kind: 'backdrop' | 'rock' | 'chest';
+}
+
 const BRIDGE_AUTHORING_TILE_SIZE = 16;
 
 /** Collider geometry exported from the authored bridge-obstacle sample. */
@@ -116,6 +121,14 @@ const PORTAL_PLATFORM_COLLIDER_SPECS: readonly PortalCollisionSpec[] = [
     shape: 'right-triangle',
     flipY: true,
   },
+];
+
+const CHEST_DEAD_END_COLLIDER_SPECS: readonly (PortalCollisionSpec & {
+  kind: ChestDeadEndCollisionBounds['kind'];
+})[] = [
+  { kind: 'backdrop', x: 17, y: -3, width: 70, height: 16, shape: 'rectangle' },
+  { kind: 'rock', x: 60, y: 25, width: 13, height: 12, shape: 'rectangle' },
+  { kind: 'chest', x: 36, y: 25, width: 10, height: 9, shape: 'rectangle' },
 ];
 
 export const PLAYER_SPEED = 80;
@@ -195,6 +208,24 @@ export function getBridgeBounds(
     shape: spec.shape,
     flipX: spec.flipX ?? false,
     flipY: spec.flipY ?? false,
+  }));
+}
+
+/** Rectangle colliders exported with the authored south-opening treasure cell. */
+export function getChestDeadEndBounds(
+  placement: ChestDeadEndPlacement,
+  tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
+): ChestDeadEndCollisionBounds[] {
+  const scale = tileSize / BRIDGE_AUTHORING_TILE_SIZE;
+  const anchorX = placement.tileX * tileSize;
+  const anchorY = placement.tileY * tileSize;
+
+  return CHEST_DEAD_END_COLLIDER_SPECS.map((spec) => ({
+    kind: spec.kind,
+    left: anchorX + spec.x * scale,
+    top: anchorY + spec.y * scale,
+    right: anchorX + (spec.x + spec.width) * scale - 1,
+    bottom: anchorY + (spec.y + spec.height) * scale - 1,
   }));
 }
 
@@ -306,6 +337,7 @@ export function isPositionValid(
   portal?: PortalCollider | null,
   bridges: readonly BridgePlacement[] = [],
   bridgeStates: readonly BridgeState[] = [],
+  chestDeadEnds: readonly ChestDeadEndPlacement[] = [],
 ): boolean {
   const ts = map.tileSize;
 
@@ -343,6 +375,12 @@ export function isPositionValid(
   for (const bridge of bridges) {
     for (const bounds of getBridgeBounds(bridge, ts)) {
       if (intersectsAuthoredCollision(left, top, right, bottom, bounds)) return false;
+    }
+  }
+
+  for (const chestDeadEnd of chestDeadEnds) {
+    for (const bounds of getChestDeadEndBounds(chestDeadEnd, ts)) {
+      if (intersectsBounds(left, top, right, bottom, bounds)) return false;
     }
   }
 
@@ -388,6 +426,7 @@ export function applyInputWithCollision(
   bridges: readonly BridgePlacement[] = [],
   bridgeStates: readonly BridgeState[] = [],
   swamps: readonly SwampPlacement[] = [],
+  chestDeadEnds: readonly ChestDeadEndPlacement[] = [],
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
@@ -403,14 +442,14 @@ export function applyInputWithCollision(
 
   if (dx !== 0) {
     const candidateX = x + dx;
-    if (isPositionValid(candidateX, y, map, portal, bridges, bridgeStates)) {
+    if (isPositionValid(candidateX, y, map, portal, bridges, bridgeStates, chestDeadEnds)) {
       newX = candidateX;
     }
   }
 
   if (dy !== 0) {
     const candidateY = y + dy;
-    if (isPositionValid(newX, candidateY, map, portal, bridges, bridgeStates)) {
+    if (isPositionValid(newX, candidateY, map, portal, bridges, bridgeStates, chestDeadEnds)) {
       newY = candidateY;
     }
   }

@@ -1639,6 +1639,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       entityLayer.addChild(swampDecoration);
     }
 
+    for (const chestDeadEndSprite of renderer.chestDeadEndSprites) {
+      entityLayer.addChild(chestDeadEndSprite);
+    }
+
     for (const tree of renderer.treeSprites) {
       entityLayer.addChild(tree);
     }
@@ -1676,6 +1680,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout.pressurePlates,
         currentLayout.bridges,
         currentLayout.swamps,
+        currentLayout.chestDeadEnds,
         currentLayout.dirtMask,
         assets,
         app.renderer,
@@ -1830,6 +1835,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         layout.pressurePlates,
         layout.bridges,
         layout.swamps,
+        layout.chestDeadEnds,
         layout.dirtMask,
         assets,
         app.renderer,
@@ -1995,6 +2001,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
               currentLayout?.bridges,
               gameState.bridgeStates,
               currentLayout?.swamps,
+              currentLayout?.chestDeadEnds,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -2328,6 +2335,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout?.bridges,
         latestServerState?.bridgeStates,
         currentLayout?.swamps,
+        currentLayout?.chestDeadEnds,
       );
       localX = result.x;
       localY = result.y;

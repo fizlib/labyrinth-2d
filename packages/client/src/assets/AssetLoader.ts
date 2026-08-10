@@ -34,6 +34,7 @@ import {
 import { PORTAL_PLATFORM_ASSET_PATHS } from '../systems/PortalPlatformLayout';
 import { BRIDGE_OBSTACLE_ASSET_PATHS } from '../systems/BridgeObstacleLayout';
 import { SWAMP_OBSTACLE_ASSET_PATHS } from '../systems/SwampObstacleLayout';
+import { CHEST_DEAD_END_ASSET_PATHS } from '../systems/ChestDeadEndLayout';
 import {
   CHARACTER_ATLAS_MANIFEST,
   CHARACTER_ATLAS_PATH,
@@ -184,6 +185,8 @@ export interface GameAssets {
   bridgeObstacleTextures: ReadonlyMap<string, Texture>;
   /** Authored terrain, lilies, and vegetation used by swamp obstacles. */
   swampObstacleTextures: ReadonlyMap<string, Texture>;
+  /** Authored tree backing, chest, and rock used by treasure dead ends. */
+  chestDeadEndTextures: ReadonlyMap<string, Texture>;
   /** Number of activation frames (the rest are active idle frames). */
   portalActivationCount: number;
   /** Wisdom orb HUD texture. */
@@ -255,6 +258,7 @@ export async function loadAssets(
   let portalPlatformTextures = new Map<string, Texture>();
   let bridgeObstacleTextures = new Map<string, Texture>();
   let swampObstacleTextures = new Map<string, Texture>();
+  let chestDeadEndTextures = new Map<string, Texture>();
   let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
   let expandMapButtonTexture: Texture | null = null;
@@ -959,6 +963,25 @@ export async function loadAssets(
     console.warn('[Assets] Swamp obstacle modules unavailable', error);
   }
 
+  // ── Authored chest dead-end modules ─────────────────────────────────────
+  try {
+    chestDeadEndTextures = new Map(
+      await Promise.all(
+        CHEST_DEAD_END_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded chest dead ends (${chestDeadEndTextures.size} source modules)`,
+    );
+  } catch (error) {
+    chestDeadEndTextures.clear();
+    console.warn('[Assets] Chest dead-end modules unavailable', error);
+  }
+
   reportProgress(0.93, 'Inscribing the final glyphs…');
 
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
@@ -1081,6 +1104,7 @@ export async function loadAssets(
     portalPlatformTextures,
     bridgeObstacleTextures,
     swampObstacleTextures,
+    chestDeadEndTextures,
     portalActivationCount,
     wisdomOrbTexture,
     expandMapButtonTexture,

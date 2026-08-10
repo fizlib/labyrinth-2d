@@ -94,6 +94,17 @@ export interface SwampPlacement {
   tileY: number;
 }
 
+/** Authored treasure-cell prefab placed in a south-opening maze dead end. */
+export interface ChestDeadEndPlacement {
+  cellX: number;
+  cellY: number;
+  /** Top-left tile of the 6×6 walkable dead-end cell. */
+  tileX: number;
+  tileY: number;
+  /** The current prefab is authored only for the north-backed, south-opening topology. */
+  openDirection: 'south';
+}
+
 export interface GeneratedMazeLayout {
   map: TileMapData;
   spawnPoints: SpawnPoint[];
@@ -104,6 +115,8 @@ export interface GeneratedMazeLayout {
   bridges: BridgePlacement[];
   /** Walkable swamps placed in qualifying horizontal passages. */
   swamps: SwampPlacement[];
+  /** Treasure prefabs placed in every matching south-opening dead end. */
+  chestDeadEnds: ChestDeadEndPlacement[];
   /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
   dirtMask: Uint8Array;
 }
@@ -1188,6 +1201,7 @@ export function generateMazeLayout(
 
   const bridges = computeBridgePlacements(gatedData, spawnPoints, seed);
   const swamps = computeSwampPlacements(gatedData, spawnPoints, bridges, seed);
+  const chestDeadEnds = computeChestDeadEndPlacements(gatedData);
 
   const safeSpawnPoints = spawnPoints.map((spawnPoint) =>
     findSafeSpawnPoint(gatedData, spawnPoint));
@@ -1204,6 +1218,7 @@ export function generateMazeLayout(
     pressurePlates,
     bridges,
     swamps,
+    chestDeadEnds,
     dirtMask,
   };
 }
@@ -1248,6 +1263,46 @@ function areCellsConnected(
     }
   }
   return false;
+}
+
+/**
+ * Find every maze cell matching the authored chest prefab's topology.
+ *
+ * The source composition has a tree facade across its north edge and can only
+ * be reused without breaking the game's 2.5D perspective when south is the
+ * cell's sole opening.
+ */
+export function computeChestDeadEndPlacements(data: number[]): ChestDeadEndPlacement[] {
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
+  const hubCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+  const placements: ChestDeadEndPlacement[] = [];
+
+  for (let cellY = 0; cellY < GRID_CELLS; cellY++) {
+    for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
+      if (hubCells.has(`${cellX},${cellY}`)) continue;
+
+      const northOpen = cellY > 0 &&
+        areCellsConnected(data, cellX, cellY, cellX, cellY - 1);
+      const eastOpen = cellX < GRID_CELLS - 1 &&
+        areCellsConnected(data, cellX, cellY, cellX + 1, cellY);
+      const southOpen = cellY < GRID_CELLS - 1 &&
+        areCellsConnected(data, cellX, cellY, cellX, cellY + 1);
+      const westOpen = cellX > 0 &&
+        areCellsConnected(data, cellX, cellY, cellX - 1, cellY);
+
+      if (northOpen || eastOpen || !southOpen || westOpen) continue;
+      const { tx, ty } = cellToTile(cellX, cellY);
+      placements.push({
+        cellX,
+        cellY,
+        tileX: tx,
+        tileY: ty,
+        openDirection: 'south',
+      });
+    }
+  }
+
+  return placements;
 }
 
 /**
@@ -1420,6 +1475,7 @@ export function computePortalPosition(
   spawnDistance: number,
   bridges: readonly BridgePlacement[] = [],
   swamps: readonly SwampPlacement[] = [],
+  chestDeadEnds: readonly ChestDeadEndPlacement[] = [],
 ): SpawnPoint | null {
   const obstacleCells = new Set<string>();
   for (const bridge of bridges) {
@@ -1430,6 +1486,9 @@ export function computePortalPosition(
     for (let offset = 0; offset < swamp.lengthCells; offset++) {
       obstacleCells.add(`${swamp.westCellX + offset},${swamp.cellY}`);
     }
+  }
+  for (const chestDeadEnd of chestDeadEnds) {
+    obstacleCells.add(`${chestDeadEnd.cellX},${chestDeadEnd.cellY}`);
   }
 
   const supportsPortalPlatform = (cx: number, cy: number): boolean => {

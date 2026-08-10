@@ -57,6 +57,7 @@ import {
   type GatePlacement,
   type PressurePlateInfo,
   type BridgePlacement,
+  type ChestDeadEndPlacement,
   type SwampPlacement,
   type BridgeEntrySide,
   type BridgeState,
@@ -256,6 +257,9 @@ export class Room {
   /** Authored walkable swamps from deterministic map generation. */
   private readonly swamps: SwampPlacement[];
 
+  /** Authored collidable treasure prefabs in south-opening dead ends. */
+  private readonly chestDeadEnds: ChestDeadEndPlacement[];
+
   /** Shared, server-authoritative missing-stone masks. */
   private readonly bridgeStates: BridgeState[];
 
@@ -291,6 +295,7 @@ export class Room {
     this.pressurePlates = layout.pressurePlates;
     this.bridges = layout.bridges;
     this.swamps = layout.swamps;
+    this.chestDeadEnds = layout.chestDeadEnds;
     this.bridgeStates = this.bridges.map((_, bridgeIndex) => ({
       bridgeIndex,
       collapsedTileMask: 0,
@@ -310,6 +315,7 @@ export class Room {
       SPAWN_DISTANCE,
       this.bridges,
       this.swamps,
+      this.chestDeadEnds,
     );
     if (portalTile) {
       this.portalPosition = {
@@ -910,6 +916,7 @@ export class Room {
           this.bridges,
           this.bridgeStates,
           this.swamps,
+          this.chestDeadEnds,
         );
         player.x = result.x;
         player.y = result.y;

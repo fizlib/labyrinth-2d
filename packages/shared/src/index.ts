@@ -23,12 +23,14 @@ export {
   isPortalWallOpeningTile,
   getPortalPlatformBounds,
   getBridgeBounds,
+  getChestDeadEndBounds,
   applyInput,
   isPositionValid,
   applyInputWithCollision,
   type PortalBounds,
   type PortalCollisionBounds,
   type PortalCollider,
+  type ChestDeadEndCollisionBounds,
 } from './physics.js';
 
 export {
@@ -109,6 +111,7 @@ export {
   MAX_SWAMP_LENGTH_CELLS,
   GRID_CELLS,
   computePortalPosition,
+  computeChestDeadEndPlacements,
   generateMazeLayout,
   generateMaze,
   type TileMapData,
@@ -119,6 +122,7 @@ export {
   type PressurePlateInfo,
   type BridgePlacement,
   type SwampPlacement,
+  type ChestDeadEndPlacement,
   type GeneratedMazeLayout,
   type HubTileBounds,
   getHubTileBounds,

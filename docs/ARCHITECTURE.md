@@ -129,6 +129,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Player position is stored at the feet, not the sprite center, which keeps wall contact and sorting consistent.
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
+- South-opening treasure dead ends use the same three authored rectangle colliders on the client and server for their tree backing, rock, and chest.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
 
 ### Runestones and Portal Flow
@@ -186,6 +187,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 9. Stamp a visual-only dirt mask around each closed gate so the client can render short dirt approaches that transition back into grass.
 10. Select up to 12 bridge passages across the whole maze, independently of spawn-to-hub routes. Each bridge connects two empty 6×6 cells, retains forest walls along its west and east banks, excludes spawn/hub/gate cells, and never shares either adjacent cell with another bridge.
 11. Assign every bridge a distinct deterministic hidden route through its 2×6 central-stone walkway. The permanent stair tiles at both ends are outside the puzzle. Routes have one safe tile at each endpoint and one or two non-adjacent rows where the route crosses between columns.
+12. Identify every south-opening dead end and attach the authored chest-cell prefab. Portal placement excludes those reserved cells.
 
 ### Spawns and Objective Placement
 
@@ -283,6 +285,7 @@ The loader attempts to load authored PNG assets first and falls back to generate
 - `assets/runestones.png`
 - `assets/portal_spritesheet.png`
 - `assets/portal-platform/` (the authored Tormund masonry modules used by the portal stairs and platform)
+- `assets/chest-dead-end/chest01_0.png`
 - `assets/wisdom_orb.png`
 - `assets/expand_button.png`
 - `assets/contract_button.png`
