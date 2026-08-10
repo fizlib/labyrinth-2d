@@ -160,6 +160,22 @@ uWS
             break;
           }
 
+          case MessageType.ActivateTrapCell: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) room.handleActivateTrapCell(data.id, msg);
+            }
+            break;
+          }
+
+          case MessageType.OpenCage: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) room.handleOpenCage(data.id, msg);
+            }
+            break;
+          }
+
           case MessageType.UseWisdomOrb: {
             if (data.roomId) {
               const room = rooms.get(data.roomId);

@@ -9,6 +9,7 @@
 import type { HubDirection } from './navigation.js';
 import type { BridgeEntrySide, BridgeState } from './bridge.js';
 import type { SwordFieldState } from './sword-field.js';
+import type { CageState } from './cage.js';
 
 export {
   PLAYER_SPEED,
@@ -94,6 +95,31 @@ export {
   type SwordFieldWisdomTarget,
 } from './sword-field.js';
 
+export {
+  CAGE_INTERACTION_RANGE,
+  CAGE_COLLIDER_WIDTH,
+  CAGE_COLLIDER_TOP_OFFSET,
+  CAGE_COLLIDER_BOTTOM_OFFSET,
+  CAGE_EXIT_DISTANCE,
+  getCageCollisionBounds,
+  getCageInteractionPoint,
+  isPlayerActivelyCaged,
+  findActivePlayerCage,
+  hasPrisonerExitedCage,
+  findOpenableCage,
+  type CageState,
+  type CageCollisionBounds,
+} from './cage.js';
+
+export {
+  TRAP_CELL_INTERACTION_RANGE,
+  getTrapCellWorldBounds,
+  isPlayerInTrapCell,
+  findTrapCellInteractionTarget,
+  type TrapCellWorldBounds,
+  type TrapCellInteractionTarget,
+} from './trap-cell.js';
+
 // ── Re-export map data ──────────────────────────────────────────────────────
 export {
   TILE_FLOOR,
@@ -129,11 +155,15 @@ export {
   GRID_CELLS,
   computePortalPosition,
   CHEST_DEAD_END_DENSITY,
+  TRAP_CELL_DENSITY,
+  MIN_TRAP_CELLS,
+  MAX_TRAP_CELLS,
   chooseChestCount,
   getChestDeadEndVariant,
   computeChestDeadEndPlacements,
   computeSwordFieldPlacements,
   computeTeamRouteSwordFieldPlacements,
+  computeTrapCellPlacements,
   generateMazeLayout,
   generateMaze,
   type TileMapData,
@@ -145,6 +175,7 @@ export {
   type BridgePlacement,
   type SwampPlacement,
   type SwordFieldPlacement,
+  type TrapCellPlacement,
   type ChestCount,
   type ChestSlot,
   type ChestDeadEndDirection,
@@ -263,6 +294,8 @@ export enum MessageType {
   ActivateRunestone = 'ACTIVATE_RUNESTONE',
   OpenChest = 'OPEN_CHEST',
   PressPressurePlate = 'PRESS_PRESSURE_PLATE',
+  ActivateTrapCell = 'ACTIVATE_TRAP_CELL',
+  OpenCage = 'OPEN_CAGE',
   UseWisdomOrb = 'USE_WISDOM_ORB',
   DebugTeleport = 'DEBUG_TELEPORT',
   DebugPlayerAction = 'DEBUG_PLAYER_ACTION',
@@ -317,6 +350,18 @@ export interface PressPressurePlateMessage {
   type: MessageType.PressPressurePlate;
   /** Unique deterministic pressure-plate ID from the generated layout. */
   plateId: number;
+}
+
+export interface ActivateTrapCellMessage {
+  type: MessageType.ActivateTrapCell;
+  /** Index into the deterministic trap-cell placement array. */
+  trapCellIndex: number;
+}
+
+export interface OpenCageMessage {
+  type: MessageType.OpenCage;
+  /** Stable room-local ID of the nearby closed cage. */
+  cageId: number;
 }
 
 export interface UseWisdomOrbMessage {
@@ -554,6 +599,8 @@ export interface GameState {
   chestStates: ChestState[];
   /** Shared lowering/cleared state for each deterministic sword barrier. */
   swordFieldStates: SwordFieldState[];
+  /** Spawned survivor cages, including vacated cages that remain solid forever. */
+  cageStates: CageState[];
 }
 
 // ── Union Types ─────────────────────────────────────────────────────────────
@@ -564,6 +611,8 @@ export type ClientToServerMessage =
   | ActivateRunestoneMessage
   | OpenChestMessage
   | PressPressurePlateMessage
+  | ActivateTrapCellMessage
+  | OpenCageMessage
   | UseWisdomOrbMessage
   | DebugTeleportMessage
   | DebugPlayerActionMessage;

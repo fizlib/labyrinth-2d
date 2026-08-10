@@ -4,7 +4,7 @@
 
 Nine players enter a labyrinth in three squads. Each squad begins in a different location and must reach the central hub. Most players are survivors trying to unlock the labyrinth and escape, while two hidden wardens try to delay and misdirect them until time runs out.
 
-Traps and other hazards can slow players down, but they do not eliminate players.
+Traps and other hazards can delay or temporarily imprison players, but they do not eliminate players.
 
 ## Players, squads, and roles
 
@@ -73,10 +73,21 @@ Traps and other hazards can slow players down, but they do not eliminate players
 
 ## Warden information and play
 
+### Trap cells and cages
+
+- Every room deterministically places 6-10 trap cells on otherwise empty 6x6 maze cells. They avoid all spawns, the hub, gates, authored obstacles, treasure cells, and the portal platform.
+- Wardens see trap cells as translucent red floor regions in the world and as red cells on both versions of their minimap. Survivors do not see either indicator.
+- A warden inside or within 20 pixels of a trap cell sees a red `[ E ]` above their head. Keyboard/mobile `E`, or clicking the prompt, asks the server to activate that nearby cell.
+- One activation checks every trap cell simultaneously. Each uncaged survivor currently standing in any trap cell receives a cage at their exact position.
+- A closed cage completely immobilizes its survivor without freezing their character animation: movement input changes facing and plays the walk cycle in place. The visual uses `birdCage1` behind the character and `birdCage2` in front, with a short magical materialization effect.
+- A different, non-imprisoned player within 28 pixels sees `[ E ]` and can open the gate, swapping the front art to `birdCage3`. The prisoner may then move only up or down until they clear the cage.
+- Once vacated, the empty cage remains a permanent solid collider and cannot be entered again.
+- If the same survivor is trapped again in the same trap cell, their previous cage in that cell disappears as the new cage materializes. Cages belonging to other players or other cells remain in place.
+
 Each warden has a private map that shows:
 
 - The complete labyrinth layout.
-- Trap locations, marked with an **X**.
+- Trap cells, marked in **red**.
 - Escape-door locations from the beginning of the match.
 
 The warden map does **not** show:
@@ -110,7 +121,7 @@ The following values and details should be tuned through playtesting:
 
 - Total match duration.
 - Maze size and navigation difficulty.
-- Trap frequency and the duration of slowing effects.
+- Trap-cell frequency, activation cadence, and cage rescue distance.
 - How visible locked escape doors are from commonly travelled routes.
 - How often the unused fourth hub route is the best place to search.
 - How much directional precision a wisdom-orb arrow provides.

@@ -14,7 +14,7 @@
 // Viewport culling hides off-screen chunks every frame.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Container, Sprite, Texture, Renderer, Rectangle } from 'pixi.js';
+import { Container, Sprite, Texture, Renderer, Rectangle, Graphics } from 'pixi.js';
 import type {
   TileMapData,
   GatePlacement,
@@ -23,6 +23,7 @@ import type {
   SwampPlacement,
   SwordFieldPlacement,
   SwordFieldState,
+  TrapCellPlacement,
   ChestDeadEndPlacement,
   ChestState,
   BridgeEntrySide,
@@ -42,6 +43,7 @@ import {
   TILE_PRESSURE_PLATE,
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
+  CELL_SIZE,
 } from '@labyrinth/shared';
 import type { DirtTextures, GameAssets, FrontGateTextures } from '../assets/AssetLoader';
 import {
@@ -375,6 +377,8 @@ export class TilemapRenderer {
   readonly forestUnderlayLayer: Container;
   /** Authored ground-edge modules. Attach below entities, above terrain. */
   readonly groundDetailLayer: Container;
+  /** Warden-only red overlays spanning complete 6x6 trap cells. */
+  readonly trapCellHighlightLayer: Container;
 
   // ── Forest/gate row chunks — attach to the foreground wall layer ──────
   readonly wallRowChunks: Container[] = [];
@@ -414,6 +418,7 @@ export class TilemapRenderer {
     bridges: BridgePlacement[],
     swamps: SwampPlacement[],
     swordFields: SwordFieldPlacement[],
+    trapCells: TrapCellPlacement[],
     chestDeadEnds: ChestDeadEndPlacement[],
     dirtMask: Uint8Array,
     assets: GameAssets,
@@ -431,6 +436,18 @@ export class TilemapRenderer {
     this.forestUnderlayLayer.sortableChildren = true;
     this.groundDetailLayer = new Container();
     this.groundDetailLayer.sortableChildren = true;
+    this.trapCellHighlightLayer = new Container();
+    this.trapCellHighlightLayer.visible = false;
+
+    for (const placement of trapCells) {
+      const size = CELL_SIZE * ts;
+      const highlight = new Graphics()
+        .rect(placement.tileX * ts, placement.tileY * ts, size, size)
+        .fill({ color: 0xd7192d, alpha: 0.2 })
+        .rect(placement.tileX * ts + 1, placement.tileY * ts + 1, size - 2, size - 2)
+        .stroke({ color: 0xff3348, alpha: 0.82, width: 2 });
+      this.trapCellHighlightLayer.addChild(highlight);
+    }
 
     // ── Step 1: Build 32×32 2D Chunks (Background + Shadows) ─────────
 
@@ -1001,6 +1018,11 @@ export class TilemapRenderer {
     for (const swamp of this.swampVisuals) swamp.setWardenVisible(visible);
   }
 
+  /** Reveal or hide the complete trap-cell network for the local role. */
+  setWardenTrapHighlights(visible: boolean): void {
+    this.trapCellHighlightLayer.visible = visible;
+  }
+
   // ── Per-frame viewport culling ────────────────────────────────────────
 
   /**
@@ -1041,6 +1063,7 @@ export class TilemapRenderer {
     this.portalTerrainLayer.destroy({ children: true });
     this.forestUnderlayLayer.destroy({ children: true });
     this.groundDetailLayer.destroy({ children: true });
+    this.trapCellHighlightLayer.destroy({ children: true });
 
     for (const chunk of this.wallRowChunks) {
       chunk.parent?.removeChild(chunk);

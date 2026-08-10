@@ -64,6 +64,13 @@ export interface DirtTextures {
   northWest: Texture;
 }
 
+/** Three-layer authored bird-cage prefab: back, closed front, open front. */
+export interface CageTextures {
+  back: Texture;
+  closed: Texture;
+  open: Texture;
+}
+
 /**
  * Fiorwoods tree-wall modules. The original maps build a south-facing tree
  * facade from eight 32px rows, with a separate low hedge treatment for the
@@ -199,6 +206,8 @@ export interface GameAssets {
   pressurePlateFrames: Texture[];
   /** Hub-side pressure plate animation frames (24x16). */
   hubPressurePlateFrames: Texture[];
+  /** Authored cage layers exported from the supplied style scene. */
+  cageTextures: CageTextures;
 }
 
 export type AssetLoadProgressCallback = (progress: number, status: string) => void;
@@ -266,6 +275,11 @@ export async function loadAssets(
   let contractMapButtonTexture: Texture | null = null;
   let pressurePlateFrames: Texture[] = [];
   let hubPressurePlateFrames: Texture[] = [];
+  let cageTextures: CageTextures = {
+    back: Texture.EMPTY,
+    closed: Texture.EMPTY,
+    open: Texture.EMPTY,
+  };
 
   try {
     const tilesheet = await Assets.load<Texture>('assets/tiles.png');
@@ -1006,6 +1020,20 @@ export async function loadAssets(
     console.warn('[Assets] Chest dead-end modules unavailable', error);
   }
 
+  // ── Authored magical cage layers ────────────────────────────────────────
+  try {
+    const [back, closed, open] = await Promise.all([
+      Assets.load<Texture>('assets/cage/birdCage1.png'),
+      Assets.load<Texture>('assets/cage/birdCage2.png'),
+      Assets.load<Texture>('assets/cage/birdCage3.png'),
+    ]);
+    for (const texture of [back, closed, open]) texture.source.scaleMode = 'nearest';
+    cageTextures = { back, closed, open };
+    console.info('[Assets] Loaded authored bird-cage back, closed, and open layers');
+  } catch (error) {
+    console.warn('[Assets] Authored cage layers unavailable', error);
+  }
+
   reportProgress(0.93, 'Inscribing the final glyphs…');
 
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
@@ -1136,5 +1164,6 @@ export async function loadAssets(
     contractMapButtonTexture,
     pressurePlateFrames,
     hubPressurePlateFrames,
+    cageTextures,
   };
 }

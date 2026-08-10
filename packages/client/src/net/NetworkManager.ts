@@ -18,6 +18,8 @@ import {
   type ActivateRunestoneMessage,
   type OpenChestMessage,
   type PressPressurePlateMessage,
+  type ActivateTrapCellMessage,
+  type OpenCageMessage,
   type UseWisdomOrbMessage,
   type DebugTeleportMessage,
   type DebugPlayerAction,
@@ -308,6 +310,24 @@ export class NetworkManager {
     const msg: PressPressurePlateMessage = {
       type: MessageType.PressPressurePlate,
       plateId,
+    };
+    this.send(msg);
+  }
+
+  /** Fire the trap network from one nearby deterministic trap cell. */
+  sendActivateTrapCell(trapCellIndex: number): void {
+    const msg: ActivateTrapCellMessage = {
+      type: MessageType.ActivateTrapCell,
+      trapCellIndex,
+    };
+    this.send(msg);
+  }
+
+  /** Ask the server to open one nearby closed cage for another player. */
+  sendOpenCage(cageId: number): void {
+    const msg: OpenCageMessage = {
+      type: MessageType.OpenCage,
+      cageId,
     };
     this.send(msg);
   }

@@ -105,6 +105,15 @@ export interface SwordFieldPlacement {
   tileY: number;
 }
 
+/** One complete 6x6 maze cell belonging to the wardens' trap network. */
+export interface TrapCellPlacement {
+  cellX: number;
+  cellY: number;
+  /** Top-left tile of the walkable 6x6 cell. */
+  tileX: number;
+  tileY: number;
+}
+
 /** Authored treasure-cell prefab placed in a maze dead end. */
 export type ChestCount = 1 | 2 | 3;
 export type ChestSlot = 0 | 1 | 2;
@@ -139,6 +148,8 @@ export interface GeneratedMazeLayout {
   swamps: SwampPlacement[];
   /** Role-interactive sword barriers placed in qualifying horizontal passages. */
   swordFields: SwordFieldPlacement[];
+  /** Warden-visible 6x6 cells that can capture survivors when the network fires. */
+  trapCells: TrapCellPlacement[];
   /** Independently openable treasure instances placed in every maze dead end. */
   chestDeadEnds: ChestDeadEndPlacement[];
   /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
@@ -677,6 +688,10 @@ const MIN_EXTRA_SWORD_FIELDS = 1;
 const MAX_EXTRA_SWORD_FIELDS = 3;
 const CHEST_RANDOM_SALT = 0x3c6ef017;
 const CHEST_DEAD_END_SELECTION_SALT = 0x9e3779b9;
+const TRAP_CELL_RANDOM_SALT = 0x6d2b79f5;
+export const TRAP_CELL_DENSITY = 0.06;
+export const MIN_TRAP_CELLS = 6;
+export const MAX_TRAP_CELLS = 10;
 export const CHEST_DEAD_END_DENSITY = 0.6;
 export const MIN_SWAMP_LENGTH_CELLS = 2;
 export const MAX_SWAMP_LENGTH_CELLS = 5;
@@ -1508,6 +1523,109 @@ export function computeSwordFieldPlacements(
   return placements;
 }
 
+function getTrapCellRank(seed: number, cellX: number, cellY: number): number {
+  let value = seed ^ TRAP_CELL_RANDOM_SALT;
+  value = Math.imul(value ^ (cellX + 1), 0x45d9f3b);
+  value = Math.imul(value ^ (cellY + 1), 0x119de1f3);
+  value ^= value >>> 16;
+  return value >>> 0;
+}
+
+/**
+ * Select deterministic, well-spaced trap cells without overlapping any authored
+ * objective, spawn, hub, or obstacle prefab.
+ */
+export function computeTrapCellPlacements(
+  data: number[],
+  spawnPoints: readonly SpawnPoint[],
+  gates: readonly GatePlacement[],
+  bridges: readonly BridgePlacement[],
+  swamps: readonly SwampPlacement[],
+  swordFields: readonly SwordFieldPlacement[],
+  chestDeadEnds: readonly ChestDeadEndPlacement[],
+  portalPosition: SpawnPoint | null,
+  seed: number,
+): TrapCellPlacement[] {
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
+  const occupiedCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+
+  for (const spawnPoint of spawnPoints) {
+    const { cx, cy } = spawnPointToCell(spawnPoint);
+    occupiedCells.add(`${cx},${cy}`);
+  }
+  for (const gate of gates) occupiedCells.add(`${gate.cellX},${gate.cellY}`);
+  for (const bridge of bridges) {
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY}`);
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
+  }
+  for (const swamp of swamps) {
+    for (let offset = 0; offset < swamp.lengthCells; offset++) {
+      occupiedCells.add(`${swamp.westCellX + offset},${swamp.cellY}`);
+    }
+  }
+  for (const swordField of swordFields) occupySwordFieldCells(occupiedCells, swordField);
+  for (const chest of chestDeadEnds) occupiedCells.add(`${chest.cellX},${chest.cellY}`);
+
+  if (portalPosition) {
+    const portalCellX = Math.round(
+      (portalPosition.x - CELL_SIZE / 2 - WALL_WIDTH) / CELL_STEP_X,
+    );
+    const portalCellY = Math.round((portalPosition.y + 0.75 - WALL_HEIGHT) / CELL_STEP_Y);
+    occupiedCells.add(`${portalCellX},${portalCellY}`);
+    occupiedCells.add(`${portalCellX},${portalCellY - 1}`);
+  }
+
+  const candidates: Array<TrapCellPlacement & { rank: number }> = [];
+  for (let cellY = 0; cellY < GRID_CELLS; cellY++) {
+    for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
+      if (occupiedCells.has(`${cellX},${cellY}`)) continue;
+      if (!isEmptyObstacleCell(data, cellX, cellY)) continue;
+      const { tx, ty } = cellToTile(cellX, cellY);
+      candidates.push({
+        cellX,
+        cellY,
+        tileX: tx,
+        tileY: ty,
+        rank: getTrapCellRank(seed, cellX, cellY),
+      });
+    }
+  }
+
+  candidates.sort((a, b) => a.rank - b.rank || a.cellY - b.cellY || a.cellX - b.cellX);
+  const minimum = Math.min(MIN_TRAP_CELLS, candidates.length);
+  const desiredCount = Math.min(
+    MAX_TRAP_CELLS,
+    candidates.length,
+    Math.max(minimum, Math.round(candidates.length * TRAP_CELL_DENSITY)),
+  );
+  const selected: typeof candidates = [];
+
+  // Prefer one full cell of separation so each red region reads independently.
+  for (const candidate of candidates) {
+    if (selected.length >= desiredCount) break;
+    if (
+      selected.some(
+        (existing) =>
+          Math.abs(existing.cellX - candidate.cellX) <= 1 &&
+          Math.abs(existing.cellY - candidate.cellY) <= 1,
+      )
+    ) {
+      continue;
+    }
+    selected.push(candidate);
+  }
+
+  // Extremely constrained layouts may not satisfy spacing; preserve the count.
+  for (const candidate of candidates) {
+    if (selected.length >= desiredCount) break;
+    if (!selected.includes(candidate)) selected.push(candidate);
+  }
+
+  return selected
+    .map(({ rank: _rank, ...placement }) => placement)
+    .sort((a, b) => a.cellY - b.cellY || a.cellX - b.cellX);
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 export const MAZE_WIDTH = MAP_WIDTH;
@@ -1621,6 +1739,17 @@ export function generateMazeLayout(
     seed,
     requiredSwordFields,
   );
+  const trapCells = computeTrapCellPlacements(
+    gatedData,
+    safeSpawnPoints,
+    gates,
+    bridges,
+    swamps,
+    swordFields,
+    chestDeadEnds,
+    portalPosition,
+    seed,
+  );
 
   return {
     map: {
@@ -1635,6 +1764,7 @@ export function generateMazeLayout(
     bridges,
     swamps,
     swordFields,
+    trapCells,
     chestDeadEnds,
     dirtMask,
   };

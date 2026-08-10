@@ -42,6 +42,9 @@ function classifyAsset(name: string, relativePath: string): string {
 
 function catalogLocation(relativePath: string): { source: string; collection: string } {
   const segments = relativePath.split('/');
+  if (segments.length === 1) {
+    return { source: 'Loose', collection: 'Unsorted' };
+  }
   if (segments[0]?.toLowerCase() === 'assets') {
     const source = segments[1] || 'Assets';
     if (source === 'Maps') return { source, collection: segments[2] || 'General' };
@@ -95,14 +98,33 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
     pendingScan = (async () => {
       const root = styleLibraryRoot;
       const candidates: Array<{ name: string; filePath: string; relativePath: string }> = [];
-      const directories = includeFullStyleLibrary
-        ? (await fs.promises.readdir(root, { withFileTypes: true }))
-          // The package also contains thousands of loose root-level duplicates.
-          // Only descend into its curated directory trees so source/category
-          // filters reflect the sorted hierarchy.
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => path.join(root, entry.name))
+      const rootEntries = includeFullStyleLibrary
+        ? await fs.promises.readdir(root, { withFileTypes: true })
         : [];
+      const directories = rootEntries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(root, entry.name));
+      const rootFileNames = new Set(
+        rootEntries
+          .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.png'))
+          .map((entry) => entry.name.toLowerCase()),
+      );
+
+      for (const entry of rootEntries) {
+        if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.png')) continue;
+
+        // Loose exports often contain both `sprite.png` and an equivalent
+        // `sprite #12345.png` alias. Prefer the stable unsuffixed filename when
+        // it exists, while retaining numbered files that have no canonical peer.
+        const canonicalName = entry.name.replace(/ #\d+(?=\.png$)/i, '');
+        if (canonicalName !== entry.name && rootFileNames.has(canonicalName.toLowerCase())) continue;
+
+        candidates.push({
+          name: entry.name,
+          filePath: path.join(root, entry.name),
+          relativePath: entry.name,
+        });
+      }
 
       while (directories.length > 0) {
         const directory = directories.pop()!;

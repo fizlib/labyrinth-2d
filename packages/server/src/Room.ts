@@ -51,6 +51,11 @@ import {
   findBridgeWisdomHintTarget,
   findSwampWisdomHintTarget,
   findSwordFieldWisdomTarget,
+  findTrapCellInteractionTarget,
+  isPlayerInTrapCell,
+  findActivePlayerCage,
+  findOpenableCage,
+  hasPrisonerExitedCage,
   SWORD_FIELD_LOWER_DURATION_MS,
   getBridgeCollapseMask,
   getBridgeRepairCollapsedMask,
@@ -68,6 +73,8 @@ import {
   type ChestDeadEndPlacement,
   type SwampPlacement,
   type SwordFieldPlacement,
+  type TrapCellPlacement,
+  type CageState,
   type SwordFieldState,
   type BridgeEntrySide,
   type BridgeState,
@@ -80,6 +87,8 @@ import {
   type ActivateRunestoneMessage,
   type OpenChestMessage,
   type PressPressurePlateMessage,
+  type ActivateTrapCellMessage,
+  type OpenCageMessage,
   type DebugTeleportMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
@@ -275,6 +284,9 @@ export class Room {
   /** Authored survivor-orb/warden-interaction barriers from map generation. */
   private readonly swordFields: SwordFieldPlacement[];
 
+  /** Deterministic 6x6 cells visible to and activatable by wardens. */
+  private readonly trapCells: TrapCellPlacement[];
+
   /** Shared lowering/cleared state for every sword barrier. */
   private readonly swordFieldStates: SwordFieldState[];
 
@@ -283,6 +295,11 @@ export class Room {
 
   /** Shared opened/unopened state in deterministic chest placement order. */
   private readonly chestStates: ChestState[];
+
+  /** Spawned cages persist after escape as permanent solid obstacles. */
+  private readonly cageStates: CageState[] = [];
+
+  private nextCageId = 0;
 
   /** Shared, server-authoritative missing-stone masks. */
   private readonly bridgeStates: BridgeState[];
@@ -338,6 +355,7 @@ export class Room {
     this.bridges = layout.bridges;
     this.swamps = layout.swamps;
     this.swordFields = layout.swordFields;
+    this.trapCells = layout.trapCells;
     this.swordFieldStates = this.swordFields.map((_, swordFieldIndex) => ({
       swordFieldIndex,
       loweringStartedTick: null,
@@ -401,6 +419,7 @@ export class Room {
       bridgeStates: this.bridgeStates,
       chestStates: this.chestStates,
       swordFieldStates: this.swordFieldStates,
+      cageStates: this.cageStates,
     };
     console.info(
       `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
@@ -412,7 +431,7 @@ export class Room {
       );
     }
     console.info(
-      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Bridges: ${this.bridges.length}, Swamps: ${this.swamps.length}, Sword fields: ${this.swordFields.length}`,
+      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Bridges: ${this.bridges.length}, Swamps: ${this.swamps.length}, Sword fields: ${this.swordFields.length}, Trap cells: ${this.trapCells.length}`,
     );
     if (this.portalPosition) {
       console.info(
@@ -539,6 +558,11 @@ export class Room {
     this.bridgeRepairOccupancy.delete(playerId);
     this.revealedWisdomBridges.delete(playerId);
     this.revealedWisdomSwamps.delete(playerId);
+    for (const cage of this.cageStates) {
+      if (cage.prisonerPlayerId !== playerId || cage.vacated) continue;
+      cage.opened = true;
+      cage.vacated = true;
+    }
     this.state.players = this.state.players.filter((p) => p.id !== playerId);
 
     const leftMsg: PlayerLeftMessage = {
@@ -891,6 +915,80 @@ export class Room {
     );
   }
 
+  /** Fire the shared trap network from one nearby trap cell as a warden. */
+  handleActivateTrapCell(playerId: string, msg: ActivateTrapCellMessage): void {
+    if (!Number.isInteger(msg.trapCellIndex)) return;
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    const placement = this.trapCells[msg.trapCellIndex];
+    if (!player || player.role !== 'warden' || !placement) return;
+
+    const nearby = findTrapCellInteractionTarget(
+      [placement],
+      player.x,
+      player.y,
+      this.map.tileSize,
+    );
+    if (!nearby) return;
+
+    let capturedCount = 0;
+    for (const survivor of this.state.players) {
+      if (survivor.role !== 'survivor') continue;
+      if (findActivePlayerCage(this.cageStates, survivor.id)) continue;
+      const occupiedTrapCell = this.trapCells.find((trapCell) =>
+        isPlayerInTrapCell(trapCell, survivor.x, survivor.y, this.map.tileSize),
+      );
+      if (!occupiedTrapCell) continue;
+
+      // Re-capturing the same survivor in the same trap cell replaces their
+      // vacated cage instead of accumulating permanent duplicate colliders.
+      for (let cageIndex = this.cageStates.length - 1; cageIndex >= 0; cageIndex--) {
+        const previousCage = this.cageStates[cageIndex];
+        if (
+          previousCage.prisonerPlayerId === survivor.id &&
+          isPlayerInTrapCell(
+            occupiedTrapCell,
+            previousCage.x,
+            previousCage.y,
+            this.map.tileSize,
+          )
+        ) {
+          this.cageStates.splice(cageIndex, 1);
+        }
+      }
+
+      this.clearQueuedInputs(survivor);
+      this.bridgeTraversals.delete(survivor.id);
+      this.bridgeRepairOccupancy.delete(survivor.id);
+      this.cageStates.push({
+        cageId: this.nextCageId++,
+        prisonerPlayerId: survivor.id,
+        x: survivor.x,
+        y: survivor.y,
+        opened: false,
+        vacated: false,
+      });
+      capturedCount++;
+    }
+
+    console.info(
+      `[Room:${this.id}] Warden ${playerId} fired trap cell ${msg.trapCellIndex}; captured ${capturedCount} survivor(s)`,
+    );
+  }
+
+  /** Open a nearby prisoner's cage; the prisoner cannot open their own gate. */
+  handleOpenCage(playerId: string, msg: OpenCageMessage): void {
+    if (!Number.isInteger(msg.cageId)) return;
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    const cage = this.cageStates.find((candidate) => candidate.cageId === msg.cageId);
+    if (!player || !cage || findActivePlayerCage(this.cageStates, playerId)) return;
+    if (!findOpenableCage([cage], playerId, player.x, player.y)) return;
+
+    cage.opened = true;
+    console.info(
+      `[Room:${this.id}] Player ${playerId} opened cage ${cage.cageId} for ${cage.prisonerPlayerId}`,
+    );
+  }
+
   // ── Game Loop ─────────────────────────────────────────────────────────
 
   /** Handle survivor wisdom use or a warden's orb-free nearby sword clear. */
@@ -1102,12 +1200,38 @@ export class Room {
 
     for (const player of this.state.players) {
       const queue = this.inputQueues.get(player.id);
+      const activeCage = findActivePlayerCage(this.cageStates, player.id);
+      if (activeCage && !activeCage.opened) {
+        if (!queue || queue.length === 0) {
+          player.isMoving = false;
+          continue;
+        }
+
+        // A closed cage blocks position changes, but movement intent still
+        // drives the prisoner's facing and walk animation for every client.
+        for (const input of queue) {
+          player.lastProcessedInput = Math.max(
+            player.lastProcessedInput,
+            input.sequenceNumber,
+          );
+        }
+        const lastInput = queue[queue.length - 1];
+        const hasMovement =
+          lastInput.up || lastInput.down || lastInput.left || lastInput.right;
+        player.isMoving = hasMovement;
+        if (hasMovement) player.facing = deriveFacingDirection(lastInput, player.facing);
+        queue.length = 0;
+        continue;
+      }
       if (!queue || queue.length === 0) {
         player.isMoving = false;
         continue;
       }
 
       for (const input of queue) {
+        const constrainedInput = activeCage
+          ? { ...input, left: false, right: false }
+          : input;
         const previousX = player.x;
         const previousY = player.y;
         // Use client-provided dt, clamped for anti-cheat safety
@@ -1115,7 +1239,7 @@ export class Room {
         const result = applyInputWithCollision(
           player.x,
           player.y,
-          input,
+          constrainedInput,
           dt,
           this.map,
           this.portalPosition,
@@ -1125,10 +1249,23 @@ export class Room {
           this.chestDeadEnds,
           this.swordFields,
           this.swordFieldStates,
+          this.cageStates,
+          player.id,
         );
         player.x = result.x;
         player.y = result.y;
         this.updateBridgeInteractions(player, previousX, previousY);
+
+        if (
+          activeCage &&
+          !activeCage.vacated &&
+          hasPrisonerExitedCage(activeCage, player.y)
+        ) {
+          activeCage.vacated = true;
+          console.info(
+            `[Room:${this.id}] ${player.id} escaped cage ${activeCage.cageId}; cage is now solid`,
+          );
+        }
 
         if (input.sequenceNumber > player.lastProcessedInput) {
           player.lastProcessedInput = input.sequenceNumber;
@@ -1136,7 +1273,11 @@ export class Room {
       }
 
       // Derive facing & isMoving from the LAST input in the queue
-      const lastInput = queue[queue.length - 1];
+      const queuedLastInput = queue[queue.length - 1];
+      const lastInput =
+        activeCage && queuedLastInput
+          ? { ...queuedLastInput, left: false, right: false }
+          : queuedLastInput;
       if (!lastInput) {
         player.isMoving = false;
         continue;
@@ -1800,6 +1941,7 @@ export class Room {
       bridgeStates: this.bridgeStates.map((bridgeState) => ({ ...bridgeState })),
       chestStates: this.chestStates.map((chestState) => ({ ...chestState })),
       swordFieldStates: this.swordFieldStates.map((state) => ({ ...state })),
+      cageStates: this.cageStates.map((state) => ({ ...state })),
     };
   }
 

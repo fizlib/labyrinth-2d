@@ -16,10 +16,12 @@ import type {
   ChestDeadEndPlacement,
   SwordFieldPlacement,
   SwampPlacement,
+  TrapCellPlacement,
   TileMapData,
 } from '@labyrinth/shared';
 import {
   getSwampAuthoringWidth,
+  CELL_SIZE,
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
   TILE_GATE_HORIZONTAL,
@@ -83,6 +85,7 @@ const COL_SWORD_HIGHLIGHT: readonly number[] = [244, 249, 250, 255]; // blade sh
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
 const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot center
+const COL_TRAP: readonly number[] = [224, 37, 55, 255]; // warden-only trap network
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -92,6 +95,7 @@ export interface MinimapOptions {
   swamps?: readonly SwampPlacement[];
   swordFields?: readonly SwordFieldPlacement[];
   chestDeadEnds?: readonly ChestDeadEndPlacement[];
+  trapCells?: readonly TrapCellPlacement[];
   expandButtonTexture?: Texture | null;
   contractButtonTexture?: Texture | null;
   onExpandedChange?: (expanded: boolean) => void;
@@ -129,6 +133,7 @@ export class Minimap {
   private swampMask: Uint8Array;
   private swordFieldMask: Uint8Array;
   private chestMask: Uint8Array;
+  private trapCellMask: Uint8Array;
   private fog: Uint8Array;
 
   // ── Tracking for incremental updates ───────────────────────────────────
@@ -162,6 +167,7 @@ export class Minimap {
     this.swampMask = this.createSwampMask(options.swamps ?? []);
     this.swordFieldMask = this.createSwordFieldMask(options.swordFields ?? []);
     this.chestMask = this.createChestMask(options.chestDeadEnds ?? []);
+    this.trapCellMask = this.createTrapCellMask(options.trapCells ?? []);
     this.isWarden = options.isWarden ?? false;
     this.expandButtonTexture = options.expandButtonTexture ?? null;
     this.contractButtonTexture = options.contractButtonTexture ?? null;
@@ -457,9 +463,7 @@ export class Minimap {
   }
 
   /** Stamp three tiny swords with their grips up and blade tips pointing down. */
-  private createSwordFieldMask(
-    swordFields: readonly SwordFieldPlacement[],
-  ): Uint8Array {
+  private createSwordFieldMask(swordFields: readonly SwordFieldPlacement[]): Uint8Array {
     const mask = new Uint8Array(this.mapData.width * this.mapData.height);
     const glyph = [
       [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
@@ -524,6 +528,28 @@ export class Minimap {
       }
     }
 
+    return mask;
+  }
+
+  /** Stamp each complete 6x6 trap cell for the warden's maps. */
+  private createTrapCellMask(trapCells: readonly TrapCellPlacement[]): Uint8Array {
+    const mask = new Uint8Array(this.mapData.width * this.mapData.height);
+    for (const placement of trapCells) {
+      for (let localY = 0; localY < CELL_SIZE; localY++) {
+        for (let localX = 0; localX < CELL_SIZE; localX++) {
+          const tileX = placement.tileX + localX;
+          const tileY = placement.tileY + localY;
+          if (
+            tileX >= 0 &&
+            tileX < this.mapData.width &&
+            tileY >= 0 &&
+            tileY < this.mapData.height
+          ) {
+            mask[tileY * this.mapData.width + tileX] = 1;
+          }
+        }
+      }
+    }
     return mask;
   }
 
@@ -853,6 +879,7 @@ export class Minimap {
 
   /** Get the minimap colour for a given tile ID. */
   private tileColor(tileIndex: number, id: number): readonly number[] {
+    if (this.isWarden && this.trapCellMask[tileIndex] === 1) return COL_TRAP;
     if (this.swordFieldMask[tileIndex] === 4) return COL_SWORD_HIGHLIGHT;
     if (this.swordFieldMask[tileIndex] === 3) return COL_SWORD_BLADE;
     if (this.swordFieldMask[tileIndex] === 2) return COL_SWORD_GUARD;

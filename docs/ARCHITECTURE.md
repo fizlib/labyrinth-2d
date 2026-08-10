@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-08-10 - Per-team sword fields and warden clearing
+Last updated: 2026-08-10 - Warden trap cells and survivor cages
 
 ## Project Overview
 
@@ -72,6 +72,8 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `ACTIVATE_RUNESTONE` | Request activation of a nearby runestone |
 | `OPEN_CHEST` | Request opening a nearby unopened treasure chest |
 | `PRESS_PRESSURE_PLATE` | Warden-only request to latch a nearby gate button |
+| `ACTIVATE_TRAP_CELL` | Warden-only request to fire the shared trap network from a nearby 6x6 trap cell |
+| `OPEN_CAGE` | Outside-player request to open a nearby prisoner's cage |
 | `USE_WISDOM_ORB` | Survivors spend an orb on a nearby reveal/clear or request direction; wardens may use the same proximity request only to clear sword fields |
 | `DEBUG_TELEPORT` | Debug-only teleport helper used by developer tooling |
 
@@ -129,6 +131,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | `swordFieldStates` | `SwordFieldState[]` | Authoritative blocking, lowering, and cleared state for every generated sword field |
 | `gateStates` | `GateState[]` | Authoritative open/closed state for every generated gate |
 | `pressurePlateStates` | `PressurePlateState[]` | Authoritative physical-press and warden-latch state for every gate button |
+| `cageStates` | `CageState[]` | Authoritative spawned, opened, and permanently vacated cage state |
 
 ## Shared Gameplay Systems
 
@@ -143,6 +146,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
 - Directional treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
 - Sword fields preserve the ten small fence/marker colliders from the first editor export. The additional `149×32` central blocker from the second export remains solid through the shake-and-sink sequence and is removed only when the server marks the field cleared.
+- Spawned cages use the shared dynamic-collider path. Closed prisoners cannot change position, but their movement input still drives replicated facing and walk animation; opened prisoners may move only north/south until clear, while every other player collides with the cage. A vacated cage remains permanently solid.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
 
 ### Runestones and Portal Flow
@@ -190,11 +194,20 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - The server consumes one orb only for survivors, records the lowering start tick, keeps the main collider active for the full animation, then marks the field cleared. Late joiners reconstruct the correct visual phase from the current server tick.
 - Fence, grave, and ground art remain after all forty-one swords disappear, matching the supplied editor layout.
 
+### Trap Cells and Cages
+
+- Each generated room deterministically selects 6-10 well-spaced, obstacle-free 6x6 maze cells after all other objective and obstacle placement. Trap cells never overlap the hub, team spawns, gates, bridges, swamps, sword fields, treasure cells, or the portal platform.
+- Only wardens render the translucent red in-world cell overlays and matching red minimap cells. A warden anywhere inside or just outside one sees a red `[ E ]` above their character.
+- Activating one nearby trap cell atomically checks the whole trap network and cages every uncaged survivor whose feet are currently inside any trap cell.
+- Cage state is server-authoritative and replicated through normal snapshots. The client materializes the supplied `birdCage1` back layer below the player and `birdCage2` closed front layer above the player, then swaps the front to `birdCage3` when another nearby outside player opens it.
+- The prisoner cannot open their own cage, and another imprisoned player does not count as outside. After the gate opens, the prisoner may leave north or south; once clear, that cage becomes an empty permanent collider.
+- If the same survivor is later captured again in the same trap cell, their previous cage in that cell disappears before the replacement cage materializes. Their cages in other trap cells and other players' cages are unaffected.
+
 ## Map System
 
 Map generation lives in `packages/shared/src/maps/level1.ts`.
 
-`generateMazeLayout()` returns the tile map, spawn points, gate, bridge, swamp, sword-field, and chest placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable obstacle state lives in `GameState`.
+`generateMazeLayout()` returns the tile map, spawn points, gate, bridge, swamp, sword-field, trap-cell, and chest placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable obstacle and cage state lives in `GameState`.
 
 ### Core Layout
 
@@ -221,6 +234,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 10. Select up to 12 bridge passages across the whole maze, independently of spawn-to-hub routes. Each bridge connects two empty 6×6 cells, retains forest walls along its west and east banks, excludes spawn/hub/gate cells, and never shares either adjacent cell with another bridge.
 11. Assign every bridge a distinct deterministic hidden route through its 2×6 central-stone walkway. The permanent stair tiles at both ends are outside the puzzle. Routes have one safe tile at each endpoint and one or two non-adjacent rows where the route crosses between columns.
 12. Exclude actual safe player spawn cells, identify every dead end in all four orientations, deterministically select 60% of the eligible cells, then attach each cell's weighted one-, two-, or three-chest direction-mapped prefab. Portal placement excludes those reserved cells.
+13. After portal and sword-field placement, choose 6-10 deterministic trap cells from the remaining complete 6x6 walkable cells, preferring at least one cell of spacing between highlights.
 
 ### Spawns and Objective Placement
 

@@ -29,6 +29,7 @@ import {
 } from './bridge.js';
 import { getPlayerSwampTerrain, SWAMP_SPEED_MULTIPLIER } from './swamp.js';
 import { getSwordFieldCollisionBounds, type SwordFieldState } from './sword-field.js';
+import { findActivePlayerCage, getCageCollisionBounds, type CageState } from './cage.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -425,6 +426,8 @@ export function isPositionValid(
   chestDeadEnds: readonly ChestDeadEndPlacement[] = [],
   swordFields: readonly SwordFieldPlacement[] = [],
   swordFieldStates: readonly SwordFieldState[] = [],
+  cages: readonly CageState[] = [],
+  movingPlayerId?: string,
 ): boolean {
   const ts = map.tileSize;
 
@@ -481,6 +484,17 @@ export function isPositionValid(
     }
   }
 
+  for (const cage of cages) {
+    // A prisoner occupies the inside of their own cage. Closed cages are handled
+    // by applyInputWithCollision; an opened prisoner may pass through its gates.
+    if (movingPlayerId && !cage.vacated && cage.prisonerPlayerId === movingPlayerId) {
+      continue;
+    }
+    if (intersectsBounds(left, top, right, bottom, getCageCollisionBounds(cage))) {
+      return false;
+    }
+  }
+
   for (const bridgeState of bridgeStates) {
     const repairInProgress =
       bridgeState.repairingSide === 'north' || bridgeState.repairingSide === 'south';
@@ -526,9 +540,14 @@ export function applyInputWithCollision(
   chestDeadEnds: readonly ChestDeadEndPlacement[] = [],
   swordFields: readonly SwordFieldPlacement[] = [],
   swordFieldStates: readonly SwordFieldState[] = [],
+  cages: readonly CageState[] = [],
+  movingPlayerId?: string,
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
+
+  const activeCage = movingPlayerId ? findActivePlayerCage(cages, movingPlayerId) : null;
+  if (activeCage && !activeCage.opened) return { x, y };
 
   let dx = 0;
   let dy = 0;
@@ -536,8 +555,12 @@ export function applyInputWithCollision(
   const speed = PLAYER_SPEED * (swampTerrain === 'deep-mud' ? SWAMP_SPEED_MULTIPLIER : 1);
   if (input.up) dy -= speed * dt;
   if (input.down) dy += speed * dt;
-  if (input.left) dx -= speed * dt;
-  if (input.right) dx += speed * dt;
+  // The authored cage opens along its north/south axis. A prisoner cannot
+  // squeeze through its closed side bars while making the escape.
+  if (!activeCage) {
+    if (input.left) dx -= speed * dt;
+    if (input.right) dx += speed * dt;
+  }
 
   if (dx !== 0) {
     const candidateX = x + dx;
@@ -552,6 +575,8 @@ export function applyInputWithCollision(
         chestDeadEnds,
         swordFields,
         swordFieldStates,
+        cages,
+        movingPlayerId,
       )
     ) {
       newX = candidateX;
@@ -571,6 +596,8 @@ export function applyInputWithCollision(
         chestDeadEnds,
         swordFields,
         swordFieldStates,
+        cages,
+        movingPlayerId,
       )
     ) {
       newY = candidateY;

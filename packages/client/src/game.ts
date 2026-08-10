@@ -38,6 +38,10 @@ import {
   applyInputWithCollision,
   getPlayerSwampTerrain,
   findSwordFieldWisdomTarget,
+  findTrapCellInteractionTarget,
+  findActivePlayerCage,
+  findOpenableCage,
+  getCageInteractionPoint,
   deriveFacingDirection,
 } from '@labyrinth/shared';
 import type {
@@ -48,6 +52,7 @@ import type {
   GeneratedMazeLayout,
   PlayerRole,
   SwampTerrain,
+  CageState,
 } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 import {
@@ -66,6 +71,7 @@ import { WisdomOrbHud } from './systems/WisdomOrbHud';
 import { WisdomArrow } from './systems/WisdomArrow';
 import { IntroDialogueHud } from './systems/IntroDialogueHud';
 import { MobileControls, type MobileControlDirection } from './systems/MobileControls';
+import { CageVisual } from './systems/Cage';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
@@ -675,10 +681,6 @@ function getAnimationKey(
 ): string {
   if (isDead) return 'lying';
   return isMoving ? `walk-${facing}` : `idle-${facing}`;
-}
-
-function deriveFacingFromKeys(): FacingDirection {
-  return deriveFacingDirection(activeKeys, localFacing);
 }
 
 interface ZIndexedDisplayObject {
@@ -1484,6 +1486,36 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   }
 
   const playerSprites: Map<string, PlayerSpriteData> = new Map();
+  const cageVisuals = new Map<number, CageVisual>();
+
+  function clearCageVisuals(): void {
+    for (const visual of cageVisuals.values()) visual.destroy();
+    cageVisuals.clear();
+  }
+
+  function syncCageVisuals(states: readonly CageState[], animateNew: boolean): void {
+    const activeIds = new Set(states.map((state) => state.cageId));
+    for (const state of states) {
+      let visual = cageVisuals.get(state.cageId);
+      if (!visual) {
+        visual = new CageVisual(
+          state.cageId,
+          state,
+          assets.cageTextures,
+          entityLayer,
+          animateNew,
+        );
+        cageVisuals.set(state.cageId, visual);
+      }
+      visual.syncState(state);
+    }
+
+    for (const [cageId, visual] of cageVisuals) {
+      if (activeIds.has(cageId)) continue;
+      visual.destroy();
+      cageVisuals.delete(cageId);
+    }
+  }
 
   /** Safely resolve animation set for a player sprite, falling back to set 0. */
   function getAnimSet(spriteIndex: number, teamId: number) {
@@ -1616,6 +1648,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     worldContainer.addChild(renderer.portalTerrainLayer);
     worldContainer.addChild(renderer.forestUnderlayLayer);
     worldContainer.addChild(renderer.groundDetailLayer);
+    worldContainer.addChild(renderer.trapCellHighlightLayer);
     worldContainer.addChild(entityLayer);
     worldContainer.addChild(forestWallLayer);
     if (cellBoundaryOverlay) worldContainer.addChild(cellBoundaryOverlay);
@@ -1682,6 +1715,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout.bridges,
         currentLayout.swamps,
         currentLayout.swordFields,
+        currentLayout.trapCells,
         currentLayout.chestDeadEnds,
         currentLayout.dirtMask,
         assets,
@@ -1755,6 +1789,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       localPlayerRole === 'warden',
     );
     replacementRenderer.setWardenSwampWisdomHints(localPlayerRole === 'warden');
+    replacementRenderer.setWardenTrapHighlights(localPlayerRole === 'warden');
     updateGateSlideAnimations(0);
     replacementRenderer.updateVisibility(worldContainer.x, worldContainer.y, zoomLevel);
     console.info(
@@ -1808,6 +1843,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     wisdomOrbs: number,
     showIntroDialogue: boolean,
   ) => void = () => {};
+  let triggerInteract: () => void = () => {};
 
   const net = new NetworkManager({
     onRoomJoined: (roomId, playerId, mapSeed, role, wisdomOrbs, gameState) => {
@@ -1829,6 +1865,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       cinematicPhase = 'idle';
       bridgeCameraBlend = 0;
       bridgeCameraFocus = null;
+      clearCageVisuals();
 
       const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
       currentMap = layout.map;
@@ -1845,6 +1882,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         layout.bridges,
         layout.swamps,
         layout.swordFields,
+        layout.trapCells,
         layout.chestDeadEnds,
         layout.dirtMask,
         assets,
@@ -1857,6 +1895,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         false,
       );
       tilemapRenderer.syncChestStates(gameState.chestStates, false);
+      syncCageVisuals(gameState.cageStates, false);
       if (cellBoundaryOverlay?.parent === worldContainer) {
         worldContainer.removeChild(cellBoundaryOverlay);
       }
@@ -1961,6 +2000,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       interactPrompt.anchor.set(0.5, 1.0);
       interactPrompt.visible = false;
       interactPrompt.zIndex = 99999;
+      interactPrompt.eventMode = 'static';
+      interactPrompt.cursor = 'pointer';
+      interactPrompt.on('pointertap', (event) => {
+        event.stopPropagation();
+        triggerInteract();
+      });
       entityLayer.addChild(interactPrompt);
 
       for (const player of gameState.players) {
@@ -1994,6 +2039,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         true,
       );
       tilemapRenderer?.syncChestStates(gameState.chestStates, true);
+      syncCageVisuals(gameState.cageStates, true);
 
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
@@ -2026,6 +2072,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
               currentLayout?.chestDeadEnds,
               currentLayout?.swordFields,
               gameState.swordFieldStates,
+              gameState.cageStates,
+              localPlayerId ?? undefined,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -2238,7 +2286,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     localPlayerRole === 'warden' ||
     (localPlayerRole === 'survivor' && localWisdomOrbs < MAX_WISDOM_ORBS);
 
-  const triggerInteract = (): void => {
+  triggerInteract = (): void => {
     if (minimap?.isExpanded()) {
       minimap.closeExpanded();
       return;
@@ -2273,6 +2321,38 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     if (nearestRunestoneIndex !== null) {
       net.sendActivateRunestone(nearestRunestoneIndex);
       return;
+    }
+
+    if (latestServerState && net.playerId) {
+      const activeLocalCage = findActivePlayerCage(
+        latestServerState.cageStates,
+        net.playerId,
+      );
+      if (!activeLocalCage) {
+        const cageTarget = findOpenableCage(
+          latestServerState.cageStates,
+          net.playerId,
+          localX,
+          localY,
+        );
+        if (cageTarget) {
+          net.sendOpenCage(cageTarget.cage.cageId);
+          return;
+        }
+      }
+    }
+
+    if (localPlayerRole === 'warden' && currentLayout) {
+      const trapTarget = findTrapCellInteractionTarget(
+        currentLayout.trapCells,
+        localX,
+        localY,
+        TILE_SIZE,
+      );
+      if (trapTarget) {
+        net.sendActivateTrapCell(trapTarget.trapCellIndex);
+        return;
+      }
     }
 
     if (localPlayerRole === 'warden' && currentLayout && latestServerState) {
@@ -2358,6 +2438,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     tilemapRenderer?.setWardenBridgeWisdomHints(currentLayout.bridges, role === 'warden');
     tilemapRenderer?.setWardenSwampWisdomHints(role === 'warden');
+    tilemapRenderer?.setWardenTrapHighlights(role === 'warden');
 
     minimap?.destroy();
     minimap = new Minimap(
@@ -2371,6 +2452,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         swamps: currentLayout.swamps,
         swordFields: currentLayout.swordFields,
         chestDeadEnds: currentLayout.chestDeadEnds,
+        trapCells: currentLayout.trapCells,
         expandButtonTexture: assets.expandMapButtonTexture,
         contractButtonTexture: assets.contractMapButtonTexture,
         onExpandedChange: (expanded) => {
@@ -2426,18 +2508,29 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       (player) => player.id === net.playerId,
     );
     const isLocalDead = localPlayerState?.isDead ?? false;
+    const activeLocalCage = latestServerState
+      ? findActivePlayerCage(latestServerState.cageStates, net.playerId)
+      : null;
+    const movementInput = {
+      up: activeKeys.up,
+      down: activeKeys.down,
+      // Once opened, the cage permits only its north/south escape route. A
+      // closed prisoner still animates against all four sides without moving.
+      left: activeLocalCage?.opened ? false : activeKeys.left,
+      right: activeLocalCage?.opened ? false : activeKeys.right,
+    };
     const isMoving =
-      activeKeys.up || activeKeys.down || activeKeys.left || activeKeys.right;
+      movementInput.up || movementInput.down || movementInput.left || movementInput.right;
     if (isMoving) {
-      localFacing = deriveFacingFromKeys();
+      localFacing = deriveFacingDirection(movementInput, localFacing);
       inputSequenceNumber++;
 
       const input: PendingInput = {
         sequenceNumber: inputSequenceNumber,
-        up: activeKeys.up,
-        down: activeKeys.down,
-        left: activeKeys.left,
-        right: activeKeys.right,
+        up: movementInput.up,
+        down: movementInput.down,
+        left: movementInput.left,
+        right: movementInput.right,
         dt: dtSeconds,
       };
 
@@ -2454,6 +2547,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout?.chestDeadEnds,
         currentLayout?.swordFields,
         latestServerState?.swordFieldStates,
+        latestServerState?.cageStates,
+        net.playerId,
       );
       localX = result.x;
       localY = result.y;
@@ -2544,6 +2639,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       tilemapRenderer.updateVisibility(worldContainer.x, worldContainer.y, zoomLevel);
       tilemapRenderer.updateBridgeAnimations(dtSeconds);
     }
+    for (const visual of cageVisuals.values()) visual.update(dtSeconds);
     if (cellBoundaryOverlay) {
       cellBoundaryOverlay.visible = DebugSettings.isEnabled('cellBoundaries');
     }
@@ -2617,9 +2713,29 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     // ── 5. Runestone/chest/gate-button interaction prompt ───────────
     if (interactPrompt && tilemapRenderer) {
       let nearestDistSq = Infinity;
+      let promptPriority = Infinity;
       let promptX = 0;
       let promptY = 0;
       let promptText = '[ E ]';
+      const considerPrompt = (
+        priority: number,
+        distanceSquared: number,
+        x: number,
+        y: number,
+        text = '[ E ]',
+      ): void => {
+        if (
+          priority > promptPriority ||
+          (priority === promptPriority && distanceSquared >= nearestDistSq)
+        ) {
+          return;
+        }
+        promptPriority = priority;
+        nearestDistSq = distanceSquared;
+        promptX = x;
+        promptY = y;
+        promptText = text;
+      };
       const INTERACT_RANGE = 28; // ~1.75 tiles in pixels
       const INTERACT_RANGE_SQ = INTERACT_RANGE * INTERACT_RANGE;
       const localTeamId = latestServerState?.players.find(
@@ -2633,10 +2749,45 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         const dx = localX - rsCenterX;
         const dy = localY - rsCenterY;
         const distSq = dx * dx + dy * dy;
-        if (distSq < INTERACT_RANGE_SQ && distSq < nearestDistSq) {
-          nearestDistSq = distSq;
-          promptX = rs.sprite.x;
-          promptY = rs.sprite.y - 34;
+        if (distSq < INTERACT_RANGE_SQ) {
+          considerPrompt(0, distSq, rs.sprite.x, rs.sprite.y - 34);
+        }
+      }
+
+      if (latestServerState && net.playerId) {
+        const activeLocalCage = findActivePlayerCage(
+          latestServerState.cageStates,
+          net.playerId,
+        );
+        if (!activeLocalCage) {
+          const cageTarget = findOpenableCage(
+            latestServerState.cageStates,
+            net.playerId,
+            localX,
+            localY,
+          );
+          if (cageTarget) {
+            const point = getCageInteractionPoint(cageTarget.cage);
+            considerPrompt(
+              1,
+              cageTarget.distanceSquared,
+              point.x,
+              cageTarget.cage.y - 34,
+            );
+          }
+        }
+      }
+
+      if (localPlayerRole === 'warden' && currentLayout) {
+        const trapTarget = findTrapCellInteractionTarget(
+          currentLayout.trapCells,
+          localX,
+          localY,
+          TILE_SIZE,
+        );
+        if (trapTarget) {
+          // The trap prompt belongs to the warden, not the floor target.
+          considerPrompt(2, trapTarget.distanceSquared, localX, localY - 30);
         }
       }
 
@@ -2647,10 +2798,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           const dx = localX - chest.interactionX;
           const dy = localY - chest.interactionY;
           const distSq = dx * dx + dy * dy;
-          if (distSq <= chestRangeSq && distSq < nearestDistSq) {
-            nearestDistSq = distSq;
-            promptX = chest.promptX;
-            promptY = chest.promptY;
+          if (distSq <= chestRangeSq) {
+            considerPrompt(5, distSq, chest.promptX, chest.promptY);
           }
         }
       }
@@ -2671,10 +2820,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           const dx = localX - plateCenterX;
           const dy = localY - plateCenterY;
           const distSq = dx * dx + dy * dy;
-          if (distSq <= plateRangeSq && distSq < nearestDistSq) {
-            nearestDistSq = distSq;
-            promptX = plate.sprite.x + plate.sprite.width / 2;
-            promptY = plate.sprite.y - 3;
+          if (distSq <= plateRangeSq) {
+            considerPrompt(
+              4,
+              distSq,
+              plate.sprite.x + plate.sprite.width / 2,
+              plate.sprite.y - 3,
+            );
           }
         }
       }
@@ -2693,10 +2845,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           TILE_SIZE,
         );
         if (swordFieldTarget) {
-          nearestDistSq = 0;
-          promptX = swordFieldTarget.x;
-          promptY = swordFieldTarget.y - 12;
-          promptText = localPlayerRole === 'warden' ? '[ E ]' : '[ Q ]';
+          considerPrompt(
+            3,
+            0,
+            swordFieldTarget.x,
+            swordFieldTarget.y - 12,
+            localPlayerRole === 'warden' ? '[ E ]' : '[ Q ]',
+          );
         }
       }
 
