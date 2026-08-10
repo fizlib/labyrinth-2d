@@ -28,12 +28,13 @@ export interface SwampWisdomHintTarget {
   swampIndex: number;
 }
 
-const FIRM_PATH_MIN_TILE_Y = 1;
-const FIRM_PATH_MAX_TILE_Y = 4;
+const FIRM_PATH_MIN_TILE_Y = 0;
+const FIRM_PATH_MAX_TILE_Y = SWAMP_AUTHORING_HEIGHT / SWAMP_AUTHORING_TILE_SIZE - 1;
 const FIRM_PATH_START_TILE_X = 3;
 const FIRM_PATH_END_INSET_TILES = 4;
-const FIRM_PATH_MIN_HORIZONTAL_RUN = 2;
-const FIRM_PATH_BASE_MAX_HORIZONTAL_RUN = 3;
+const FIRM_PATH_MAX_HORIZONTAL_RUN = 6;
+const FIRM_PATH_HORIZONTAL_MOTIF_PERCENT = 45;
+const FIRM_PATH_STAIRCASE_MOTIF_PERCENT = 80;
 const FIRM_GAP_TILE_INTERVAL = 10;
 
 // Main water span on each authored pixel row. Tiny disconnected shoreline
@@ -65,7 +66,8 @@ function normalizeLengthCells(lengthCells: number): number {
 /** Pixel width of the rendered swamp at its original 16px authoring scale. */
 export function getSwampAuthoringWidth(lengthCells: number): number {
   const normalizedLength = normalizeLengthCells(lengthCells);
-  const widthTiles = WALL_WIDTH + (normalizedLength - MIN_SWAMP_LENGTH_CELLS) * CELL_STEP_X;
+  const widthTiles =
+    WALL_WIDTH + (normalizedLength - MIN_SWAMP_LENGTH_CELLS) * CELL_STEP_X;
   return widthTiles * SWAMP_AUTHORING_TILE_SIZE;
 }
 
@@ -111,14 +113,22 @@ function getFirmGapTileCount(widthTiles: number): number {
   return Math.max(1, Math.floor(widthTiles / FIRM_GAP_TILE_INTERVAL));
 }
 
-function getFirmGapTile(swamp: SwampPlacement, gapIndex: number, widthTiles: number): number {
+function getFirmGapTile(
+  swamp: SwampPlacement,
+  gapIndex: number,
+  widthTiles: number,
+): number {
   const gapCount = getFirmGapTileCount(widthTiles);
   const evenPosition = Math.round(((gapIndex + 1) * widthTiles) / (gapCount + 1));
   const jitter = (hashFirmPath(swamp.decorationSeed, gapIndex, 0xa54ff53a) % 3) - 1;
   return Math.max(2, Math.min(widthTiles - 3, evenPosition + jitter));
 }
 
-function isFirmPathGap(swamp: SwampPlacement, tileIndex: number, widthTiles: number): boolean {
+function isFirmPathGap(
+  swamp: SwampPlacement,
+  tileIndex: number,
+  widthTiles: number,
+): boolean {
   const gapCount = getFirmGapTileCount(widthTiles);
   for (let gapIndex = 0; gapIndex < gapCount; gapIndex++) {
     if (getFirmGapTile(swamp, gapIndex, widthTiles) === tileIndex) return true;
@@ -128,15 +138,14 @@ function isFirmPathGap(swamp: SwampPlacement, tileIndex: number, widthTiles: num
 
 function getFirmPathNextTileY(
   seed: number,
-  turnIndex: number,
+  motifIndex: number,
   currentTileY: number,
 ): number {
   const candidates: number[] = [];
   for (let tileY = FIRM_PATH_MIN_TILE_Y; tileY <= FIRM_PATH_MAX_TILE_Y; tileY++) {
-    if (Math.abs(tileY - currentTileY) >= 2) candidates.push(tileY);
+    if (tileY !== currentTileY) candidates.push(tileY);
   }
-  const candidateIndex =
-    hashFirmPath(seed, turnIndex, 0x3c6ef372) % candidates.length;
+  const candidateIndex = hashFirmPath(seed, motifIndex, 0x3c6ef372) % candidates.length;
   return candidates[candidateIndex];
 }
 
@@ -144,12 +153,9 @@ function getFirmPathCoordinates(swamp: SwampPlacement): readonly FirmPathCoordin
   const cached = firmPathCoordinateCache.get(swamp);
   if (cached) return cached;
 
-  const widthTiles = getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
+  const widthTiles =
+    getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
   const endTileX = widthTiles - FIRM_PATH_END_INSET_TILES;
-  const normalizedLength = normalizeLengthCells(swamp.lengthCells);
-  const maxHorizontalRun =
-    FIRM_PATH_BASE_MAX_HORIZONTAL_RUN +
-    (normalizedLength - MIN_SWAMP_LENGTH_CELLS);
   const coordinates: FirmPathCoordinate[] = [];
   const append = (tileX: number, tileY: number): void => {
     const previous = coordinates[coordinates.length - 1];
@@ -164,34 +170,55 @@ function getFirmPathCoordinates(swamp: SwampPlacement): readonly FirmPathCoordin
       (FIRM_PATH_MAX_TILE_Y - FIRM_PATH_MIN_TILE_Y + 1));
   append(tileX, tileY);
 
-  for (let turnIndex = 0; tileX < endTileX && turnIndex < 128; turnIndex++) {
-    const horizontalRun =
-      FIRM_PATH_MIN_HORIZONTAL_RUN +
-      (hashFirmPath(swamp.decorationSeed, turnIndex, 0x510e527f) %
-        (maxHorizontalRun - FIRM_PATH_MIN_HORIZONTAL_RUN + 1));
-    let turnTileX = Math.min(endTileX, tileX + horizontalRun);
-    while (
-      turnTileX < endTileX &&
-      isFirmPathGap(swamp, turnTileX, widthTiles)
-    ) {
-      turnTileX++;
+  for (let motifIndex = 0; tileX < endTileX && motifIndex < 128; motifIndex++) {
+    const motifRoll = hashFirmPath(swamp.decorationSeed, motifIndex, 0x510e527f) % 100;
+
+    if (motifRoll < FIRM_PATH_HORIZONTAL_MOTIF_PERCENT) {
+      const remainingColumns = endTileX - tileX;
+      const horizontalRun =
+        1 +
+        (hashFirmPath(swamp.decorationSeed, motifIndex, 0x9b05688c) %
+          Math.min(FIRM_PATH_MAX_HORIZONTAL_RUN, remainingColumns));
+      for (let step = 0; step < horizontalRun; step++) {
+        tileX++;
+        append(tileX, tileY);
+      }
+      continue;
     }
 
-    for (let horizontalTileX = tileX + 1; horizontalTileX <= turnTileX; horizontalTileX++) {
-      append(horizontalTileX, tileY);
-    }
-    tileX = turnTileX;
-    if (tileX >= endTileX) break;
+    // Every turn begins with a horizontal tile. Besides keeping the route
+    // readable, this guarantees that a mandatory mud-gap column is crossed
+    // straight instead of silently moving the safe lane inside the gap.
+    tileX++;
+    append(tileX, tileY);
+    if (tileX >= endTileX || isFirmPathGap(swamp, tileX, widthTiles)) continue;
 
-    const nextTileY = getFirmPathNextTileY(
-      swamp.decorationSeed,
-      turnIndex,
-      tileY,
-    );
+    const nextTileY = getFirmPathNextTileY(swamp.decorationSeed, motifIndex, tileY);
     const verticalStep = Math.sign(nextTileY - tileY);
+    const useStaircase =
+      motifRoll < FIRM_PATH_STAIRCASE_MOTIF_PERCENT && Math.abs(nextTileY - tileY) >= 2;
+
+    if (!useStaircase) {
+      while (tileY !== nextTileY) {
+        tileY += verticalStep;
+        append(tileX, tileY);
+      }
+      continue;
+    }
+
+    // Spread taller turns over adjacent columns to make diagonal staircases
+    // and zig-zags instead of repeating the same square-wave silhouette.
     while (tileY !== nextTileY) {
       tileY += verticalStep;
       append(tileX, tileY);
+      if (tileY === nextTileY || tileX >= endTileX) break;
+
+      tileX++;
+      append(tileX, tileY);
+      while (tileX < endTileX && isFirmPathGap(swamp, tileX, widthTiles)) {
+        tileX++;
+        append(tileX, tileY);
+      }
     }
   }
 
@@ -207,7 +234,8 @@ export function getSwampTerrainAtAuthoringPoint(
 ): SwampTerrain {
   if (!isSwampWaterAtAuthoringPoint(swamp.lengthCells, x, y)) return 'dry';
 
-  const widthTiles = getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
+  const widthTiles =
+    getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
   const tileX = Math.floor(x / SWAMP_AUTHORING_TILE_SIZE);
   const tileY = Math.floor(y / SWAMP_AUTHORING_TILE_SIZE);
   if (isFirmPathGap(swamp, tileX, widthTiles)) return 'deep-mud';
@@ -223,14 +251,18 @@ export function getSwampTerrainAtAuthoringPoint(
 export function getSwampFirmGroundTiles(
   swamp: SwampPlacement,
 ): readonly SwampFirmGroundTile[] {
-  const widthTiles = getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
+  const widthTiles =
+    getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
   const tiles: SwampFirmGroundTile[] = [];
 
   for (const coordinate of getFirmPathCoordinates(swamp)) {
     if (isFirmPathGap(swamp, coordinate.tileX, widthTiles)) continue;
     const centerX = (coordinate.tileX + 0.5) * SWAMP_AUTHORING_TILE_SIZE;
-    const centerY = (coordinate.tileY + 0.5) * SWAMP_AUTHORING_TILE_SIZE;
-    if (!isSwampWaterAtAuthoringPoint(swamp.lengthCells, centerX, centerY)) continue;
+    // The authored north bank covers the upper half of row zero. Sampling the
+    // tile's lower edge keeps valid top-lane route tiles without treating the
+    // dry pixels above the shoreline as mud.
+    const waterSampleY = (coordinate.tileY + 1) * SWAMP_AUTHORING_TILE_SIZE - 1;
+    if (!isSwampWaterAtAuthoringPoint(swamp.lengthCells, centerX, waterSampleY)) continue;
     tiles.push({
       pathIndex: tiles.length,
       tileX: coordinate.tileX,

@@ -81,71 +81,87 @@ test('firm-ground reveal geometry follows the route and preserves mud gaps', () 
     (left, right) => left - right,
   );
   assert.ok(
-    routeColumns.some(
-      (tileX, index) => index > 0 && tileX > routeColumns[index - 1] + 1,
-    ),
+    routeColumns.some((tileX, index) => index > 0 && tileX > routeColumns[index - 1] + 1),
     'the revealed route must visibly break across at least one mud tile',
   );
   for (const tile of tiles) {
     assert.equal(tile.width, 16);
     assert.equal(tile.height, 16);
-    assert.equal(
-      getSwampTerrainAtAuthoringPoint(
-        swamp,
-        tile.x + tile.width / 2,
-        tile.y + tile.height / 2,
+    assert.ok(
+      Array.from({ length: tile.height }, (_, offset) => tile.y + offset).some(
+        (sampleY) =>
+          getSwampTerrainAtAuthoringPoint(swamp, tile.x + tile.width / 2, sampleY) ===
+          'firm-ground',
       ),
-      'firm-ground',
+      'every revealed route tile must overlap firm ground',
     );
   }
   for (let index = 1; index < tiles.length; index++) {
     const previous = tiles[index - 1];
     const tile = tiles[index];
     const distance =
-      Math.abs(tile.tileX - previous.tileX) +
-      Math.abs(tile.tileY - previous.tileY);
+      Math.abs(tile.tileX - previous.tileX) + Math.abs(tile.tileY - previous.tileY);
     assert.ok(
-      distance === 1 ||
-        (distance === 2 && tile.tileY === previous.tileY),
+      distance === 1 || (distance === 2 && tile.tileY === previous.tileY),
       'the route must stay connected except for single-tile horizontal mud gaps',
     );
   }
 });
 
-test('firm-ground routes include multi-tile vertical turns', () => {
+test('firm-ground routes mix compact vertical turns with stair-step turns', () => {
   for (
     let lengthCells = MIN_SWAMP_LENGTH_CELLS;
     lengthCells <= MAX_SWAMP_LENGTH_CELLS;
     lengthCells++
   ) {
-    const swamp = {
-      westCellX: 0,
-      cellY: 0,
-      lengthCells,
-      decorationSeed: 700 + lengthCells,
-      tileX: 0,
-      tileY: 0,
-    };
-    const tiles = getSwampFirmGroundTiles(swamp);
-    const rowsByColumn = new Map();
-    for (const tile of tiles) {
-      const rows = rowsByColumn.get(tile.tileX) ?? [];
-      rows.push(tile.tileY);
-      rowsByColumn.set(tile.tileX, rows);
+    let compactTurnRoutes = 0;
+    let staircaseRoutes = 0;
+
+    for (let decorationSeed = 0; decorationSeed < 128; decorationSeed++) {
+      const tiles = getSwampFirmGroundTiles({
+        westCellX: 0,
+        cellY: 0,
+        lengthCells,
+        decorationSeed,
+        tileX: 0,
+        tileY: 0,
+      });
+      const rowsByColumn = new Map();
+      for (const tile of tiles) {
+        const rows = rowsByColumn.get(tile.tileX) ?? [];
+        rows.push(tile.tileY);
+        rowsByColumn.set(tile.tileX, rows);
+      }
+
+      if (
+        [...rowsByColumn.values()].some(
+          (rows) => Math.max(...rows) - Math.min(...rows) >= 2,
+        )
+      ) {
+        compactTurnRoutes++;
+      }
+
+      const turnColumns = [...rowsByColumn.entries()]
+        .filter(([, rows]) => rows.length >= 2)
+        .map(([tileX]) => tileX)
+        .sort((left, right) => left - right);
+      if (
+        turnColumns.some(
+          (tileX, index) => index > 0 && tileX === turnColumns[index - 1] + 1,
+        )
+      ) {
+        staircaseRoutes++;
+      }
     }
-    const verticalTurns = [...rowsByColumn.values()].filter(
-      (rows) => Math.max(...rows) - Math.min(...rows) >= 2,
+
+    assert.ok(
+      compactTurnRoutes >= 16,
+      `${lengthCells}-cell swamps need a substantial share of compact vertical turns`,
     );
     assert.ok(
-      verticalTurns.length >= 1,
-      `${lengthCells}-cell route needs a turn spanning at least two tiles vertically`,
+      staircaseRoutes >= 16,
+      `${lengthCells}-cell swamps need a substantial share of stair-step turns`,
     );
-    if (lengthCells >= 3) {
-      assert.ok(
-        verticalTurns.length >= 2,
-        `${lengthCells}-cell route needs multiple multi-tile vertical turns`,
-      );
-    }
   }
 });
 
@@ -163,9 +179,7 @@ test('firm-ground route shapes vary by seed instead of repeating a fixed wave', 
       tileY: 0,
     };
     const tiles = getSwampFirmGroundTiles(swamp);
-    signatures.add(
-      tiles.map((tile) => `${tile.tileX}:${tile.tileY}`).join('|'),
-    );
+    signatures.add(tiles.map((tile) => `${tile.tileX}:${tile.tileY}`).join('|'));
 
     const rowsByColumn = new Map();
     for (const tile of tiles) {
@@ -178,7 +192,10 @@ test('firm-ground route shapes vary by seed instead of repeating a fixed wave', 
       .map(([tileX]) => tileX)
       .sort((left, right) => left - right);
     turnSpacingSignatures.add(
-      turns.slice(1).map((turn, index) => turn - turns[index]).join(','),
+      turns
+        .slice(1)
+        .map((turn, index) => turn - turns[index])
+        .join(','),
     );
   }
 
@@ -186,6 +203,53 @@ test('firm-ground route shapes vary by seed instead of repeating a fixed wave', 
   assert.ok(
     turnSpacingSignatures.size >= 16,
     'turn spacing should vary substantially between generated swamps',
+  );
+});
+
+test('firm-ground routes use every row and form horizontal edge lanes and staircases', () => {
+  const usedRows = new Set();
+  const horizontalRows = new Set();
+  let staircaseCount = 0;
+
+  for (let decorationSeed = 0; decorationSeed < 128; decorationSeed++) {
+    const tiles = getSwampFirmGroundTiles({
+      westCellX: 0,
+      cellY: 0,
+      lengthCells: 5,
+      decorationSeed,
+      tileX: 0,
+      tileY: 0,
+    });
+    const coordinates = new Set(tiles.map((tile) => `${tile.tileX}:${tile.tileY}`));
+
+    for (const tile of tiles) {
+      usedRows.add(tile.tileY);
+      if (coordinates.has(`${tile.tileX + 1}:${tile.tileY}`)) {
+        horizontalRows.add(tile.tileY);
+      }
+    }
+
+    const turnColumns = [...new Set(tiles.map((tile) => tile.tileX))]
+      .filter((tileX) => tiles.filter((tile) => tile.tileX === tileX).length >= 2)
+      .sort((left, right) => left - right);
+    if (
+      turnColumns.some(
+        (tileX, index) => index > 0 && tileX === turnColumns[index - 1] + 1,
+      )
+    ) {
+      staircaseCount++;
+    }
+  }
+
+  assert.deepEqual([...usedRows].sort(), [0, 1, 2, 3, 4, 5]);
+  assert.ok(horizontalRows.has(0), 'horizontal routes must be able to use the top row');
+  assert.ok(
+    horizontalRows.has(5),
+    'horizontal routes must be able to use the bottom row',
+  );
+  assert.ok(
+    staircaseCount >= 16,
+    'a substantial share of routes should contain zig-zag stairs',
   );
 });
 
@@ -244,9 +308,7 @@ test('long eligible corridors strongly favor swamps longer than two cells', () =
 
   const twoCellCount = lengthCounts.get(2) ?? 0;
   const longerCount =
-    (lengthCounts.get(3) ?? 0) +
-    (lengthCounts.get(4) ?? 0) +
-    (lengthCounts.get(5) ?? 0);
+    (lengthCounts.get(3) ?? 0) + (lengthCounts.get(4) ?? 0) + (lengthCounts.get(5) ?? 0);
   assert.ok(longerCount > twoCellCount * 2);
   assert.ok((lengthCounts.get(MAX_SWAMP_LENGTH_CELLS) ?? 0) > 0);
 });
@@ -289,7 +351,10 @@ test('hidden firm-ground paths contain mandatory deep-mud breaks', () => {
         tileContainsFirmGround[tileIndex - 1] &&
         tileContainsFirmGround[tileIndex + 1],
     );
-    assert.ok(interruptedTiles.length >= 1, `${lengthCells}-cell swamp needs a mud break`);
+    assert.ok(
+      interruptedTiles.length >= 1,
+      `${lengthCells}-cell swamp needs a mud break`,
+    );
   }
 });
 
