@@ -13,7 +13,7 @@ Labyrinth 2D is a multiplayer top-down pixel-art labyrinth game built as a TypeS
 Supabase provides browser authentication and owner-private profile storage. It
 does not participate in the authoritative simulation or WebSocket protocol.
 
-One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
+One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, treasure-chest state, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
 ## Tech Stack
 
@@ -35,6 +35,7 @@ One room owns one maze instance. The server is authoritative for player state, h
   - one generated maze
   - one player list
   - one runestone state array
+  - one treasure-chest state array
   - one portal position selected during room creation
   - one portal activation flag
   - one precomputed hub-distance field for phase 1 wisdom guidance
@@ -68,6 +69,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `JOIN_ROOM` | Join or create a room with a display name |
 | `PLAYER_INPUT` | Send one frame of movement intent plus `sequenceNumber` |
 | `ACTIVATE_RUNESTONE` | Request activation of a nearby runestone |
+| `OPEN_CHEST` | Request opening a nearby unopened treasure chest |
 | `USE_WISDOM_ORB` | Spend one orb to request a hub-direction hint |
 | `DEBUG_TELEPORT` | Debug-only teleport helper used by developer tooling |
 
@@ -80,6 +82,8 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `PLAYER_LEFT` | Notify clients that one player disconnected |
 | `RUNESTONE_ACTIVATED` | Broadcast that one runestone is now active |
 | `ALL_RUNESTONES_ACTIVATED` | Broadcast the existing portal coordinates once all runestones are active |
+| `CHEST_OPENED` | Broadcast a chest's shared opened state and opener |
+| `WISDOM_ORB_GRANTED` | Privately provide a rewarded survivor's post-reward orb count; wardens receive no reward message |
 | `WISDOM_ORB_USED` | Private response to the player who spent an orb, containing the hint direction and remaining orb count |
 | `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
 | `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
@@ -119,6 +123,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | `runestones` | `RunestoneInfo[]` | Three runestones with activation state |
 | `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
 | `bridgeStates` | `BridgeState[]` | Authoritative missing-stone mask for every generated bridge |
+| `chestStates` | `ChestState[]` | Authoritative opened/unopened state for every generated treasure chest |
 
 ## Shared Gameplay Systems
 
@@ -145,6 +150,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 
 - A full room has `7` survivors and `2` wardens. The wardens occupy different teams, and a stable team-seat assignment preserves that distribution when a disconnected player is replaced.
 - Each survivor starts with `1` wisdom orb; wardens start with `0` and server-side role validation rejects their orb requests.
+- Survivors may carry at most `3` wisdom orbs. Opening a nearby unopened chest grants one orb only when the survivor is below that cap. Wardens can instead open and permanently consume a chest without granting an orb to anyone.
 - Roles and wisdom orbs are server-authoritative private room state. They are never included in broadcast `GameState` snapshots.
 - Shared phase-aware guidance lives in `packages/shared/src/navigation.ts`.
 - `computeHubDistanceField()` builds the phase 1 pathfield toward the central hub.
@@ -156,6 +162,13 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
   - `south`
   - `west`
 - The hint logic is branch-aware. It chooses from locally open exits that the player can actually take from the current cell or passage, rather than pointing at the target's raw absolute bearing through walls.
+
+### Treasure Chests
+
+- Every matching south-opening dead end owns one deterministic shared chest index.
+- The server validates the opener's role-specific eligibility, distance, current inventory, and the chest's unopened state before accepting `OPEN_CHEST`. Survivors receive one orb; wardens only consume the chest.
+- Opening swaps all clients to the authored `chest01 16` sprite and plays a short blue wisdom-magic burst.
+- Open state persists in `GameState.chestStates`, so late joiners see the correct sprite without replaying the opening effect.
 
 ## Map System
 
@@ -286,6 +299,7 @@ The loader attempts to load authored PNG assets first and falls back to generate
 - `assets/portal_spritesheet.png`
 - `assets/portal-platform/` (the authored Tormund masonry modules used by the portal stairs and platform)
 - `assets/chest-dead-end/chest01_0.png`
+- `assets/chest-dead-end/chest01_16.png`
 - `assets/wisdom_orb.png`
 - `assets/expand_button.png`
 - `assets/contract_button.png`
@@ -301,10 +315,11 @@ The client currently has multiple UI subsystems, not just the minimap:
   - screen-space HUD in the bottom-right corner
   - player-centered exploration view with fog of war
   - supports portal display from the beginning of the match
+  - renders each revealed treasure dead end as a small chest glyph; wardens see every chest on the expanded whole-maze view
   - wardens receive a solid red frame with no fog-of-war and a wooden corner expand button; the fixed whole-maze view is scaled to fit the internal screen, marks the portal and the local warden's position, and provides a matching contract button
 - `WisdomOrbHud`
   - screen-space HUD in the top-left corner
-  - survivors see one orb slot and the current remaining count; wardens do not receive this HUD
+  - survivors see one icon per owned orb plus the current remaining count, capped at three; wardens do not receive this HUD
   - filled orbs are clickable
 - `IntroDialogueHud`
   - screen-space dialogue panel centered along the bottom of the screen
@@ -319,8 +334,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - local-only world-space hint arrow above the local player
   - appears after a successful orb use
   - follows the player briefly while keeping the server-returned direction fixed
-- Runestone interaction prompt
-  - world-space `[E]` prompt shown above nearby inactive runestones
+- Runestone/chest interaction prompt
+  - world-space `[E]` prompt shown above nearby eligible inactive runestones or unopened treasure chests
 
 ### Input Handling
 
@@ -328,6 +343,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Intro dialogue advance: `E`, the clickable arrow button, or the mobile `E` button while the intro dialogue is visible
 - Intro dialogue skip: `E`, the clickable arrow button, or the mobile `E` button while the current page is still typing
 - Runestone interaction: `E` or the mobile `E` button after the intro dialogue is dismissed
+- Chest interaction: `E` or the mobile `E` button while near an unopened chest; survivors must carry fewer than three wisdom orbs, while wardens destroy the chest without a reward
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
 - Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.
 - Debug-only tools can enable scroll zoom, zoom toggling, and click teleport

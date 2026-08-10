@@ -11,7 +11,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Container, Sprite, Texture, Graphics, Rectangle } from 'pixi.js';
-import type { BridgePlacement, SwampPlacement, TileMapData } from '@labyrinth/shared';
+import type {
+  BridgePlacement,
+  ChestDeadEndPlacement,
+  SwampPlacement,
+  TileMapData,
+} from '@labyrinth/shared';
 import {
   getSwampAuthoringWidth,
   TILE_FLOOR,
@@ -67,6 +72,9 @@ const COL_BRIDGE_WATER: readonly number[] = [47, 105, 125, 255]; // deep blue-gr
 const COL_BRIDGE_STONE: readonly number[] = [188, 157, 103, 255]; // pale ancient stone
 const COL_SWAMP: readonly number[] = [38, 76, 60, 255]; // murky green water
 const COL_SWAMP_DOT: readonly number[] = [104, 156, 72, 255]; // marsh vegetation
+const COL_CHEST_OUTLINE: readonly number[] = [58, 32, 18, 255]; // dark iron/wood edge
+const COL_CHEST_WOOD: readonly number[] = [181, 91, 39, 255]; // warm chest boards
+const COL_CHEST_GOLD: readonly number[] = [255, 202, 61, 255]; // trim and latch
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
 const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot center
@@ -77,6 +85,7 @@ export interface MinimapOptions {
   isWarden?: boolean;
   bridges?: readonly BridgePlacement[];
   swamps?: readonly SwampPlacement[];
+  chestDeadEnds?: readonly ChestDeadEndPlacement[];
   expandButtonTexture?: Texture | null;
   contractButtonTexture?: Texture | null;
   onExpandedChange?: (expanded: boolean) => void;
@@ -112,6 +121,7 @@ export class Minimap {
   private dirtMask: Uint8Array;
   private bridgeMask: Uint8Array;
   private swampMask: Uint8Array;
+  private chestMask: Uint8Array;
   private fog: Uint8Array;
 
   // ── Tracking for incremental updates ───────────────────────────────────
@@ -143,6 +153,7 @@ export class Minimap {
     this.dirtMask = dirtMask;
     this.bridgeMask = this.createBridgeMask(options.bridges ?? []);
     this.swampMask = this.createSwampMask(options.swamps ?? []);
+    this.chestMask = this.createChestMask(options.chestDeadEnds ?? []);
     this.isWarden = options.isWarden ?? false;
     this.expandButtonTexture = options.expandButtonTexture ?? null;
     this.contractButtonTexture = options.contractButtonTexture ?? null;
@@ -430,6 +441,41 @@ export class Minimap {
           tileY < this.mapData.height
         ) {
           mask[tileY * this.mapData.width + tileX] = 2;
+        }
+      }
+    }
+
+    return mask;
+  }
+
+  /** Stamp a tiny outlined chest glyph into every authored treasure cell. */
+  private createChestMask(chestDeadEnds: readonly ChestDeadEndPlacement[]): Uint8Array {
+    const mask = new Uint8Array(this.mapData.width * this.mapData.height);
+    const glyph = [
+      [0, 1, 1, 0],
+      [1, 2, 2, 1],
+      [1, 3, 3, 1],
+      [1, 2, 3, 1],
+      [0, 1, 1, 0],
+    ] as const;
+
+    for (const placement of chestDeadEnds) {
+      const startX = placement.tileX + 1;
+      const startY = placement.tileY + 1;
+      for (let localY = 0; localY < glyph.length; localY++) {
+        for (let localX = 0; localX < glyph[localY].length; localX++) {
+          const value = glyph[localY][localX];
+          if (value === 0) continue;
+          const tileX = startX + localX;
+          const tileY = startY + localY;
+          if (
+            tileX >= 0 &&
+            tileX < this.mapData.width &&
+            tileY >= 0 &&
+            tileY < this.mapData.height
+          ) {
+            mask[tileY * this.mapData.width + tileX] = value;
+          }
         }
       }
     }
@@ -763,6 +809,9 @@ export class Minimap {
 
   /** Get the minimap colour for a given tile ID. */
   private tileColor(tileIndex: number, id: number): readonly number[] {
+    if (this.chestMask[tileIndex] === 3) return COL_CHEST_GOLD;
+    if (this.chestMask[tileIndex] === 2) return COL_CHEST_WOOD;
+    if (this.chestMask[tileIndex] === 1) return COL_CHEST_OUTLINE;
     if (this.bridgeMask[tileIndex] === 2) return COL_BRIDGE_STONE;
     if (this.bridgeMask[tileIndex] === 1) return COL_BRIDGE_WATER;
     if (this.swampMask[tileIndex] === 2) return COL_SWAMP_DOT;

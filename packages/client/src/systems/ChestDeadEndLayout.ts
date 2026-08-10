@@ -17,6 +17,7 @@ export interface ChestDeadEndSpriteSpec {
 
 const CHEST_DEAD_END_ASSET_PATH_BY_ID = {
   chest: '/assets/chest-dead-end/chest01_0.png',
+  chestOpen: '/assets/chest-dead-end/chest01_16.png',
   f155: getFiorwoodsRuntimeAssetPath(155),
   f1105: getFiorwoodsRuntimeAssetPath(1105),
   f1110: getFiorwoodsRuntimeAssetPath(1110),
@@ -318,6 +319,20 @@ export const CHEST_DEAD_END_SPRITES = [
     layer: 'prop',
   },
 ] as const satisfies readonly ChestDeadEndSpriteSpec[];
+
+/** Exact opened-chest state exported from the style editor. */
+export const CHEST_DEAD_END_OPEN_SPRITE = {
+  asset: 'chestOpen',
+  name: 'chest01 16',
+  nativeWidth: 30,
+  nativeHeight: 37,
+  x: 34,
+  y: 18,
+  w: 15,
+  h: 18,
+  z: 501,
+  layer: 'prop',
+} as const satisfies ChestDeadEndSpriteSpec;
 
 export function getChestDeadEndAssetPath(asset: ChestDeadEndAsset): string {
   return CHEST_DEAD_END_ASSET_PATH_BY_ID[asset];

@@ -1,6 +1,6 @@
 import { Container, Graphics, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 
-import { INITIAL_WISDOM_ORBS } from '@labyrinth/shared';
+import { INITIAL_WISDOM_ORBS, MAX_WISDOM_ORBS } from '@labyrinth/shared';
 
 const MARGIN = 8;
 const PANEL_WIDTH = 92;
@@ -60,7 +60,7 @@ export class WisdomOrbHud {
 
     const orbStartX = 6;
     const orbY = 12;
-    for (let i = 0; i < INITIAL_WISDOM_ORBS; i++) {
+    for (let i = 0; i < MAX_WISDOM_ORBS; i++) {
       const orb = new Sprite(texture);
       orb.width = ORB_SIZE;
       orb.height = ORB_SIZE;
@@ -104,14 +104,13 @@ export class WisdomOrbHud {
   }
 
   setRemaining(remainingOrbs: number): void {
-    this.remainingOrbs = Math.max(0, Math.min(INITIAL_WISDOM_ORBS, remainingOrbs));
+    this.remainingOrbs = Math.max(0, Math.min(MAX_WISDOM_ORBS, remainingOrbs));
     this.countText.text = `x${this.remainingOrbs}`;
 
     for (let i = 0; i < this.orbSprites.length; i++) {
       const orb = this.orbSprites[i];
       const active = i < this.remainingOrbs;
-      orb.alpha = active ? 1 : 0.25;
-      orb.tint = active ? 0xffffff : 0x6f7c8d;
+      orb.visible = active;
       orb.eventMode = active ? 'static' : 'none';
       orb.cursor = active ? 'pointer' : 'default';
     }

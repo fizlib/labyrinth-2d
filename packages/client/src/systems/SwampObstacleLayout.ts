@@ -149,6 +149,57 @@ const ASSET_DIMENSIONS: Readonly<
   r100: [12, 9],
 };
 
+/**
+ * The original two-cell swamp composition authored in the style editor.
+ *
+ * Runtime swamps use seeded, generative decoration. The topology atlas keeps
+ * this fixed arrangement so resetting the editor restores the approved visual
+ * reference exactly.
+ */
+export const SWAMP_OBSTACLE_AUTHORED_DETAIL_SPRITES = [
+  { asset: 'watergrass3', x: 14, y: 8, w: 16, h: 16, z: 500 },
+  { asset: 'watergrass0', x: 7, y: 2, w: 13, h: 16, z: 500 },
+  { asset: 'watergrass6', x: 29, y: 6, w: 13, h: 12, z: 500 },
+  { asset: 'r99', x: 48, y: 9, w: 15, h: 14, z: 1 },
+  { asset: 'r98', x: 64, y: 11, w: 15, h: 12, z: 1 },
+  { asset: 'watergrass3', x: 81, y: 6, w: 16, h: 16, z: 500 },
+  { asset: 'watergrass6', x: 42, y: 22, w: 13, h: 12, z: 500 },
+  { asset: 'r100', x: 37, y: 36, w: 12, h: 9, z: 1 },
+  { asset: 'watergrass3', x: 28, y: 37, w: 16, h: 16, z: 500 },
+  { asset: 'watergrass0', x: 47, y: 33, w: 13, h: 16, z: 500 },
+  { asset: 'r48', x: 94, y: 50, w: 13, h: 16, z: 1 },
+  { asset: 'r49', x: 107, y: 50, w: 15, h: 16, z: 1 },
+  { asset: 'watergrass6', x: 59, y: 22, w: 13, h: 12, z: 500 },
+  { asset: 'r99', x: 69, y: 41, w: 15, h: 14, z: 1 },
+  { asset: 'watergrass3', x: 79, y: 46, w: 16, h: 16, z: 500 },
+  { asset: 'watergrass3', x: 25, y: 66, w: 16, h: 16, z: 500 },
+  { asset: 'watergrass0', x: 36, y: 73, w: 13, h: 16, z: 500 },
+  { asset: 'watergrass6', x: 43, y: 49, w: 13, h: 12, z: 500 },
+  { asset: 'r99', x: 52, y: 62, w: 15, h: 14, z: 1 },
+  { asset: 'r100', x: 116, y: 64, w: 12, h: 9, z: 1 },
+  { asset: 'r98', x: 81, y: 76, w: 15, h: 12, z: 1 },
+  { asset: 'watergrass6', x: 69, y: 74, w: 13, h: 12, z: 500 },
+  { asset: 'watergrass6', x: 77, y: 63, w: 13, h: 12, z: 500 },
+  { asset: 'watergrass6', x: 92, y: 38, w: 13, h: 12, z: 500 },
+  { asset: 'watergrass6', x: 78, y: 24, w: 13, h: 12, z: 500 },
+  { asset: 'r98', x: 97, y: 10, w: 15, h: 12, z: 1 },
+  { asset: 'r99', x: 100, y: 23, w: 15, h: 14, z: 1 },
+  { asset: 'watergrass6', x: 114, y: 9, w: 13, h: 12, z: 500 },
+  { asset: 'watergrass3', x: 117, y: 20, w: 16, h: 16, z: 500 },
+  { asset: 'watergrass0', x: 108, y: 32, w: 13, h: 16, z: 500 },
+  { asset: 'watergrass6', x: 99, y: 67, w: 13, h: 12, z: 500 },
+  { asset: 'watergrass6', x: 118, y: 74, w: 13, h: 12, z: 500 },
+  { asset: 'r98', x: 131, y: 66, w: 15, h: 12, z: 1 },
+  { asset: 'watergrass0', x: 154, y: 66, w: 13, h: 16, z: 500 },
+  { asset: 'r99', x: 136, y: 76, w: 15, h: 14, z: 1 },
+  { asset: 'watergrass0', x: 134, y: 32, w: 13, h: 16, z: 500 },
+  { asset: 'r100', x: 151, y: 42, w: 12, h: 9, z: 1 },
+  { asset: 'watergrass6', x: 138, y: 53, w: 13, h: 12, z: 500 },
+  { asset: 'watergrass6', x: 121, y: 44, w: 13, h: 12, z: 500 },
+  { asset: 'watergrass6', x: 130, y: 8, w: 13, h: 12, z: 500 },
+  { asset: 'watergrass6', x: 133, y: 19, w: 13, h: 12, z: 500 },
+] as const satisfies readonly SwampObstacleSpriteSpec[];
+
 function createRandom(seed: number): () => number {
   let state = seed | 0;
   return () => {

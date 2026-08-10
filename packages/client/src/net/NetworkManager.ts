@@ -16,6 +16,7 @@ import {
   type JoinRoomMessage,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
+  type OpenChestMessage,
   type UseWisdomOrbMessage,
   type DebugTeleportMessage,
   type DebugPlayerAction,
@@ -37,6 +38,8 @@ export interface NetworkCallbacks {
   onPlayerLeft: (playerId: string) => void;
   onRunestoneActivated: (runestoneIndex: number) => void;
   onAllRunestonesActivated: (portalX: number, portalY: number) => void;
+  onChestOpened: (chestIndex: number, playerId: string) => void;
+  onWisdomOrbGranted: (chestIndex: number, wisdomOrbs: number) => void;
   onWisdomOrbUsed: (hint: WisdomOrbHint, remainingWisdomOrbs: number) => void;
   onPlayerRoleChanged: (role: PlayerRole, wisdomOrbs: number) => void;
   onDebugPlayerRole: (playerId: string, role: PlayerRole) => void;
@@ -222,6 +225,14 @@ export class NetworkManager {
         this.callbacks.onAllRunestonesActivated(msg.portalX, msg.portalY);
         break;
 
+      case MessageType.ChestOpened:
+        this.callbacks.onChestOpened(msg.chestIndex, msg.playerId);
+        break;
+
+      case MessageType.WisdomOrbGranted:
+        this.callbacks.onWisdomOrbGranted(msg.chestIndex, msg.wisdomOrbs);
+        break;
+
       case MessageType.WisdomOrbUsed:
         this.callbacks.onWisdomOrbUsed(msg.hint, msg.remainingWisdomOrbs);
         break;
@@ -278,6 +289,15 @@ export class NetworkManager {
     const msg: ActivateRunestoneMessage = {
       type: MessageType.ActivateRunestone,
       runestoneIndex,
+    };
+    this.send(msg);
+  }
+
+  /** Request opening one nearby deterministic treasure chest. */
+  sendOpenChest(chestIndex: number): void {
+    const msg: OpenChestMessage = {
+      type: MessageType.OpenChest,
+      chestIndex,
     };
     this.send(msg);
   }

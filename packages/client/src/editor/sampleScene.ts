@@ -12,6 +12,7 @@ import {
   WALL_WIDTH,
   generateMazeLayout,
   getBridgeBounds,
+  getChestDeadEndBounds,
   getHubTileBounds,
   getPortalBounds,
   getPortalPlatformBounds,
@@ -21,6 +22,7 @@ import {
   type GatePlacement,
   type BridgePlacement,
   type PortalBounds,
+  type SwampPlacement,
   type TileMapData,
 } from '@labyrinth/shared';
 import {
@@ -45,6 +47,17 @@ import {
   PORTAL_VISUAL_OFFSET_X,
   getPortalPlatformAssetPath,
 } from '../systems/PortalPlatformLayout';
+import {
+  SWAMP_OBSTACLE_AUTHORED_DETAIL_SPRITES,
+  getSwampObstacleAssetPath,
+  getSwampObstacleTerrainSprites,
+  type SwampObstacleAsset,
+} from '../systems/SwampObstacleLayout';
+import {
+  CHEST_DEAD_END_OPEN_SPRITE,
+  CHEST_DEAD_END_SPRITES,
+  getChestDeadEndAssetPath,
+} from '../systems/ChestDeadEndLayout';
 import type { EditorCollider, EditorElement, SemanticRole, StyleEditorDocumentV1 } from './types';
 
 const TILE = 16;
@@ -68,6 +81,11 @@ const PORTAL_SHEET = '/assets/portal_spritesheet.png';
 const PORTAL_FRAME_SIZE = 48;
 const BRIDGE_SAMPLE_CELL_X = 5;
 const BRIDGE_SAMPLE_NORTH_CELL_Y = 11;
+const SWAMP_SAMPLE_WEST_CELL_X = 2;
+const SWAMP_SAMPLE_CELL_Y = 5;
+const SWAMP_SAMPLE_LENGTH_CELLS = 2;
+const CHEST_SAMPLE_CELL_X = 2;
+const CHEST_SAMPLE_CELL_Y = 9;
 const PORTAL_SAMPLE_CELL_X = 8;
 const PORTAL_SAMPLE_CELL_Y = 14;
 const PORTAL_TERRAIN_Z = 1;
@@ -87,6 +105,18 @@ const BRIDGE_NATIVE_SIZE_BY_ASSET: Partial<
   f1537: [18, 15],
   f1542: [18, 15],
   f1591: [32, 13],
+  watergrass3: [31, 32],
+  watergrass6: [25, 23],
+};
+const SWAMP_NATIVE_SIZE_BY_ASSET: Partial<
+  Record<SwampObstacleAsset, readonly [number, number]>
+> = {
+  r48: [27, 32],
+  r49: [30, 32],
+  r98: [29, 24],
+  r99: [30, 28],
+  r100: [25, 17],
+  watergrass0: [26, 32],
   watergrass3: [31, 32],
   watergrass6: [25, 23],
 };
@@ -122,6 +152,20 @@ function bridgeAssetRole(asset: BridgeObstacleAsset, zIndex: number): SemanticRo
 
 function bridgeNativeSize(asset: BridgeObstacleAsset): readonly [number, number] {
   return BRIDGE_NATIVE_SIZE_BY_ASSET[asset] ?? [32, 32];
+}
+
+function swampAssetName(asset: SwampObstacleAsset): string {
+  if (asset.startsWith('r')) return `Sprite_Rohlan Fields_${asset.slice(1)}`;
+  if (asset === 'watergrass0') return 'watergrass_0';
+  return asset === 'watergrass3' ? 'watergrass_3' : 'watergrass_6';
+}
+
+function swampAssetRole(zIndex: number): SemanticRole {
+  return zIndex >= 500 ? 'bush' : 'ground.grass';
+}
+
+function swampNativeSize(asset: SwampObstacleAsset): readonly [number, number] {
+  return SWAMP_NATIVE_SIZE_BY_ASSET[asset] ?? [32, 32];
 }
 
 function bridgeHidesSampleForestPlacement(placement: ForestStylePlacementSpec): boolean {
@@ -483,6 +527,132 @@ function addBridgeObstacleElements(
       bounds.shape,
       bounds.flipX,
       bounds.flipY,
+    ));
+  }
+}
+
+function addSwampObstacleElements(elements: EditorElement[]): void {
+  const swamp: SwampPlacement = {
+    westCellX: SWAMP_SAMPLE_WEST_CELL_X,
+    cellY: SWAMP_SAMPLE_CELL_Y,
+    lengthCells: SWAMP_SAMPLE_LENGTH_CELLS,
+    decorationSeed: 0,
+    tileX: WALL_WIDTH + SWAMP_SAMPLE_WEST_CELL_X * CELL_STEP_X + CELL_SIZE,
+    tileY: WALL_HEIGHT + SWAMP_SAMPLE_CELL_Y * CELL_STEP_Y,
+  };
+  const localX = (swamp.tileX - CROP_TILE_X) * TILE;
+  const localY = (swamp.tileY - CROP_TILE_Y) * TILE;
+
+  // The authored swamp replaces the existing z=0 ground tiles so reset keeps
+  // stable atlas element IDs and the same ordering as the supplied export.
+  for (const spec of getSwampObstacleTerrainSprites(swamp)) {
+    const x = localX + spec.x;
+    const y = localY + spec.y;
+    const terrain = elements.find((candidate) =>
+      candidate.x === x && candidate.y === y &&
+      candidate.width === spec.w && candidate.height === spec.h &&
+      candidate.zIndex === spec.z && candidate.role.startsWith('ground.'));
+    if (!terrain) {
+      throw new Error(`Swamp obstacle terrain is missing at sample pixel ${x},${y}`);
+    }
+
+    terrain.name = swampAssetName(spec.asset);
+    terrain.role = swampAssetRole(spec.z);
+    terrain.assetPath = getSwampObstacleAssetPath(spec.asset);
+    [terrain.nativeWidth, terrain.nativeHeight] = swampNativeSize(spec.asset);
+  }
+
+  for (const spec of SWAMP_OBSTACLE_AUTHORED_DETAIL_SPRITES) {
+    const [nativeWidth, nativeHeight] = swampNativeSize(spec.asset);
+    elements.push(assetElement(
+      swampAssetName(spec.asset),
+      swampAssetRole(spec.z),
+      getSwampObstacleAssetPath(spec.asset),
+      nativeWidth,
+      nativeHeight,
+      localX + spec.x,
+      localY + spec.y,
+      spec.w,
+      spec.h,
+      spec.z,
+    ));
+  }
+}
+
+function addChestDeadEndElements(
+  layout: GeneratedMazeLayout,
+  elements: EditorElement[],
+  colliders: EditorCollider[],
+): void {
+  const placement = layout.chestDeadEnds.find(
+    (candidate) =>
+      candidate.cellX === CHEST_SAMPLE_CELL_X &&
+      candidate.cellY === CHEST_SAMPLE_CELL_Y,
+  );
+  if (!placement) {
+    throw new Error('Seed-44 chest dead-end fixture is missing at cell 2,9');
+  }
+
+  const localX = (placement.tileX - CROP_TILE_X) * TILE;
+  const localY = (placement.tileY - CROP_TILE_Y) * TILE;
+  for (const spec of CHEST_DEAD_END_SPRITES) {
+    if (spec.layer === 'terrain') {
+      const x = localX + spec.x;
+      const y = localY + spec.y;
+      const terrain = elements.find((candidate) =>
+        candidate.x === x && candidate.y === y &&
+        candidate.width === spec.w && candidate.height === spec.h &&
+        candidate.zIndex === spec.z && candidate.role.startsWith('ground.'));
+      if (!terrain) {
+        throw new Error(`Chest dead-end terrain is missing at sample pixel ${x},${y}`);
+      }
+
+      terrain.name = spec.name;
+      terrain.role = 'ground.grass';
+      terrain.assetPath = getChestDeadEndAssetPath(spec.asset);
+      terrain.nativeWidth = spec.nativeWidth;
+      terrain.nativeHeight = spec.nativeHeight;
+      continue;
+    }
+
+    elements.push(assetElement(
+      spec.name,
+      spec.asset === 'chest' ? 'decoration' : 'ground.grass',
+      getChestDeadEndAssetPath(spec.asset),
+      spec.nativeWidth,
+      spec.nativeHeight,
+      localX + spec.x,
+      localY + spec.y,
+      spec.w,
+      spec.h,
+      spec.z,
+    ));
+  }
+
+  const openChest = CHEST_DEAD_END_OPEN_SPRITE;
+  elements.push(assetElement(
+    openChest.name,
+    'decoration',
+    getChestDeadEndAssetPath(openChest.asset),
+    openChest.nativeWidth,
+    openChest.nativeHeight,
+    localX + openChest.x,
+    localY + openChest.y,
+    openChest.w,
+    openChest.h,
+    openChest.z,
+  ));
+
+  const cropPixelX = CROP_TILE_X * TILE;
+  const cropPixelY = CROP_TILE_Y * TILE;
+  for (const bounds of getChestDeadEndBounds(placement, TILE)) {
+    colliders.push(collider(
+      `Chest dead end · ${bounds.kind}`,
+      bounds.left - cropPixelX,
+      bounds.top - cropPixelY,
+      bounds.right - bounds.left + 1,
+      bounds.bottom - bounds.top + 1,
+      'freeform',
     ));
   }
 }
@@ -875,12 +1045,14 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
   }
 
   addGroundElements(layout, elements);
+  addSwampObstacleElements(elements);
   addBridgeObstacleElements(elements, colliders);
   addWallElements(map, elements);
   addWallColliders(map, colliders);
   addGateObstacleElements(layout, elements, colliders);
   addCentralHubElements(map, elements, colliders);
   addPortalCellElements(elements, colliders);
+  addChestDeadEndElements(layout, elements, colliders);
 
   const topologyGrid = Array.from({ length: CROP_CELLS_HIGH }, (_, row) =>
     topology
@@ -895,7 +1067,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
     createdAt: now,
     updatedAt: now,
     sample: {
-      name: 'Generated Fiorwoods Topology Atlas · seed 44 · cells 2,5–8,14',
+      name: 'Map',
       width: SAMPLE_WIDTH,
       height: SAMPLE_HEIGHT,
       tileSize: TILE,
@@ -906,6 +1078,8 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
       'The central hub section includes its editable ground tiles, thick side walls, corrected north-west and north-east corner transitions, sacred tree, tree shadow, and three runestones.',
       'The portal section is anchored between seed-44 cells (8,13) and (8,14), which both have intact north forest walls. It includes the exact editable clearing, raised stone platform, inactive portal frame, split wall opening, portal hitbox, and six authored platform-edge colliders; the central stairway remains walkable.',
       'The bridge obstacle is anchored between seed-44 cells (5,11) and (5,12), with forest banks on both sides and open north/south cells. It includes the exact water repaint, stone walkway, bank decorations, and six authored colliders.',
+      'The swamp obstacle spans seed-44 cells (2,5) and (3,5), with its exact authored water, banks, lilies, reeds, and cattails preserved as the editor reference.',
+      'The chest cell at seed-44 cell (2,9) is the reusable south-opening dead-end prefab, including its tree backing, closed and opened chest states, terrain stamp, rock, and three authored rectangle colliders.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',

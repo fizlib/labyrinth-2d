@@ -29,6 +29,8 @@ import {
   CELL_STEP_Y,
   GRID_CELLS,
   SPAWN_DISTANCE,
+  MAX_WISDOM_ORBS,
+  CHEST_INTERACTION_RANGE,
   PLAYER_CHARACTER_NAMES,
   SQUAD_COLORS,
   FEET_HITBOX_W,
@@ -56,10 +58,7 @@ import {
 import { loadAssets, type GameAssets } from './assets/AssetLoader';
 import { DebugSettings } from './config/DebugSettings';
 import { Minimap } from './systems/Minimap';
-import {
-  TilemapRenderer,
-  type RunestoneSpriteData,
-} from './systems/TilemapRenderer';
+import { TilemapRenderer } from './systems/TilemapRenderer';
 import { Portal } from './systems/Portal';
 import { PortalPlatform } from './systems/PortalPlatform';
 import { getPortalPlatformPlayerZFloor } from './systems/PortalPlatformLayout';
@@ -164,6 +163,7 @@ let localX = 0;
 let localY = 0;
 let localPlayerInitialized = false;
 let localPlayerRole: PlayerRole | null = null;
+let localWisdomOrbs = 0;
 let localFacing: FacingDirection = 'down';
 
 /** Briefly suppress reconciliation while a click-teleport reaches the server. */
@@ -1692,6 +1692,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     if (latestServerState) {
       replacementRenderer.syncBridgeStates(latestServerState.bridgeStates, false);
+      replacementRenderer.syncChestStates(latestServerState.chestStates, false);
 
       for (const runestoneState of latestServerState.runestones) {
         const runestone = replacementRenderer.runestoneSprites.find(
@@ -1841,6 +1842,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         app.renderer,
       );
       tilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
+      tilemapRenderer.syncChestStates(gameState.chestStates, false);
       if (cellBoundaryOverlay?.parent === worldContainer) {
         worldContainer.removeChild(cellBoundaryOverlay);
       }
@@ -1972,6 +1974,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       const localPlayerId = net.playerId;
       snapshotBuffer.push(gameState);
       tilemapRenderer?.syncBridgeStates(gameState.bridgeStates, true);
+      tilemapRenderer?.syncChestStates(gameState.chestStates, true);
 
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
@@ -2064,6 +2067,21 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
     },
 
+    onChestOpened: (chestIndex, playerId) => {
+      console.info(`[Main] Chest ${chestIndex} opened by ${playerId}`);
+      tilemapRenderer?.chestDeadEndVisuals
+        .find((visual) => visual.index === chestIndex)
+        ?.syncOpened(true, true);
+    },
+
+    onWisdomOrbGranted: (chestIndex, wisdomOrbs) => {
+      localWisdomOrbs = wisdomOrbs;
+      wisdomOrbHud?.setRemaining(wisdomOrbs);
+      console.info(
+        `[WisdomOrb] Chest ${chestIndex} reward received; inventory=${wisdomOrbs}`,
+      );
+    },
+
     onAllRunestonesActivated: (portalX, portalY) => {
       console.info(
         `[Main] All runestones activated! Portal at (${Math.round(portalX)}, ${Math.round(portalY)})`,
@@ -2074,6 +2092,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onWisdomOrbUsed: (hint, remainingWisdomOrbs) => {
+      localWisdomOrbs = remainingWisdomOrbs;
       wisdomOrbHud?.setRemaining(remainingWisdomOrbs);
       if (hint.kind === 'bridge') {
         wisdomArrow?.hide();
@@ -2140,6 +2159,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       updateLoadingProgress(0.98, 'The gate is resisting. Retrying…');
       minimap?.closeExpanded();
       localPlayerRole = null;
+      localWisdomOrbs = 0;
       debugPlayerRoles.clear();
       mobileControls.setWisdomAvailable(false);
       if (statusEl) {
@@ -2187,6 +2207,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     net.sendUseWisdomOrb();
   };
 
+  const canLocalPlayerOpenChest = (): boolean =>
+    localPlayerRole === 'warden' ||
+    (localPlayerRole === 'survivor' && localWisdomOrbs < MAX_WISDOM_ORBS);
+
   const triggerInteract = (): void => {
     if (minimap?.isExpanded()) {
       minimap.closeExpanded();
@@ -2203,10 +2227,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     const localTeamId = latestServerState?.players.find(
       (player) => player.id === net.playerId,
     )?.teamId;
-    if (localTeamId === undefined) return;
-
     const INTERACT_RANGE = 28;
     const INTERACT_RANGE_SQ = INTERACT_RANGE * INTERACT_RANGE;
+    let nearestRunestoneIndex: number | null = null;
+    let nearestRunestoneDistSq = Infinity;
     for (const rs of tilemapRenderer.runestoneSprites) {
       if (rs.activated || rs.index !== localTeamId) continue;
       const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
@@ -2214,11 +2238,31 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       const dx = localX - rsCenterX;
       const dy = localY - rsCenterY;
       const distSq = dx * dx + dy * dy;
-      if (distSq < INTERACT_RANGE_SQ) {
-        net.sendActivateRunestone(rs.index);
-        break;
+      if (distSq < INTERACT_RANGE_SQ && distSq < nearestRunestoneDistSq) {
+        nearestRunestoneIndex = rs.index;
+        nearestRunestoneDistSq = distSq;
       }
     }
+    if (nearestRunestoneIndex !== null) {
+      net.sendActivateRunestone(nearestRunestoneIndex);
+      return;
+    }
+
+    if (!canLocalPlayerOpenChest()) return;
+    const chestRangeSq = CHEST_INTERACTION_RANGE * CHEST_INTERACTION_RANGE;
+    let nearestChestIndex: number | null = null;
+    let nearestChestDistSq = Infinity;
+    for (const chest of tilemapRenderer.chestDeadEndVisuals) {
+      if (chest.isOpened()) continue;
+      const dx = localX - chest.interactionX;
+      const dy = localY - chest.interactionY;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= chestRangeSq && distSq < nearestChestDistSq) {
+        nearestChestIndex = chest.index;
+        nearestChestDistSq = distSq;
+      }
+    }
+    if (nearestChestIndex !== null) net.sendOpenChest(nearestChestIndex);
   };
 
   const mobileControls = new MobileControls({
@@ -2237,6 +2281,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   applyLocalRoleUi = (role, wisdomOrbs, showIntroDialogue) => {
     localPlayerRole = role;
+    localWisdomOrbs = wisdomOrbs;
     if (!currentMap || !currentLayout) return;
 
     tilemapRenderer?.setWardenBridgeWisdomHints(
@@ -2255,6 +2300,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         isWarden: role === 'warden',
         bridges: currentLayout.bridges,
         swamps: currentLayout.swamps,
+        chestDeadEnds: currentLayout.chestDeadEnds,
         expandButtonTexture: assets.expandMapButtonTexture,
         contractButtonTexture: assets.contractMapButtonTexture,
         onExpandedChange: (expanded) => {
@@ -2496,10 +2542,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     // ── 4e. Gate slide animations ────────────────────────────────────
     updateGateSlideAnimations(dtSeconds);
 
-    // ── 5. Runestone interaction prompt ──────────────────────────────
+    // ── 5. Runestone/chest interaction prompt ───────────────────────
     if (interactPrompt && tilemapRenderer) {
-      let nearestRS: RunestoneSpriteData | null = null;
       let nearestDistSq = Infinity;
+      let promptX = 0;
+      let promptY = 0;
       const INTERACT_RANGE = 28; // ~1.75 tiles in pixels
       const INTERACT_RANGE_SQ = INTERACT_RANGE * INTERACT_RANGE;
       const localTeamId = latestServerState?.players.find(
@@ -2515,16 +2562,30 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         const distSq = dx * dx + dy * dy;
         if (distSq < INTERACT_RANGE_SQ && distSq < nearestDistSq) {
           nearestDistSq = distSq;
-          nearestRS = rs;
+          promptX = rs.sprite.x;
+          promptY = rs.sprite.y - 34;
         }
       }
 
-      if (nearestRS) {
+      if (canLocalPlayerOpenChest()) {
+        const chestRangeSq = CHEST_INTERACTION_RANGE * CHEST_INTERACTION_RANGE;
+        for (const chest of tilemapRenderer.chestDeadEndVisuals) {
+          if (chest.isOpened()) continue;
+          const dx = localX - chest.interactionX;
+          const dy = localY - chest.interactionY;
+          const distSq = dx * dx + dy * dy;
+          if (distSq <= chestRangeSq && distSq < nearestDistSq) {
+            nearestDistSq = distSq;
+            promptX = chest.promptX;
+            promptY = chest.promptY;
+          }
+        }
+      }
+
+      if (nearestDistSq < Infinity) {
         if (!interactPrompt.visible) interactPrompt.visible = true;
-        if (interactPrompt.x !== nearestRS.sprite.x)
-          interactPrompt.x = nearestRS.sprite.x;
-        const promptY = nearestRS.sprite.y - 34;
-        if (interactPrompt.y !== promptY) interactPrompt.y = promptY; // above the runestone
+        if (interactPrompt.x !== promptX) interactPrompt.x = promptX;
+        if (interactPrompt.y !== promptY) interactPrompt.y = promptY;
         if (interactPrompt.zIndex !== 99999) interactPrompt.zIndex = 99999;
       } else {
         if (interactPrompt.visible) interactPrompt.visible = false;

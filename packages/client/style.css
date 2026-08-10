@@ -721,9 +721,12 @@ body {
   display: block;
 }
 
-/* Keep the optional debug panel clear of the top-right control. */
-#fullscreen-toggle:not([hidden]) ~ #debug-ui {
-  top: 68px;
+/* Keep the debug panel's expand/collapse control immediately left of fullscreen. */
+body:has(#fullscreen-toggle:not([hidden])) #debug-ui {
+  top: var(--fullscreen-toggle-top);
+  right: calc(
+    var(--fullscreen-toggle-right) + var(--fullscreen-toggle-size) + 8px
+  );
 }
 
 .fullscreen-help {

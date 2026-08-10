@@ -73,6 +73,12 @@ export interface ChestDeadEndCollisionBounds extends PortalBounds {
 
 const BRIDGE_AUTHORING_TILE_SIZE = 16;
 
+/** Pixel radius within which a survivor may open a treasure chest. */
+export const CHEST_INTERACTION_RANGE = 28;
+
+const CHEST_INTERACTION_X = 42;
+const CHEST_INTERACTION_Y = 34;
+
 /** Collider geometry exported from the authored bridge-obstacle sample. */
 const BRIDGE_COLLIDER_SPECS: readonly PortalCollisionSpec[] = [
   { x: 0, y: 28, width: 32, height: 104, shape: 'rectangle' },
@@ -227,6 +233,18 @@ export function getChestDeadEndBounds(
     right: anchorX + (spec.x + spec.width) * scale - 1,
     bottom: anchorY + (spec.y + spec.height) * scale - 1,
   }));
+}
+
+/** Authored chest center used by matching client and server interaction checks. */
+export function getChestInteractionPoint(
+  placement: ChestDeadEndPlacement,
+  tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
+): { x: number; y: number } {
+  const scale = tileSize / BRIDGE_AUTHORING_TILE_SIZE;
+  return {
+    x: placement.tileX * tileSize + CHEST_INTERACTION_X * scale,
+    y: placement.tileY * tileSize + CHEST_INTERACTION_Y * scale,
+  };
 }
 
 function intersectsBounds(

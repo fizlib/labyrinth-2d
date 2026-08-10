@@ -23,6 +23,7 @@ import {
   CELL_SIZE,
   SPAWN_DISTANCE,
   INITIAL_WISDOM_ORBS,
+  getChestWisdomOrbReward,
   PLAYER_CHARACTER_COUNT,
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
@@ -33,6 +34,8 @@ import {
   computeHubDistanceField,
   computePortalDistanceField,
   getNavigationDirectionForPosition,
+  CHEST_INTERACTION_RANGE,
+  getChestInteractionPoint,
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_ROWS,
   BRIDGE_REPAIR_DURATION_MS,
@@ -61,12 +64,14 @@ import {
   type SwampPlacement,
   type BridgeEntrySide,
   type BridgeState,
+  type ChestState,
   type GameState,
   type PlayerInfo,
   type PlayerRole,
   type RunestoneInfo,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
+  type OpenChestMessage,
   type DebugTeleportMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
@@ -74,6 +79,8 @@ import {
   type PlayerLeftMessage,
   type RunestoneActivatedMessage,
   type AllRunestonesActivatedMessage,
+  type ChestOpenedMessage,
+  type WisdomOrbGrantedMessage,
   type WisdomOrbUsedMessage,
   type PlayerRoleChangedMessage,
   type DebugPlayerRoleMessage,
@@ -260,6 +267,9 @@ export class Room {
   /** Authored collidable treasure prefabs in south-opening dead ends. */
   private readonly chestDeadEnds: ChestDeadEndPlacement[];
 
+  /** Shared opened/unopened state in deterministic chest placement order. */
+  private readonly chestStates: ChestState[];
+
   /** Shared, server-authoritative missing-stone masks. */
   private readonly bridgeStates: BridgeState[];
 
@@ -296,6 +306,10 @@ export class Room {
     this.bridges = layout.bridges;
     this.swamps = layout.swamps;
     this.chestDeadEnds = layout.chestDeadEnds;
+    this.chestStates = this.chestDeadEnds.map((_, chestIndex) => ({
+      chestIndex,
+      opened: false,
+    }));
     this.bridgeStates = this.bridges.map((_, bridgeIndex) => ({
       bridgeIndex,
       collapsedTileMask: 0,
@@ -339,6 +353,7 @@ export class Room {
       portal: this.portalPosition,
       gateStates: this.gates.map((_, i) => ({ gateIndex: i, open: false })),
       bridgeStates: this.bridgeStates,
+      chestStates: this.chestStates,
     };
     console.info(
       `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
@@ -741,6 +756,52 @@ export class Room {
         );
       }
     }
+  }
+
+  /** Open one nearby shared chest, rewarding survivors while wardens destroy it. */
+  handleOpenChest(playerId: string, msg: OpenChestMessage): void {
+    if (!Number.isInteger(msg.chestIndex)) return;
+    const placement = this.chestDeadEnds[msg.chestIndex];
+    const state = this.chestStates[msg.chestIndex];
+    if (!placement || !state || state.opened) return;
+
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    const ws = this.sockets.get(playerId);
+    if (!player || !ws) return;
+
+    const rewardedWisdomOrbs =
+      player.role === 'survivor' ? getChestWisdomOrbReward(player.wisdomOrbs) : null;
+    if (player.role === 'survivor' && rewardedWisdomOrbs === null) return;
+
+    const interaction = getChestInteractionPoint(placement, this.map.tileSize);
+    const dx = player.x - interaction.x;
+    const dy = player.y - interaction.y;
+    if (dx * dx + dy * dy > CHEST_INTERACTION_RANGE * CHEST_INTERACTION_RANGE) return;
+
+    state.opened = true;
+    if (rewardedWisdomOrbs !== null) player.wisdomOrbs = rewardedWisdomOrbs;
+
+    const openedMessage: ChestOpenedMessage = {
+      type: MessageType.ChestOpened,
+      chestIndex: msg.chestIndex,
+      playerId,
+    };
+    this.broadcast(openedMessage);
+
+    if (rewardedWisdomOrbs !== null) {
+      const rewardMessage: WisdomOrbGrantedMessage = {
+        type: MessageType.WisdomOrbGranted,
+        chestIndex: msg.chestIndex,
+        wisdomOrbs: player.wisdomOrbs,
+      };
+      this.send(ws, rewardMessage);
+    }
+
+    console.info(
+      rewardedWisdomOrbs === null
+        ? `[Room:${this.id}] Chest ${msg.chestIndex} destroyed by warden ${playerId}`
+        : `[Room:${this.id}] Chest ${msg.chestIndex} opened by ${playerId}; ${player.wisdomOrbs} wisdom orb(s)`,
+    );
   }
 
   // ── Game Loop ─────────────────────────────────────────────────────────
@@ -1513,6 +1574,7 @@ export class Room {
       portal: this.portalPosition ? { ...this.portalPosition } : null,
       gateStates: this.state.gateStates.map((g) => ({ ...g })),
       bridgeStates: this.bridgeStates.map((bridgeState) => ({ ...bridgeState })),
+      chestStates: this.chestStates.map((chestState) => ({ ...chestState })),
     };
   }
 

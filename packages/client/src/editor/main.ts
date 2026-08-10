@@ -22,7 +22,8 @@ import {
   type StyleEditorDocumentV1,
 } from './types';
 
-const STORAGE_KEY = 'labyrinth-style-editor-v1-topology-atlas-r20';
+const SESSION_STORAGE_KEY = 'labyrinth-style-editor-v1-map-r20';
+const DEFAULT_MAP_STORAGE_KEY = 'labyrinth-style-editor-v1-default-map-r1';
 const STORAGE_ARCHIVE_PREFIX = 'zip-base64:';
 const PAGE_SIZE = 200;
 const HISTORY_LIMIT = 20;
@@ -76,6 +77,7 @@ const showCollidersCheckbox = required<HTMLInputElement>('show-colliders');
 const notesField = required<HTMLTextAreaElement>('style-notes');
 const undoButton = required<HTMLButtonElement>('undo');
 const redoButton = required<HTMLButtonElement>('redo');
+const saveDefaultMapButton = required<HTMLButtonElement>('save-default-map');
 
 const app = new Application();
 await app.init({
@@ -104,8 +106,9 @@ resizeHandle.eventMode = 'static';
 resizeHandle.cursor = 'nwse-resize';
 overlayLayer.addChild(selectionFrame, selectionLabel, resizeHandle);
 
-const restoredLocalDocument = loadLocalDocument();
-let documentState = restoredLocalDocument ?? createSampleDocument();
+const restoredSessionDocument = loadSessionDocument();
+const restoredDefaultDocument = restoredSessionDocument ? null : loadDefaultDocument();
+let documentState = restoredSessionDocument ?? restoredDefaultDocument ?? createSampleDocument();
 const selectedElementIds = new Set<string>();
 const selectedColliderIds = new Set<string>();
 let selectedAsset: AssetCatalogEntry | null = null;
@@ -144,42 +147,77 @@ const catalogQuery: CatalogQuery = { q: '', category: '', collection: '', source
 let catalogResultTotal = 0;
 let catalogRequest = 0;
 
-function loadLocalDocument(): StyleEditorDocumentV1 | null {
+function decodeStoredDocument(raw: string | null): StyleEditorDocumentV1 | null {
+  if (!raw) return null;
+  let json = raw;
+  if (raw.startsWith(STORAGE_ARCHIVE_PREFIX)) {
+    const binary = atob(raw.slice(STORAGE_ARCHIVE_PREFIX.length));
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const files = unzipSync(bytes);
+    const documentBytes = files['document.json'];
+    if (!documentBytes) return null;
+    json = strFromU8(documentBytes);
+  }
+  const parsed = JSON.parse(json) as StyleEditorDocumentV1;
+  return parsed.version === 1 ? parsed : null;
+}
+
+function encodeStoredDocument(value: StyleEditorDocumentV1): string {
+  const archive = zipSync({
+    'document.json': strToU8(JSON.stringify(value)),
+  }, { level: 1 });
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < archive.length; offset += chunkSize) {
+    binary += String.fromCharCode(...archive.subarray(offset, offset + chunkSize));
+  }
+  return `${STORAGE_ARCHIVE_PREFIX}${btoa(binary)}`;
+}
+
+function loadSessionDocument(): StyleEditorDocumentV1 | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    let json = raw;
-    if (raw.startsWith(STORAGE_ARCHIVE_PREFIX)) {
-      const binary = atob(raw.slice(STORAGE_ARCHIVE_PREFIX.length));
-      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-      const files = unzipSync(bytes);
-      const documentBytes = files['document.json'];
-      if (!documentBytes) return null;
-      json = strFromU8(documentBytes);
-    }
-    const parsed = JSON.parse(json) as StyleEditorDocumentV1;
-    return parsed.version === 1 ? parsed : null;
+    return decodeStoredDocument(sessionStorage.getItem(SESSION_STORAGE_KEY));
   } catch {
     return null;
   }
 }
 
-function saveLocalDocument(): boolean {
+function loadDefaultDocument(): StyleEditorDocumentV1 | null {
   try {
-    const archive = zipSync({
-      'document.json': strToU8(JSON.stringify(documentState)),
-    }, { level: 1 });
-    let binary = '';
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < archive.length; offset += chunkSize) {
-      binary += String.fromCharCode(...archive.subarray(offset, offset + chunkSize));
-    }
-    localStorage.setItem(STORAGE_KEY, `${STORAGE_ARCHIVE_PREFIX}${btoa(binary)}`);
+    return decodeStoredDocument(localStorage.getItem(DEFAULT_MAP_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredDocument(
+  storage: Storage,
+  key: string,
+  failureMessage: string,
+): boolean {
+  try {
+    storage.setItem(key, encodeStoredDocument(documentState));
     return true;
   } catch (error) {
-    console.error('[StyleEditor] Local autosave failed', error);
+    console.error(failureMessage, error);
     return false;
   }
+}
+
+function saveSessionDocument(): boolean {
+  return saveStoredDocument(
+    sessionStorage,
+    SESSION_STORAGE_KEY,
+    '[StyleEditor] Session autosave failed',
+  );
+}
+
+function saveDefaultDocument(): boolean {
+  return saveStoredDocument(
+    localStorage,
+    DEFAULT_MAP_STORAGE_KEY,
+    '[StyleEditor] Saving the default map failed',
+  );
 }
 
 /** Returns the single selected element when exactly one is selected, or null otherwise. */
@@ -213,9 +251,9 @@ function scheduleAutosave(): void {
   if (saveTimer !== null) window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
     documentState.updatedAt = new Date().toISOString();
-    saveStatus.textContent = saveLocalDocument()
-      ? 'Autosaved locally'
-      : 'Autosave unavailable — use Save JSON + Preview';
+    saveStatus.textContent = saveSessionDocument()
+      ? 'Autosaved for this session'
+      : 'Autosave unavailable — use Save JSON';
     saveTimer = null;
   }, 350);
 }
@@ -226,7 +264,7 @@ function commitHistory(): void {
   if (history[historyIndex] === snapshot) return;
   history.splice(historyIndex + 1);
   history.push(snapshot);
-  // The topology atlas is much larger than the former one-cell sample, so a
+  // The map is much larger than the former one-cell sample, so a
   // bounded history avoids retaining hundreds of megabytes after long edits.
   if (history.length > HISTORY_LIMIT) history.shift();
   historyIndex = history.length - 1;
@@ -1111,33 +1149,18 @@ function debounceCatalogInput(): void {
 }
 
 async function exportDocument(): Promise<void> {
-  saveStatus.textContent = 'Building export…';
-  overlayLayer.visible = false;
-  const colliderVisible = colliderLayer.visible;
-  colliderLayer.visible = false;
-  const extracted = app.renderer.extract.canvas({
-    target: world,
-    frame: new Rectangle(0, 0, documentState.sample.width, documentState.sample.height),
-    resolution: 1,
-    clearColor: '#080b11',
-  }) as HTMLCanvasElement;
-  overlayLayer.visible = true;
-  colliderLayer.visible = colliderVisible;
-  const pngBlob = await new Promise<Blob>((resolve, reject) => extracted.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Preview PNG failed')), 'image/png'));
+  saveStatus.textContent = 'Building JSON export…';
   documentState.updatedAt = new Date().toISOString();
-  const archive = zipSync({
-    'labyrinth-style-v1.json': strToU8(JSON.stringify(documentState, null, 2)),
-    'labyrinth-style-preview.png': new Uint8Array(await pngBlob.arrayBuffer()),
-  }, { level: 6 });
-  const url = URL.createObjectURL(new Blob([archive], { type: 'application/zip' }));
+  const json = JSON.stringify(documentState, null, 2);
+  const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'labyrinth-style-export.zip';
+  link.download = 'labyrinth-style-v1.json';
   link.click();
   URL.revokeObjectURL(url);
-  saveStatus.textContent = saveLocalDocument()
-    ? 'Exported ZIP and autosaved locally'
-    : 'Exported ZIP; local autosave unavailable';
+  saveStatus.textContent = saveSessionDocument()
+    ? 'Exported JSON and autosaved for this session'
+    : 'Exported JSON; session autosave unavailable';
 }
 
 function validateDocument(value: unknown): StyleEditorDocumentV1 {
@@ -1164,14 +1187,14 @@ async function importDocument(file: File): Promise<void> {
   selectedColliderIds.clear();
   history.splice(0, history.length, JSON.stringify(documentState));
   historyIndex = 0;
-  const savedLocally = saveLocalDocument();
+  const savedForSession = saveSessionDocument();
   notesField.value = documentState.notes;
   await rebuildScene();
   fitWorld();
   updateHistoryButtons();
-  saveStatus.textContent = savedLocally
+  saveStatus.textContent = savedForSession
     ? `Imported ${file.name}`
-    : `Imported ${file.name}; local autosave unavailable`;
+    : `Imported ${file.name}; session autosave unavailable`;
 }
 
 document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((button) => button.addEventListener('click', () => setTool(button.dataset.tool as EditorTool)));
@@ -1179,9 +1202,15 @@ undoButton.addEventListener('click', () => restoreHistory(historyIndex - 1));
 redoButton.addEventListener('click', () => restoreHistory(historyIndex + 1));
 required<HTMLButtonElement>('duplicate').addEventListener('click', duplicateSelection);
 required<HTMLButtonElement>('delete-selection').addEventListener('click', deleteSelection);
+saveDefaultMapButton.addEventListener('click', () => {
+  if (!window.confirm('Replace the saved default map with the current map?')) return;
+  saveStatus.textContent = saveDefaultDocument()
+    ? 'Saved current map as the default'
+    : 'Default save unavailable — use Save JSON';
+});
 required<HTMLButtonElement>('reset-document').addEventListener('click', () => {
-  if (!window.confirm('Reset the editor sample and discard the current local layout?')) return;
-  documentState = createSampleDocument();
+  if (!window.confirm('Reset to the saved default map and discard changes from this session?')) return;
+  documentState = loadDefaultDocument() ?? createSampleDocument();
   selectedElementIds.clear(); selectedColliderIds.clear();
   history.splice(0, history.length, JSON.stringify(documentState)); historyIndex = 0;
   notesField.value = documentState.notes;
@@ -1257,5 +1286,9 @@ setTool('select');
 updateHistoryButtons();
 await rebuildScene();
 fitWorld();
-saveStatus.textContent = restoredLocalDocument ? 'Restored local autosave' : 'New sample ready';
+saveStatus.textContent = restoredSessionDocument
+  ? 'Restored session autosave'
+  : restoredDefaultDocument
+    ? 'Loaded saved default map'
+    : 'Map ready';
 void initializeCatalog().catch((error) => { assetGrid.innerHTML = `<div class="readout">${escapeHtml(error instanceof Error ? error.message : 'Catalog failed')}</div>`; });

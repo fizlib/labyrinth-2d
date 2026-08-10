@@ -140,6 +140,16 @@ uWS
             break;
           }
 
+          case MessageType.OpenChest: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) {
+                room.handleOpenChest(data.id, msg);
+              }
+            }
+            break;
+          }
+
           case MessageType.UseWisdomOrb: {
             if (data.roomId) {
               const room = rooms.get(data.roomId);

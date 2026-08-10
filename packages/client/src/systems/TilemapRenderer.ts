@@ -22,6 +22,7 @@ import type {
   BridgePlacement,
   SwampPlacement,
   ChestDeadEndPlacement,
+  ChestState,
   BridgeEntrySide,
   BridgeState,
 } from '@labyrinth/shared';
@@ -51,7 +52,10 @@ import {
 import { addBridgeObstacles, type BridgeObstacleVisual } from './BridgeObstacle';
 import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
 import { addSwampObstacles, type SwampObstacleVisual } from './SwampObstacle';
-import { addChestDeadEnds } from './ChestDeadEnd';
+import {
+  addChestDeadEnds,
+  type ChestDeadEndVisual,
+} from './ChestDeadEnd';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -379,6 +383,8 @@ export class TilemapRenderer {
   readonly swampVisuals: SwampObstacleVisual[];
   /** Authored tree backing and collidable props in treasure dead ends. */
   readonly chestDeadEndSprites: Container[];
+  /** Stateful closed/open chest visuals in generated placement order. */
+  readonly chestDeadEndVisuals: ChestDeadEndVisual[];
 
   // ── Internal tracking for culling + cleanup ────────────────────────────
   private allChunks: ChunkMeta[] = [];
@@ -768,12 +774,14 @@ export class TilemapRenderer {
     );
     this.swampForegroundSprites = swampRender.foregroundSprites;
     this.swampVisuals = swampRender.visuals;
-    this.chestDeadEndSprites = addChestDeadEnds(
+    const chestRender = addChestDeadEnds(
       chestDeadEnds,
       ts,
       assets.chestDeadEndTextures,
       this.forestUnderlayLayer,
     );
+    this.chestDeadEndSprites = chestRender.entities;
+    this.chestDeadEndVisuals = chestRender.visuals;
 
     // ── Step 3: Extract Special Entities ──────────────────────────────
 
@@ -892,6 +900,15 @@ export class TilemapRenderer {
   updateBridgeAnimations(dt: number): void {
     for (const bridge of this.bridgeVisuals) bridge.update(dt);
     for (const swamp of this.swampVisuals) swamp.update(dt);
+    for (const chest of this.chestDeadEndVisuals) chest.update(dt);
+  }
+
+  /** Apply authoritative opened state to every deterministic treasure chest. */
+  syncChestStates(chestStates: readonly ChestState[], animate: boolean): void {
+    for (const visual of this.chestDeadEndVisuals) {
+      const state = chestStates.find((candidate) => candidate.chestIndex === visual.index);
+      visual.syncOpened(state?.opened ?? false, animate);
+    }
   }
 
   /** Show a private wisdom-orb route hint on one bridge. */
@@ -1012,6 +1029,7 @@ export class TilemapRenderer {
     this.swampForegroundSprites.length = 0;
     this.swampVisuals.length = 0;
     this.chestDeadEndSprites.length = 0;
+    this.chestDeadEndVisuals.length = 0;
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;
     this.pressurePlateSprites.length = 0;

@@ -18,12 +18,14 @@ export {
   PORTAL_WALL_OPENING_WIDTH,
   PORTAL_WALL_OPENING_HEIGHT,
   PORTAL_WALL_OPENING_TOP_OFFSET,
+  CHEST_INTERACTION_RANGE,
   getPortalBounds,
   getPortalWallOpeningBounds,
   isPortalWallOpeningTile,
   getPortalPlatformBounds,
   getBridgeBounds,
   getChestDeadEndBounds,
+  getChestInteractionPoint,
   applyInput,
   isPositionValid,
   applyInputWithCollision,
@@ -194,6 +196,17 @@ export const DEFAULT_ROOM_ID = 'default';
 /** Number of wisdom orbs each survivor starts with. Wardens always start with 0. */
 export const INITIAL_WISDOM_ORBS = 1;
 
+/** Maximum number of wisdom orbs a survivor can carry. */
+export const MAX_WISDOM_ORBS = 3;
+
+/** Return the post-chest inventory, or null when the survivor is already full. */
+export function getChestWisdomOrbReward(wisdomOrbs: number): number | null {
+  if (!Number.isInteger(wisdomOrbs) || wisdomOrbs < 0 || wisdomOrbs >= MAX_WISDOM_ORBS) {
+    return null;
+  }
+  return wisdomOrbs + 1;
+}
+
 /** Playable character names in server sprite-index order. */
 export const PLAYER_CHARACTER_NAMES = [
   'Female1',
@@ -217,6 +230,7 @@ export enum MessageType {
   JoinRoom = 'JOIN_ROOM',
   PlayerInput = 'PLAYER_INPUT',
   ActivateRunestone = 'ACTIVATE_RUNESTONE',
+  OpenChest = 'OPEN_CHEST',
   UseWisdomOrb = 'USE_WISDOM_ORB',
   DebugTeleport = 'DEBUG_TELEPORT',
   DebugPlayerAction = 'DEBUG_PLAYER_ACTION',
@@ -227,6 +241,8 @@ export enum MessageType {
   PlayerLeft = 'PLAYER_LEFT',
   RunestoneActivated = 'RUNESTONE_ACTIVATED',
   AllRunestonesActivated = 'ALL_RUNESTONES_ACTIVATED',
+  ChestOpened = 'CHEST_OPENED',
+  WisdomOrbGranted = 'WISDOM_ORB_GRANTED',
   WisdomOrbUsed = 'WISDOM_ORB_USED',
   PlayerRoleChanged = 'PLAYER_ROLE_CHANGED',
   DebugPlayerRole = 'DEBUG_PLAYER_ROLE',
@@ -257,6 +273,12 @@ export interface ActivateRunestoneMessage {
   type: MessageType.ActivateRunestone;
   /** Runestone index: 0, 1, or 2. */
   runestoneIndex: number;
+}
+
+export interface OpenChestMessage {
+  type: MessageType.OpenChest;
+  /** Index into the deterministic chest-dead-end placement array. */
+  chestIndex: number;
 }
 
 export interface UseWisdomOrbMessage {
@@ -378,6 +400,20 @@ export interface WisdomOrbUsedMessage {
   remainingWisdomOrbs: number;
 }
 
+/** Public notification that one shared treasure chest has been opened. */
+export interface ChestOpenedMessage {
+  type: MessageType.ChestOpened;
+  chestIndex: number;
+  playerId: string;
+}
+
+/** Private inventory update sent only to the survivor who opened a chest. */
+export interface WisdomOrbGrantedMessage {
+  type: MessageType.WisdomOrbGranted;
+  chestIndex: number;
+  wisdomOrbs: number;
+}
+
 /** Private result of consuming a wisdom orb. */
 export type WisdomOrbHint =
   | {
@@ -444,6 +480,12 @@ export interface GateState {
   open: boolean;
 }
 
+/** Shared opened/unopened state for one deterministic treasure placement. */
+export interface ChestState {
+  chestIndex: number;
+  opened: boolean;
+}
+
 // ── Game State ──────────────────────────────────────────────────────────────
 
 export interface GameState {
@@ -456,6 +498,8 @@ export interface GameState {
   gateStates: GateState[];
   /** Per-bridge collapsed walkway state shared by the whole room. */
   bridgeStates: BridgeState[];
+  /** Per-chest opened state shared by the whole room. */
+  chestStates: ChestState[];
 }
 
 // ── Union Types ─────────────────────────────────────────────────────────────
@@ -464,6 +508,7 @@ export type ClientToServerMessage =
   | JoinRoomMessage
   | PlayerInputMessage
   | ActivateRunestoneMessage
+  | OpenChestMessage
   | UseWisdomOrbMessage
   | DebugTeleportMessage
   | DebugPlayerActionMessage;
@@ -474,6 +519,8 @@ export type ServerToClientMessage =
   | PlayerLeftMessage
   | RunestoneActivatedMessage
   | AllRunestonesActivatedMessage
+  | ChestOpenedMessage
+  | WisdomOrbGrantedMessage
   | WisdomOrbUsedMessage
   | PlayerRoleChangedMessage
   | DebugPlayerRoleMessage

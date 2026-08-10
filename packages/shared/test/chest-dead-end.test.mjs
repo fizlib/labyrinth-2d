@@ -5,7 +5,9 @@ import {
   CELL_SIZE,
   CELL_STEP_X,
   CELL_STEP_Y,
+  CHEST_INTERACTION_RANGE,
   FEET_HITBOX_H,
+  MAX_WISDOM_ORBS,
   TILE_FLOOR,
   WALL_HEIGHT,
   WALL_WIDTH,
@@ -13,6 +15,8 @@ import {
   computePortalPosition,
   generateMazeLayout,
   getChestDeadEndBounds,
+  getChestInteractionPoint,
+  getChestWisdomOrbReward,
   isPositionValid,
 } from '../dist/index.js';
 
@@ -113,4 +117,22 @@ test('all three exported chest-cell rectangles block player feet', () => {
     true,
     'the floor immediately south of the chest must remain walkable',
   );
+});
+
+test('chest interaction point and wisdom-orb cap stay shared', () => {
+  const placement = {
+    cellX: 0,
+    cellY: 0,
+    tileX: 4,
+    tileY: 4,
+    openDirection: 'south',
+  };
+
+  assert.deepEqual(getChestInteractionPoint(placement, 16), { x: 106, y: 98 });
+  assert.equal(CHEST_INTERACTION_RANGE, 28);
+  assert.equal(MAX_WISDOM_ORBS, 3);
+  assert.equal(getChestWisdomOrbReward(0), 1);
+  assert.equal(getChestWisdomOrbReward(2), 3);
+  assert.equal(getChestWisdomOrbReward(3), null);
+  assert.equal(getChestWisdomOrbReward(4), null);
 });
