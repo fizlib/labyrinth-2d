@@ -38,6 +38,7 @@ import { CHEST_DEAD_END_ASSET_PATHS } from '../systems/ChestDeadEndLayout';
 import { SWORD_FIELD_ASSET_PATHS } from '../systems/SwordFieldLayout';
 import { CHARACTER_ATLAS_MANIFEST, CHARACTER_ATLAS_PATH } from './characterAtlasManifest';
 import { getFiorwoodsRuntimeAssetPath } from './runtimeAssetPaths';
+import { CAGE_GROUND_ASSET_PATHS } from '../systems/CageGroundLayout';
 
 export interface FrontGateTextures {
   topLeft: Texture;
@@ -64,11 +65,12 @@ export interface DirtTextures {
   northWest: Texture;
 }
 
-/** Three-layer authored bird-cage prefab: back, closed front, open front. */
+/** Authored bird-cage layers and the six-tile dark-grass base beneath them. */
 export interface CageTextures {
   back: Texture;
   closed: Texture;
   open: Texture;
+  ground: readonly Texture[];
 }
 
 /**
@@ -279,6 +281,7 @@ export async function loadAssets(
     back: Texture.EMPTY,
     closed: Texture.EMPTY,
     open: Texture.EMPTY,
+    ground: CAGE_GROUND_ASSET_PATHS.map(() => Texture.EMPTY),
   };
 
   try {
@@ -1020,18 +1023,23 @@ export async function loadAssets(
     console.warn('[Assets] Chest dead-end modules unavailable', error);
   }
 
-  // ── Authored magical cage layers ────────────────────────────────────────
+  // ── Authored magical cage prefab ────────────────────────────────────────
   try {
-    const [back, closed, open] = await Promise.all([
+    const [back, closed, open, ...ground] = await Promise.all([
       Assets.load<Texture>('assets/cage/birdCage1.png'),
       Assets.load<Texture>('assets/cage/birdCage2.png'),
       Assets.load<Texture>('assets/cage/birdCage3.png'),
+      ...CAGE_GROUND_ASSET_PATHS.map((path) => Assets.load<Texture>(path)),
     ]);
-    for (const texture of [back, closed, open]) texture.source.scaleMode = 'nearest';
-    cageTextures = { back, closed, open };
-    console.info('[Assets] Loaded authored bird-cage back, closed, and open layers');
+    for (const texture of [back, closed, open, ...ground]) {
+      texture.source.scaleMode = 'nearest';
+    }
+    cageTextures = { back, closed, open, ground };
+    console.info(
+      '[Assets] Loaded authored bird-cage layers and six-tile dark-grass base',
+    );
   } catch (error) {
-    console.warn('[Assets] Authored cage layers unavailable', error);
+    console.warn('[Assets] Authored cage prefab unavailable', error);
   }
 
   reportProgress(0.93, 'Inscribing the final glyphs…');

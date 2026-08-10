@@ -22,10 +22,10 @@ export interface CageCollisionBounds {
 /** Maximum feet-to-cage distance for another player to open its gate. */
 export const CAGE_INTERACTION_RANGE = 28;
 
-/** Footprint of the authored 20x32 cage around player feet. */
-export const CAGE_COLLIDER_WIDTH = 20;
-export const CAGE_COLLIDER_TOP_OFFSET = -14;
-export const CAGE_COLLIDER_BOTTOM_OFFSET = 4;
+/** 18x14 collider authored around the cage base in labyrinth-style-v1 (14). */
+export const CAGE_COLLIDER_WIDTH = 18;
+export const CAGE_COLLIDER_TOP_OFFSET = -12;
+export const CAGE_COLLIDER_BOTTOM_OFFSET = 1;
 
 /** Vertical travel required before an opened cage becomes empty and solid. */
 export const CAGE_EXIT_DISTANCE = 20;

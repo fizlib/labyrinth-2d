@@ -1437,6 +1437,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const worldContainer = new Container();
   app.stage.addChild(worldContainer);
 
+  // Dynamic cage grass belongs above static ground details but below every entity.
+  const cageGroundLayer = new Container();
+  worldContainer.addChild(cageGroundLayer);
+
   // Dynamic entities retain normal feet-based Y sorting.
   const entityLayer = new Container();
   entityLayer.sortableChildren = true;
@@ -1502,6 +1506,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           state.cageId,
           state,
           assets.cageTextures,
+          cageGroundLayer,
           entityLayer,
           animateNew,
         );
@@ -1639,6 +1644,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let latestServerState: GameState | null = null;
 
   function attachTilemapLayers(renderer: TilemapRenderer): void {
+    cageGroundLayer.parent?.removeChild(cageGroundLayer);
     entityLayer.parent?.removeChild(entityLayer);
     forestWallLayer.parent?.removeChild(forestWallLayer);
     cellBoundaryOverlay?.parent?.removeChild(cellBoundaryOverlay);
@@ -1648,6 +1654,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     worldContainer.addChild(renderer.portalTerrainLayer);
     worldContainer.addChild(renderer.forestUnderlayLayer);
     worldContainer.addChild(renderer.groundDetailLayer);
+    worldContainer.addChild(cageGroundLayer);
     worldContainer.addChild(renderer.trapCellHighlightLayer);
     worldContainer.addChild(entityLayer);
     worldContainer.addChild(forestWallLayer);

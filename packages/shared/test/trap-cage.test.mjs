@@ -11,6 +11,7 @@ import {
   findOpenableCage,
   findTrapCellInteractionTarget,
   generateMazeLayout,
+  getCageCollisionBounds,
   getTrapCellWorldBounds,
   isPlayerInTrapCell,
 } from '../dist/index.js';
@@ -153,6 +154,13 @@ test('cages block outsiders and only a nearby different player may open one', ()
     opened: false,
     vacated: false,
   };
+
+  assert.deepEqual(getCageCollisionBounds(cage), {
+    left: 151,
+    top: 148,
+    right: 168,
+    bottom: 161,
+  });
 
   assert.deepEqual(
     applyInputWithCollision(

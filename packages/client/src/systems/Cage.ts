@@ -1,6 +1,7 @@
 import { Container, Graphics, Sprite } from 'pixi.js';
 import type { CageState } from '@labyrinth/shared';
 import type { CageTextures } from '../assets/AssetLoader';
+import { CAGE_GROUND_TILES, CAGE_GROUND_TILE_SIZE } from './CageGroundLayout';
 
 const MATERIALIZE_DURATION = 0.5;
 const MAGIC_PARTICLE_COUNT = 8;
@@ -12,6 +13,7 @@ interface MagicParticle {
 
 /** Two-sided cage visual whose back/player/front z-order matches the editor export. */
 export class CageVisual {
+  private readonly ground: Container;
   private readonly back: Sprite;
   private readonly front: Sprite;
   private readonly magic: Container;
@@ -24,11 +26,24 @@ export class CageVisual {
     readonly cageId: number,
     state: CageState,
     private readonly textures: CageTextures,
-    parent: Container,
+    groundParent: Container,
+    entityParent: Container,
     animate: boolean,
   ) {
     this.opened = state.opened;
     this.materializeElapsed = animate ? 0 : MATERIALIZE_DURATION;
+
+    this.ground = new Container();
+    this.ground.position.set(state.x, state.y);
+    for (let index = 0; index < CAGE_GROUND_TILES.length; index++) {
+      const tile = CAGE_GROUND_TILES[index];
+      const sprite = new Sprite(textures.ground[index]);
+      sprite.position.set(tile.x, tile.y);
+      // The editor scales each 32px source module to one 16px world tile.
+      sprite.width = CAGE_GROUND_TILE_SIZE;
+      sprite.height = CAGE_GROUND_TILE_SIZE;
+      this.ground.addChild(sprite);
+    }
 
     this.back = new Sprite(textures.back);
     this.back.anchor.set(0.5, 1);
@@ -62,12 +77,15 @@ export class CageVisual {
       });
     }
 
-    parent.addChild(this.back, this.front, this.magic);
+    groundParent.addChild(this.ground);
+    entityParent.addChild(this.back, this.front, this.magic);
     if (!animate) {
       this.magic.visible = false;
+      this.ground.alpha = 1;
       this.back.alpha = 1;
       this.front.alpha = 1;
     } else {
+      this.ground.alpha = 0;
       this.back.alpha = 0;
       this.front.alpha = 0;
       this.back.scale.set(0.2);
@@ -95,6 +113,7 @@ export class CageVisual {
     this.front.scale.set(scale);
     this.back.alpha = Math.min(1, progress * 2.5);
     this.front.alpha = this.back.alpha;
+    this.ground.alpha = this.back.alpha;
 
     this.ring.scale.set(0.35 + progress * 1.1);
     this.magic.alpha = 1 - progress;
@@ -113,9 +132,11 @@ export class CageVisual {
   }
 
   destroy(): void {
+    this.ground.parent?.removeChild(this.ground);
     this.back.parent?.removeChild(this.back);
     this.front.parent?.removeChild(this.front);
     this.magic.parent?.removeChild(this.magic);
+    this.ground.destroy({ children: true });
     this.back.destroy();
     this.front.destroy();
     this.magic.destroy({ children: true });
