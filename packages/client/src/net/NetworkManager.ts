@@ -47,6 +47,7 @@ export interface NetworkCallbacks {
   onPlayerRoleChanged: (role: PlayerRole, wisdomOrbs: number) => void;
   onDebugPlayerRole: (playerId: string, role: PlayerRole) => void;
   onGateStateChanged: (gateIndex: number, open: boolean) => void;
+  onTrapActivationResult: (trapCellIndex: number, capturedCount: number) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
 }
@@ -254,6 +255,10 @@ export class NetworkManager {
 
       case MessageType.GateStateChanged:
         this.callbacks.onGateStateChanged(msg.gateIndex, msg.open);
+        break;
+
+      case MessageType.TrapActivationResult:
+        this.callbacks.onTrapActivationResult(msg.trapCellIndex, msg.capturedCount);
         break;
 
       default:

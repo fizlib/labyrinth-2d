@@ -91,6 +91,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `WISDOM_ORB_USED` | Private accepted-action response containing the result and remaining orb count; warden sword clears leave the count at zero |
 | `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
 | `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
+| `TRAP_ACTIVATION_RESULT` | Private result used for the activating Warden's empty-room feedback |
 | `ERROR` | Report room-join or protocol errors |
 
 ### Shared State Contracts
@@ -199,6 +200,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Each generated room deterministically selects 6-10 well-spaced, obstacle-free 6x6 maze cells after all other objective and obstacle placement. Trap cells never overlap the hub, team spawns, gates, bridges, swamps, sword fields, treasure cells, or the portal platform.
 - Only wardens render the translucent red in-world cell overlays and matching red minimap cells. A warden anywhere inside or just outside one sees a red `[ E ]` above their character.
 - Activating one nearby trap cell atomically checks the whole trap network and cages every uncaged survivor whose feet are currently inside any trap cell.
+- A valid activation that finds no uncaged survivors returns private feedback to the Warden and briefly shakes the red `[ E ]` prompt. If a newly materialized cage overlaps the activating Warden, the server moves them to the nearest collision-free side with a two-pixel gap.
 - Cage state is server-authoritative and replicated through normal snapshots. The client materializes the supplied six-piece 48x32 dark-grass base below all entities, the `birdCage1` back layer below the player, and the `birdCage2` closed front layer above the player, then swaps the front to `birdCage3` when another nearby outside player opens it.
 - The prisoner cannot open their own cage, and another imprisoned player does not count as outside. After the gate opens, the prisoner may leave north or south; once clear, that cage becomes an empty permanent collider.
 - If the same survivor is later captured again in the same trap cell, their previous cage in that cell disappears before the replacement cage materializes. Their cages in other trap cells and other players' cages are unaffected.

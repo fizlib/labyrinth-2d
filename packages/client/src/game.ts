@@ -195,6 +195,10 @@ const WARDEN_INTERACT_PROMPT_COLOR = '#ef3434';
 /** Floating "Press E" interaction prompt */
 let interactPrompt: Text | null = null;
 
+const EMPTY_TRAP_PROMPT_SHAKE_DURATION = 0.45;
+let emptyTrapPromptShakeRemaining = 0;
+let emptyTrapPromptShakeElapsed = 0;
+
 function getInteractPromptColor(role: PlayerRole | null): string {
   return role === 'warden'
     ? WARDEN_INTERACT_PROMPT_COLOR
@@ -1873,6 +1877,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       bridgeCameraBlend = 0;
       bridgeCameraFocus = null;
       clearCageVisuals();
+      emptyTrapPromptShakeRemaining = 0;
+      emptyTrapPromptShakeElapsed = 0;
 
       const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
       currentMap = layout.map;
@@ -2236,12 +2242,20 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
     },
 
+    onTrapActivationResult: (trapCellIndex, capturedCount) => {
+      if (capturedCount > 0) return;
+      console.info(`[Main] Trap cell ${trapCellIndex} found no free survivors`);
+      emptyTrapPromptShakeRemaining = EMPTY_TRAP_PROMPT_SHAKE_DURATION;
+      emptyTrapPromptShakeElapsed = 0;
+    },
+
     onDisconnect: () => {
       console.info('[Main] Disconnected from server');
       updateLoadingProgress(0.98, 'The gate is resisting. Retrying…');
       minimap?.closeExpanded();
       localPlayerRole = null;
       localWisdomOrbs = 0;
+      emptyTrapPromptShakeRemaining = 0;
       debugPlayerRoles.clear();
       mobileControls.setWisdomAvailable(false);
       if (statusEl) {
@@ -2718,6 +2732,15 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     updateGateSlideAnimations(dtSeconds);
 
     // ── 5. Runestone/chest/gate-button interaction prompt ───────────
+    const emptyTrapPromptShakeActive = emptyTrapPromptShakeRemaining > 0;
+    if (emptyTrapPromptShakeActive) {
+      emptyTrapPromptShakeElapsed += dtSeconds;
+      emptyTrapPromptShakeRemaining = Math.max(
+        0,
+        emptyTrapPromptShakeRemaining - dtSeconds,
+      );
+    }
+
     if (interactPrompt && tilemapRenderer) {
       let nearestDistSq = Infinity;
       let promptPriority = Infinity;
@@ -2794,7 +2817,22 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         );
         if (trapTarget) {
           // The trap prompt belongs to the warden, not the floor target.
-          considerPrompt(2, trapTarget.distanceSquared, localX, localY - 30);
+          const shakeProgress = Math.max(
+            0,
+            1 - emptyTrapPromptShakeElapsed / EMPTY_TRAP_PROMPT_SHAKE_DURATION,
+          );
+          const shakeX = emptyTrapPromptShakeActive
+            ? Math.round(Math.sin(emptyTrapPromptShakeElapsed * 85) * 2 * shakeProgress)
+            : 0;
+          const shakeY = emptyTrapPromptShakeActive
+            ? Math.round(Math.sin(emptyTrapPromptShakeElapsed * 63) * shakeProgress)
+            : 0;
+          considerPrompt(
+            2,
+            trapTarget.distanceSquared,
+            localX + shakeX,
+            localY - 30 + shakeY,
+          );
         }
       }
 

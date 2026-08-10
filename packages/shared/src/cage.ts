@@ -27,6 +27,9 @@ export const CAGE_COLLIDER_WIDTH = 18;
 export const CAGE_COLLIDER_TOP_OFFSET = -12;
 export const CAGE_COLLIDER_BOTTOM_OFFSET = 1;
 
+/** Empty space left between a newly spawned cage and a displaced warden. */
+export const CAGE_SPAWN_CLEARANCE = 2;
+
 /** Vertical travel required before an opened cage becomes empty and solid. */
 export const CAGE_EXIT_DISTANCE = 20;
 
@@ -40,6 +43,45 @@ export function getCageCollisionBounds(
     right: left + CAGE_COLLIDER_WIDTH - 1,
     bottom: cage.y + CAGE_COLLIDER_BOTTOM_OFFSET,
   };
+}
+
+/**
+ * Nearest feet positions that clear an overlapping newly spawned cage.
+ * The caller chooses the first position that is valid against the full map.
+ */
+export function getCageSeparationPositions(
+  cage: Pick<CageState, 'x' | 'y'>,
+  playerX: number,
+  playerY: number,
+  playerFeetWidth: number,
+  playerFeetHeight: number,
+  clearance: number = CAGE_SPAWN_CLEARANCE,
+): Array<{ x: number; y: number }> {
+  const bounds = getCageCollisionBounds(cage);
+  const playerLeft = playerX - playerFeetWidth / 2;
+  const playerTop = playerY - playerFeetHeight;
+  const playerRight = playerLeft + playerFeetWidth - 1;
+  const playerBottom = playerY - 1;
+  const overlaps =
+    playerLeft <= bounds.right &&
+    playerRight >= bounds.left &&
+    playerTop <= bounds.bottom &&
+    playerBottom >= bounds.top;
+  if (!overlaps) return [];
+
+  const gap = Math.max(0, clearance);
+  const positions = [
+    { x: bounds.left - gap - playerFeetWidth / 2, y: playerY },
+    { x: bounds.right + 1 + gap + playerFeetWidth / 2, y: playerY },
+    { x: playerX, y: bounds.top - gap },
+    { x: playerX, y: bounds.bottom + 1 + gap + playerFeetHeight },
+  ];
+
+  return positions.sort((a, b) => {
+    const aDistance = (a.x - playerX) ** 2 + (a.y - playerY) ** 2;
+    const bDistance = (b.x - playerX) ** 2 + (b.y - playerY) ** 2;
+    return aDistance - bDistance;
+  });
 }
 
 /** Point used by matching client and server proximity checks. */

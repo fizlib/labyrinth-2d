@@ -55,6 +55,7 @@ import {
   isPlayerInTrapCell,
   findActivePlayerCage,
   findOpenableCage,
+  getCageSeparationPositions,
   hasPrisonerExitedCage,
   SWORD_FIELD_LOWER_DURATION_MS,
   getBridgeCollapseMask,
@@ -62,6 +63,7 @@ import {
   getBridgeBankReturnPosition,
   deriveFacingDirection,
   applyInputWithCollision,
+  isPositionValid,
   generateMazeLayout,
   type NavigationDistanceField,
   type TileMapData,
@@ -102,6 +104,7 @@ import {
   type PlayerRoleChangedMessage,
   type DebugPlayerRoleMessage,
   type GateStateChangedMessage,
+  type TrapActivationResultMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -931,6 +934,7 @@ export class Room {
     if (!nearby) return;
 
     let capturedCount = 0;
+    const spawnedCages: CageState[] = [];
     for (const survivor of this.state.players) {
       if (survivor.role !== 'survivor') continue;
       if (findActivePlayerCage(this.cageStates, survivor.id)) continue;
@@ -959,20 +963,87 @@ export class Room {
       this.clearQueuedInputs(survivor);
       this.bridgeTraversals.delete(survivor.id);
       this.bridgeRepairOccupancy.delete(survivor.id);
-      this.cageStates.push({
+      const cage: CageState = {
         cageId: this.nextCageId++,
         prisonerPlayerId: survivor.id,
         x: survivor.x,
         y: survivor.y,
         opened: false,
         vacated: false,
-      });
+      };
+      this.cageStates.push(cage);
+      spawnedCages.push(cage);
       capturedCount++;
+    }
+
+    if (spawnedCages.length > 0) {
+      this.moveWardenClearOfSpawnedCages(player, spawnedCages);
+    }
+
+    const requesterSocket = this.sockets.get(playerId);
+    if (requesterSocket) {
+      const result: TrapActivationResultMessage = {
+        type: MessageType.TrapActivationResult,
+        trapCellIndex: msg.trapCellIndex,
+        capturedCount,
+      };
+      this.send(requesterSocket, result);
     }
 
     console.info(
       `[Room:${this.id}] Warden ${playerId} fired trap cell ${msg.trapCellIndex}; captured ${capturedCount} survivor(s)`,
     );
+  }
+
+  /** Push the activating warden to the nearest legal side of every new cage. */
+  private moveWardenClearOfSpawnedCages(
+    warden: RoomPlayerInfo,
+    spawnedCages: readonly CageState[],
+  ): void {
+    let moved = false;
+
+    for (let pass = 0; pass <= spawnedCages.length; pass++) {
+      let resolvedOverlap = false;
+      for (const cage of spawnedCages) {
+        const candidates = getCageSeparationPositions(
+          cage,
+          warden.x,
+          warden.y,
+          FEET_HITBOX_W,
+          FEET_HITBOX_H,
+        );
+        if (candidates.length === 0) continue;
+
+        const destination = candidates.find((candidate) =>
+          isPositionValid(
+            candidate.x,
+            candidate.y,
+            this.map,
+            this.portalPosition,
+            this.bridges,
+            this.bridgeStates,
+            this.chestDeadEnds,
+            this.swordFields,
+            this.swordFieldStates,
+            this.cageStates,
+            warden.id,
+          ),
+        );
+        if (!destination) continue;
+
+        warden.x = destination.x;
+        warden.y = destination.y;
+        moved = true;
+        resolvedOverlap = true;
+        break;
+      }
+      if (!resolvedOverlap) break;
+    }
+
+    if (!moved) return;
+    this.clearQueuedInputs(warden);
+    this.bridgeTraversals.delete(warden.id);
+    this.bridgeRepairOccupancy.delete(warden.id);
   }
 
   /** Open a nearby prisoner's cage; the prisoner cannot open their own gate. */

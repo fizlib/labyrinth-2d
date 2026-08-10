@@ -100,8 +100,10 @@ export {
   CAGE_COLLIDER_WIDTH,
   CAGE_COLLIDER_TOP_OFFSET,
   CAGE_COLLIDER_BOTTOM_OFFSET,
+  CAGE_SPAWN_CLEARANCE,
   CAGE_EXIT_DISTANCE,
   getCageCollisionBounds,
+  getCageSeparationPositions,
   getCageInteractionPoint,
   isPlayerActivelyCaged,
   findActivePlayerCage,
@@ -312,6 +314,7 @@ export enum MessageType {
   PlayerRoleChanged = 'PLAYER_ROLE_CHANGED',
   DebugPlayerRole = 'DEBUG_PLAYER_ROLE',
   GateStateChanged = 'GATE_STATE_CHANGED',
+  TrapActivationResult = 'TRAP_ACTIVATION_RESULT',
   Error = 'ERROR',
 }
 
@@ -546,6 +549,13 @@ export interface GateStateChangedMessage {
   open: boolean;
 }
 
+/** Private acknowledgement of one valid warden trap activation. */
+export interface TrapActivationResultMessage {
+  type: MessageType.TrapActivationResult;
+  trapCellIndex: number;
+  capturedCount: number;
+}
+
 // ── Runestone State ─────────────────────────────────────────────────────────
 
 export interface RunestoneInfo {
@@ -629,4 +639,5 @@ export type ServerToClientMessage =
   | PlayerRoleChangedMessage
   | DebugPlayerRoleMessage
   | GateStateChangedMessage
+  | TrapActivationResultMessage
   | ErrorMessage;

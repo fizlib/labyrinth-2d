@@ -12,8 +12,10 @@ import {
   findTrapCellInteractionTarget,
   generateMazeLayout,
   getCageCollisionBounds,
+  getCageSeparationPositions,
   getTrapCellWorldBounds,
   isPlayerInTrapCell,
+  isPositionValid,
 } from '../dist/index.js';
 
 test('trap cells are deterministic, complete 6x6 floors, and avoid authored placements', () => {
@@ -161,6 +163,30 @@ test('cages block outsiders and only a nearby different player may open one', ()
     right: 168,
     bottom: 161,
   });
+
+  const centeredSeparation = getCageSeparationPositions(cage, 160, 160, 8, 12);
+  assert.deepEqual(centeredSeparation[0], { x: 160, y: 146 });
+  assert.equal(
+    isPositionValid(
+      centeredSeparation[0].x,
+      centeredSeparation[0].y,
+      map,
+      null,
+      [],
+      [],
+      [],
+      [],
+      [],
+      [cage],
+      'warden',
+    ),
+    true,
+  );
+  assert.deepEqual(getCageSeparationPositions(cage, 150, 160, 8, 12)[0], {
+    x: 145,
+    y: 160,
+  });
+  assert.deepEqual(getCageSeparationPositions(cage, 140, 160, 8, 12), []);
 
   assert.deepEqual(
     applyInputWithCollision(
