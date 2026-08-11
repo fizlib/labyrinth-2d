@@ -57,6 +57,9 @@ import {
   findOpenableCage,
   getCageSeparationPositions,
   hasPrisonerExitedCage,
+  CHAT_SEND_COOLDOWN_MS,
+  normalizeChatMessageText,
+  isWithinChatProximity,
   SWORD_FIELD_LOWER_DURATION_MS,
   getBridgeCollapseMask,
   getBridgeRepairCollapsedMask,
@@ -91,6 +94,7 @@ import {
   type PressPressurePlateMessage,
   type ActivateTrapCellMessage,
   type OpenCageMessage,
+  type SendChatMessage,
   type DebugTeleportMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
@@ -105,6 +109,7 @@ import {
   type DebugPlayerRoleMessage,
   type GateStateChangedMessage,
   type TrapActivationResultMessage,
+  type ChatMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -249,6 +254,7 @@ export class Room {
   private state: RoomState;
   private sockets: Map<string, PlayerSocket> = new Map();
   private inputQueues: Map<string, QueuedInput[]> = new Map();
+  private readonly lastChatSentAt = new Map<string, number>();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
 
   /** Hidden role assigned to every seat in the room. */
@@ -557,6 +563,7 @@ export class Room {
   removePlayer(playerId: string): void {
     this.sockets.delete(playerId);
     this.inputQueues.delete(playerId);
+    this.lastChatSentAt.delete(playerId);
     this.bridgeTraversals.delete(playerId);
     this.bridgeRepairOccupancy.delete(playerId);
     this.revealedWisdomBridges.delete(playerId);
@@ -596,6 +603,32 @@ export class Room {
         right: msg.right,
         dt: msg.dt,
       });
+    }
+  }
+
+  /** Validate and deliver one transient message to players near the sender. */
+  handleSendChatMessage(playerId: string, msg: SendChatMessage): void {
+    const sender = this.state.players.find((player) => player.id === playerId);
+    const text = normalizeChatMessageText(msg.text);
+    if (!sender || text === null) return;
+
+    const now = Date.now();
+    const lastSentAt = this.lastChatSentAt.get(playerId) ?? -Infinity;
+    if (now - lastSentAt < CHAT_SEND_COOLDOWN_MS) return;
+    this.lastChatSentAt.set(playerId, now);
+
+    const chatMessage: ChatMessage = {
+      type: MessageType.ChatMessage,
+      playerId: sender.id,
+      displayName: sender.displayName,
+      teamId: sender.teamId,
+      text,
+    };
+
+    for (const recipient of this.state.players) {
+      if (!isWithinChatProximity(sender, recipient)) continue;
+      const socket = this.sockets.get(recipient.id);
+      if (socket) this.send(socket, chatMessage);
     }
   }
 
@@ -2020,6 +2053,7 @@ export class Room {
     this.stopLoop();
     this.sockets.clear();
     this.inputQueues.clear();
+    this.lastChatSentAt.clear();
     this.bridgeTraversals.clear();
     this.revealedWisdomBridges.clear();
     this.revealedWisdomSwamps.clear();

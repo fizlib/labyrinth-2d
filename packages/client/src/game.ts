@@ -72,6 +72,7 @@ import { WisdomArrow } from './systems/WisdomArrow';
 import { IntroDialogueHud } from './systems/IntroDialogueHud';
 import { MobileControls, type MobileControlDirection } from './systems/MobileControls';
 import { CageVisual } from './systems/Cage';
+import { ProximityChatHud } from './systems/ProximityChatHud';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
@@ -149,6 +150,12 @@ function setTouchDirection(direction: MoveDirection, pressed: boolean): void {
 
 function resetKeyboardInput(): void {
   clearMoveState(keyboardKeys);
+  syncActiveKeys();
+}
+
+function resetAllInput(): void {
+  clearMoveState(keyboardKeys);
+  clearMoveState(touchKeys);
   syncActiveKeys();
 }
 
@@ -1928,6 +1935,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     showIntroDialogue: boolean,
   ) => void = () => {};
   let triggerInteract: () => void = () => {};
+  let chatHud: ProximityChatHud | null = null;
+  let chatInputActive = false;
+  let setMobileInputEnabled: (enabled: boolean) => void = () => {};
 
   const net = new NetworkManager({
     onRoomJoined: (roomId, playerId, mapSeed, role, wisdomOrbs, gameState) => {
@@ -1937,6 +1947,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       );
       debugPlayerRoles.clear();
       debugPlayerRoles.set(playerId, role);
+      chatHud?.clear();
+      chatHud?.setEnabled(true);
 
       // Clear previous slide states on new room join
       gateSlideStates.clear();
@@ -2337,6 +2349,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       emptyTrapPromptShakeElapsed = 0;
     },
 
+    onChatMessage: (playerId, displayName, teamId, text) => {
+      chatHud?.addMessage({ playerId, displayName, teamId, text });
+    },
+
     onDisconnect: () => {
       console.info('[Main] Disconnected from server');
       updateLoadingProgress(0.98, 'The gate is resisting. Retrying…');
@@ -2345,12 +2361,28 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       localWisdomOrbs = 0;
       emptyTrapPromptShakeRemaining = 0;
       debugPlayerRoles.clear();
+      chatHud?.clear();
+      chatHud?.setEnabled(false);
       mobileControls.setWisdomAvailable(false);
       if (statusEl) {
         statusEl.textContent = '🔴 Disconnected';
         statusEl.classList.remove('connected');
         statusEl.classList.add('error');
       }
+    },
+  });
+
+  chatHud = new ProximityChatHud({
+    parent: container,
+    canvas: app.canvas,
+    onSend: (text) => net.sendChatMessage(text),
+    onActiveChange: (active) => {
+      chatInputActive = active;
+      if (active) {
+        resetAllInput();
+        minimap?.closeExpanded();
+      }
+      setMobileInputEnabled(!active);
     },
   });
 
@@ -2369,6 +2401,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     console.info(
       `[WisdomOrb][${source}] Triggered. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`,
     );
+    if (chatInputActive) return;
     if (!localPlayerInitialized) {
       console.warn(`[WisdomOrb][${source}] BLOCKED: local player not initialized`);
       return;
@@ -2396,6 +2429,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     (localPlayerRole === 'survivor' && localWisdomOrbs < MAX_WISDOM_ORBS);
 
   triggerInteract = (): void => {
+    if (chatInputActive) return;
     if (minimap?.isExpanded()) {
       minimap.closeExpanded();
       return;
@@ -2537,6 +2571,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       triggerUseWisdomOrb('MobileQ');
     },
   });
+  setMobileInputEnabled = (enabled) => mobileControls.setInputEnabled(enabled);
   mobileControls.setWisdomAvailable(false);
 
   applyLocalRoleUi = (role, wisdomOrbs, showIntroDialogue) => {
@@ -2600,9 +2635,17 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       );
       introDialogueHud.addToStage(app.stage);
     }
+    chatHud?.setSuppressed(showIntroDialogue);
   };
 
-  window.addEventListener('beforeunload', () => mobileControls.destroy(), { once: true });
+  window.addEventListener(
+    'beforeunload',
+    () => {
+      chatHud?.destroy();
+      mobileControls.destroy();
+    },
+    { once: true },
+  );
 
   // ── 60 FPS Game Loop ──────────────────────────────────────────────────
   app.ticker.add((ticker) => {
@@ -2621,12 +2664,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       ? findActivePlayerCage(latestServerState.cageStates, net.playerId)
       : null;
     const movementInput = {
-      up: activeKeys.up,
-      down: activeKeys.down,
+      up: chatInputActive ? false : activeKeys.up,
+      down: chatInputActive ? false : activeKeys.down,
       // Once opened, the cage permits only its north/south escape route. A
       // closed prisoner still animates against all four sides without moving.
-      left: activeLocalCage?.opened ? false : activeKeys.left,
-      right: activeLocalCage?.opened ? false : activeKeys.right,
+      left: chatInputActive || activeLocalCage?.opened ? false : activeKeys.left,
+      right: chatInputActive || activeLocalCage?.opened ? false : activeKeys.right,
     };
     const isMoving =
       movementInput.up || movementInput.down || movementInput.left || movementInput.right;
@@ -2763,6 +2806,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       minimap.update(localX, localY, otherPlayerPositions);
     }
     introDialogueHud?.update(dtSeconds);
+    chatHud?.setSuppressed(introDialogueHud?.isVisible() ?? false);
     wisdomArrow?.update(dtSeconds, localX, localY);
 
     // ── 4b. Screen shake ────────────────────────────────────────────
@@ -3095,6 +3139,17 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── Keyboard Input ────────────────────────────────────────────────────
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (chatInputActive) return;
+
+    if (
+      !e.repeat &&
+      (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'KeyT')
+    ) {
+      e.preventDefault();
+      chatHud?.open();
+      return;
+    }
+
     if (e.code === 'Escape' && minimap?.isExpanded()) {
       e.preventDefault();
       minimap.closeExpanded();
@@ -3126,6 +3181,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   });
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {
+    if (chatInputActive) return;
     const dir = KEY_MAP[e.code];
     if (dir) setKeyboardDirection(dir, false);
   });

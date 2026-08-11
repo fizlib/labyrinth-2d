@@ -21,6 +21,7 @@ import {
   type ActivateTrapCellMessage,
   type OpenCageMessage,
   type UseWisdomOrbMessage,
+  type SendChatMessage,
   type DebugTeleportMessage,
   type DebugPlayerAction,
   type DebugPlayerActionMessage,
@@ -48,6 +49,12 @@ export interface NetworkCallbacks {
   onDebugPlayerRole: (playerId: string, role: PlayerRole) => void;
   onGateStateChanged: (gateIndex: number, open: boolean) => void;
   onTrapActivationResult: (trapCellIndex: number, capturedCount: number) => void;
+  onChatMessage: (
+    playerId: string,
+    displayName: string,
+    teamId: number,
+    text: string,
+  ) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
 }
@@ -261,6 +268,10 @@ export class NetworkManager {
         this.callbacks.onTrapActivationResult(msg.trapCellIndex, msg.capturedCount);
         break;
 
+      case MessageType.ChatMessage:
+        this.callbacks.onChatMessage(msg.playerId, msg.displayName, msg.teamId, msg.text);
+        break;
+
       default:
         console.warn('[Net] Unknown message type:', (msg as { type: string }).type);
     }
@@ -342,6 +353,15 @@ export class NetworkManager {
     console.info('[WisdomOrb][Net] Sending USE_WISDOM_ORB to server');
     const msg: UseWisdomOrbMessage = {
       type: MessageType.UseWisdomOrb,
+    };
+    this.send(msg);
+  }
+
+  /** Send one proximity-chat message for authoritative validation and routing. */
+  sendChatMessage(text: string): void {
+    const msg: SendChatMessage = {
+      type: MessageType.SendChatMessage,
+      text,
     };
     this.send(msg);
   }

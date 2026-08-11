@@ -91,6 +91,7 @@ export class MobileControls {
   private wisdomAvailable = true;
   private dialogueExclusion: IntroDialogueExclusion | null = null;
   private expandedMinimapVisible = false;
+  private inputEnabled = true;
 
   constructor(private readonly options: MobileControlsOptions) {
     this.mediaQuery = window.matchMedia(MOBILE_CONTROLS_QUERY);
@@ -159,7 +160,7 @@ export class MobileControls {
     }
     this.wisdomAvailable = available;
     this.wisdomButton.hidden = !available;
-    this.wisdomButton.disabled = !available;
+    this.wisdomButton.disabled = !available || !this.inputEnabled;
     if (!available) {
       this.wisdomPointers.clear();
       this.syncActionButtonState(this.wisdomButton, this.wisdomPointers);
@@ -179,6 +180,17 @@ export class MobileControls {
     this.releaseJoystick();
     this.expandedMinimapVisible = visible;
     this.updateJoystickZones();
+  }
+
+  /** Release and suppress every touch control while another modal input owns focus. */
+  setInputEnabled(enabled: boolean): void {
+    if (this.inputEnabled === enabled) return;
+    this.inputEnabled = enabled;
+    this.releaseAllInputs();
+    this.root.classList.toggle('mobile-controls--input-disabled', !enabled);
+    this.interactButton.disabled = !enabled;
+    this.wisdomButton.disabled = !enabled || !this.wisdomAvailable;
+    this.updateVisibility();
   }
 
   destroy(): void {
@@ -204,6 +216,7 @@ export class MobileControls {
 
     this.addDisposable(button, 'pointerdown', (event: PointerEvent) => {
       event.preventDefault();
+      if (!this.inputEnabled) return;
       if (pointers.has(event.pointerId)) return;
       pointers.add(event.pointerId);
       this.syncActionButtonState(button, pointers);
@@ -284,7 +297,7 @@ export class MobileControls {
   private updateVisibility = (): void => {
     const visible = this.mediaQuery.matches;
     this.root.classList.toggle('mobile-controls--visible', visible);
-    this.root.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    this.root.setAttribute('aria-hidden', visible && this.inputEnabled ? 'false' : 'true');
     this.updateControlLayout();
     if (!visible) {
       this.releaseAllInputs();
@@ -361,6 +374,8 @@ export class MobileControls {
     for (const zone of this.joystickZones.splice(0)) {
       zone.remove();
     }
+
+    if (!this.inputEnabled) return;
 
     if (parentRect.width <= 0 || parentRect.height <= 0) return;
 
@@ -489,6 +504,7 @@ export class MobileControls {
   }
 
   private handleJoystickPointerDown = (event: PointerEvent): void => {
+    if (!this.inputEnabled) return;
     if (this.activeJoystickPointerId !== null) {
       // Only the pointer that opened the floating stick is allowed to steer it.
       event.preventDefault();

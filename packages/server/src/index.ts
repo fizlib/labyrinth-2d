@@ -186,6 +186,14 @@ uWS
             break;
           }
 
+          case MessageType.SendChatMessage: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) room.handleSendChatMessage(data.id, msg);
+            }
+            break;
+          }
+
           case MessageType.DebugTeleport: {
             if (data.roomId) {
               const room = rooms.get(data.roomId);

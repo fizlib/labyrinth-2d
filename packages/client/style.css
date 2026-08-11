@@ -1109,6 +1109,156 @@ canvas {
   outline: none;
 }
 
+/* ── Proximity chat HUD ───────────────────────────────────────────────── */
+
+.proximity-chat {
+  --chat-scale: 1;
+  --chat-width: 270px;
+  --chat-left: 14px;
+  --chat-bottom: 10px;
+  position: absolute;
+  z-index: 220;
+  overflow: hidden;
+  pointer-events: none;
+  font-family: 'PixelOperator8', 'Courier New', Courier, monospace;
+  color: #fffdf1;
+}
+
+.proximity-chat__panel {
+  position: absolute;
+  left: var(--chat-left);
+  bottom: var(--chat-bottom);
+  width: var(--chat-width);
+  pointer-events: none;
+}
+
+.proximity-chat__history {
+  box-sizing: border-box;
+  max-height: 0;
+  padding: 0 calc(6px * var(--chat-scale));
+  overflow: hidden;
+  font-size: calc(8px * var(--chat-scale));
+  line-height: 1.2;
+  text-shadow:
+    calc(1px * var(--chat-scale)) calc(1px * var(--chat-scale)) 0 #0a0d08,
+    0 calc(1px * var(--chat-scale)) 0 #0a0d08;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 220ms linear,
+    visibility 0s linear 220ms,
+    max-height 0s linear 220ms,
+    padding 0s linear 220ms;
+}
+
+.proximity-chat--history-visible .proximity-chat__history {
+  max-height: calc(58px * var(--chat-scale));
+  padding: calc(4px * var(--chat-scale)) calc(6px * var(--chat-scale));
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.proximity-chat--active .proximity-chat__history {
+  background: rgba(5, 16, 12, 0.76);
+}
+
+.proximity-chat__message {
+  overflow-wrap: anywhere;
+}
+
+.proximity-chat__name {
+  text-shadow:
+    calc(1px * var(--chat-scale)) calc(1px * var(--chat-scale)) 0 #07100c,
+    0 calc(1px * var(--chat-scale)) 0 #07100c;
+}
+
+.proximity-chat__form {
+  box-sizing: border-box;
+  display: none;
+  align-items: center;
+  width: 100%;
+  min-height: calc(18px * var(--chat-scale));
+  padding: 0 calc(6px * var(--chat-scale));
+  background: rgba(2, 9, 7, 0.86);
+  pointer-events: auto;
+}
+
+.proximity-chat--active .proximity-chat__form {
+  display: flex;
+}
+
+.proximity-chat__input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  padding: calc(3px * var(--chat-scale)) 0;
+  background: transparent;
+  color: #ffffff;
+  caret-color: #ffffff;
+  font: inherit;
+  font-size: calc(8px * var(--chat-scale));
+  line-height: 1.25;
+  text-shadow: calc(1px * var(--chat-scale)) calc(1px * var(--chat-scale)) 0 #000000;
+  touch-action: manipulation;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.proximity-chat__counter {
+  flex: none;
+  margin-left: calc(7px * var(--chat-scale));
+  color: rgba(190, 196, 192, 0.72);
+  font-size: calc(6px * var(--chat-scale));
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: calc(1px * var(--chat-scale)) calc(1px * var(--chat-scale)) 0 #000000;
+}
+
+.proximity-chat__prompt {
+  display: block;
+  min-height: calc(18px * var(--chat-scale));
+  margin: 0;
+  border: 0;
+  padding: calc(4px * var(--chat-scale)) calc(6px * var(--chat-scale));
+  background: transparent;
+  color: #f5f1dc;
+  font: inherit;
+  font-size: calc(8px * var(--chat-scale));
+  line-height: 1.25;
+  text-align: left;
+  text-shadow:
+    calc(1px * var(--chat-scale)) calc(1px * var(--chat-scale)) 0 #08100a,
+    0 calc(1px * var(--chat-scale)) 0 #08100a;
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.proximity-chat__prompt:hover,
+.proximity-chat__prompt:focus-visible {
+  color: #ffffff;
+}
+
+.proximity-chat__prompt:focus-visible {
+  outline: calc(1px * var(--chat-scale)) solid #79c86f;
+  outline-offset: calc(-2px * var(--chat-scale));
+}
+
+.proximity-chat--active .proximity-chat__prompt,
+.proximity-chat--disabled .proximity-chat__prompt,
+.proximity-chat--suppressed .proximity-chat__prompt {
+  display: none;
+}
+
+.proximity-chat--disabled .proximity-chat__history,
+.proximity-chat--suppressed .proximity-chat__history,
+.proximity-chat--suppressed .proximity-chat__form {
+  visibility: hidden;
+}
+
 /* ── Debug UI — overlay on top of the canvas ───────────────────────────── */
 
 #debug-ui {
@@ -1557,6 +1707,12 @@ canvas {
 
 .mobile-controls--visible {
   display: block;
+}
+
+.mobile-controls--input-disabled .mobile-controls__joystick-region,
+.mobile-controls--input-disabled .mobile-controls__actions {
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .mobile-controls__joystick-region {

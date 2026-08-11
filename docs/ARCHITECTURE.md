@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-08-10 - Warden trap cells and survivor cages
+Last updated: 2026-08-11 - Proximity text chat
 
 ## Project Overview
 
@@ -75,6 +75,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `ACTIVATE_TRAP_CELL` | Warden-only request to fire the shared trap network from a nearby 6x6 trap cell |
 | `OPEN_CAGE` | Outside-player request to open a nearby prisoner's cage |
 | `USE_WISDOM_ORB` | Survivors spend an orb on a nearby reveal/clear or request direction; wardens may use the same proximity request only to clear sword fields |
+| `SEND_CHAT_MESSAGE` | Submit one server-validated proximity-chat message |
 | `DEBUG_TELEPORT` | Debug-only teleport helper used by developer tooling |
 
 #### Server -> Client
@@ -92,6 +93,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
 | `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
 | `TRAP_ACTIVATION_RESULT` | Private result used for the activating Warden's empty-room feedback |
+| `CHAT_MESSAGE` | Transient message with the sender's public squad ID, delivered to players within 10 tiles at send time |
 | `ERROR` | Report room-join or protocol errors |
 
 ### Shared State Contracts
@@ -149,6 +151,13 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Sword fields preserve the ten small fence/marker colliders from the first editor export. The additional `149×32` central blocker from the second export remains solid through the shake-and-sink sequence and is removed only when the server marks the field cleared.
 - Spawned cages use the shared dynamic-collider path and the editor-authored 18x14 base collider. Closed prisoners cannot change position, but their movement input still drives replicated facing and walk animation; opened prisoners may move only north/south until clear, while every other player collides with the cage. A vacated cage remains permanently solid.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
+
+### Proximity Text Chat
+
+- Chat messages contain at most `120` characters and are normalized to one trimmed line by the authoritative server.
+- The server uses current authoritative player positions to deliver each message to the sender and every player within `160` world pixels (10 tiles). Walls do not block chat.
+- Chat events are transient: they are not stored in `GameState` and are not replayed to late joiners.
+- The client keeps only the latest four locally received messages. They fade after ten inactive seconds and return when the player reopens chat.
 
 ### Runestones and Portal Flow
 
@@ -369,6 +378,10 @@ The client currently has multiple UI subsystems, not just the minimap:
   - mobile-only DOM overlay shown on coarse-pointer, non-hover devices
   - bottom-left D-pad for `west`, `north`, `east`, and `south`
   - right-side `E` and `Q` buttons that mirror the keyboard action keys
+- `ProximityChatHud`
+  - DOM overlay aligned to the bottom-left of the scaled Pixi canvas
+  - opens with `Enter`, `T`, or its clickable prompt and uses a native single-line input on mobile
+  - pauses gameplay input while typing, shows a live remaining-character counter, and colors sender names by their public squad assignment
 - `WisdomArrow`
   - local-only world-space hint arrow above the local player
   - appears after a successful orb use
@@ -387,6 +400,8 @@ The client currently has multiple UI subsystems, not just the minimap:
 ### Input Handling
 
 - Movement: arrow keys or `WASD`, plus the mobile D-pad on supported touch devices
+- Proximity chat: `Enter`, `T`, or click `[Enter] To Chat`; `Enter` sends, while empty `Enter`, `Escape`, or clicking outside closes the input
+- All movement, interaction, wisdom, and mobile controls are suppressed while chat owns keyboard focus
 - Intro dialogue advance: `E`, the clickable arrow button, or the mobile `E` button while the intro dialogue is visible
 - Intro dialogue skip: `E`, the clickable arrow button, or the mobile `E` button while the current page is still typing
 - Runestone interaction: `E` or the mobile `E` button after the intro dialogue is dismissed
@@ -450,6 +465,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - bottom-screen paged spawn dialogue HUD
 - `packages/client/src/systems/MobileControls.ts`
   - DOM overlay for mobile touch movement and `E`-equivalent interaction
+- `packages/client/src/systems/ProximityChatHud.ts`
+  - canvas-aligned DOM proximity-chat log, input, timer, and character counter
 - `packages/client/src/systems/WisdomArrow.ts`
   - temporary world-space guidance arrow
 

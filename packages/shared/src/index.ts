@@ -12,6 +12,15 @@ import type { SwordFieldState } from './sword-field.js';
 import type { CageState } from './cage.js';
 
 export {
+  CHAT_MAX_LENGTH,
+  CHAT_PROXIMITY_TILES,
+  CHAT_PROXIMITY_RANGE,
+  CHAT_SEND_COOLDOWN_MS,
+  normalizeChatMessageText,
+  isWithinChatProximity,
+} from './chat.js';
+
+export {
   PLAYER_SPEED,
   FEET_HITBOX_W,
   FEET_HITBOX_H,
@@ -301,6 +310,7 @@ export enum MessageType {
   UseWisdomOrb = 'USE_WISDOM_ORB',
   DebugTeleport = 'DEBUG_TELEPORT',
   DebugPlayerAction = 'DEBUG_PLAYER_ACTION',
+  SendChatMessage = 'SEND_CHAT_MESSAGE',
 
   // ── Server → Client ──
   RoomJoined = 'ROOM_JOINED',
@@ -315,6 +325,7 @@ export enum MessageType {
   DebugPlayerRole = 'DEBUG_PLAYER_ROLE',
   GateStateChanged = 'GATE_STATE_CHANGED',
   TrapActivationResult = 'TRAP_ACTIVATION_RESULT',
+  ChatMessage = 'CHAT_MESSAGE',
   Error = 'ERROR',
 }
 
@@ -369,6 +380,11 @@ export interface OpenCageMessage {
 
 export interface UseWisdomOrbMessage {
   type: MessageType.UseWisdomOrb;
+}
+
+export interface SendChatMessage {
+  type: MessageType.SendChatMessage;
+  text: string;
 }
 
 export interface DebugTeleportMessage {
@@ -556,6 +572,16 @@ export interface TrapActivationResultMessage {
   capturedCount: number;
 }
 
+/** Transient server-authored chat event delivered only to nearby players. */
+export interface ChatMessage {
+  type: MessageType.ChatMessage;
+  playerId: string;
+  displayName: string;
+  /** Public squad index used to color the sender's name. */
+  teamId: number;
+  text: string;
+}
+
 // ── Runestone State ─────────────────────────────────────────────────────────
 
 export interface RunestoneInfo {
@@ -624,6 +650,7 @@ export type ClientToServerMessage =
   | ActivateTrapCellMessage
   | OpenCageMessage
   | UseWisdomOrbMessage
+  | SendChatMessage
   | DebugTeleportMessage
   | DebugPlayerActionMessage;
 
@@ -640,4 +667,5 @@ export type ServerToClientMessage =
   | DebugPlayerRoleMessage
   | GateStateChangedMessage
   | TrapActivationResultMessage
+  | ChatMessage
   | ErrorMessage;
