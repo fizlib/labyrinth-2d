@@ -390,6 +390,14 @@ export default defineConfig(({ command, mode }) => {
     server: {
       port: 5173,
       host: true, // Listen on all interfaces (including LAN/IPv4)
+      proxy: {
+        // Keep the game socket on the same LAN-accessible port as the client.
+        // This avoids requiring a separate Windows Firewall rule for port 9001.
+        '/ws': {
+          target: 'ws://127.0.0.1:9001',
+          ws: true,
+        },
+      },
       watch: {
         // These files are an immutable source library, not authored modules.
         // Watching the full PNG library stalls Vite's request loop on Windows.

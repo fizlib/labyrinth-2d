@@ -1,15 +1,38 @@
 import { validateProfileInput, type Profile, type ProfileUpdateInput } from './supabase';
 
 const GUEST_PROFILE_STORAGE_KEY = 'labyrinth.guest-profile.v1';
+const UINT32_RANGE = 0x1_0000_0000;
+
+function randomUint32(): number {
+  const randomValue = new Uint32Array(1);
+  try {
+    if (typeof window.crypto?.getRandomValues === 'function') {
+      window.crypto.getRandomValues(randomValue);
+      return randomValue[0] ?? 0;
+    }
+  } catch {
+    // Web Crypto may be unavailable when the dev server is opened over plain HTTP on a LAN.
+  }
+  return Math.floor(Math.random() * UINT32_RANGE);
+}
 
 function randomGuestSuffix(): string {
-  const randomValue = new Uint32Array(1);
-  window.crypto.getRandomValues(randomValue);
-  return String(randomValue[0] % 10_000).padStart(4, '0');
+  return String(randomUint32() % 10_000).padStart(4, '0');
 }
 
 function guestId(): string {
-  return `guest:${window.crypto.randomUUID()}`;
+  try {
+    const uuid = window.crypto?.randomUUID?.();
+    if (uuid) return `guest:${uuid}`;
+  } catch {
+    // Fall through to a local-only ID when randomUUID requires a secure context.
+  }
+
+  const timestamp = Date.now().toString(36);
+  const randomPart = [randomUint32(), randomUint32()]
+    .map((value) => value.toString(36).padStart(7, '0'))
+    .join('');
+  return `guest:${timestamp}-${randomPart}`;
 }
 
 function storeGuestProfile(profile: Profile): void {

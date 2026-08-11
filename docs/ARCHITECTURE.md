@@ -199,7 +199,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 ### Sword Fields
 
 - Before other obstacle placement, generation reserves non-overlapping qualifying east-west passages so every team's computed direct spawn-to-hub route contains exactly one sword field. One or more additional deterministic fields are scattered only outside those direct routes. They never overlap spawns, the hub, bridges, swamps, treasure cells, or the portal platform.
-- Survivors with an orb see `[ Q ]` at either still-blocked entrance. Keyboard `Q`, mobile `Q`, and clicking the orb HUD all use the same server-validated request.
+- Survivors see `[ Q ]` at either still-blocked entrance. With an orb, keyboard `Q`, mobile `Q`, clicking the prompt, and clicking the orb HUD all use the same server-validated request; without an orb, the same prompt explains that one must be found before the field can be passed.
 - Wardens instead see a red `[ E ]` and may clear any number of encountered fields with keyboard/mobile `E`; they spend no orb.
 - The server consumes one orb only for survivors, records the lowering start tick, keeps the main collider active for the full animation, then marks the field cleared. Late joiners reconstruct the correct visual phase from the current server tick.
 - Fence, grave, and ground art remain after all forty-one swords disappear, matching the supplied editor layout.

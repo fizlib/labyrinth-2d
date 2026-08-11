@@ -65,7 +65,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - Wardens do not receive wisdom orbs because their map already gives them superior navigation information.
 - A wisdom orb is consumed after one use.
 - Away from a nearby obstacle interaction, using one privately shows its owner an arrow pointing in the general direction of the maze's center.
-- At either entrance of a sword field, the `[ Q ]` prompt lets a survivor spend one orb to lower every sword and open the route after a short shared magic animation.
+- At either entrance of a sword field, survivors always see a `[ Q ]` prompt. Using it with an orb lowers every sword and opens the route after a short shared magic animation; using it without one explains that a Wisdom Orb must be found first.
 - Wardens see a red `[ E ]` at the same entrances. Pressing it clears the sword field without spending an orb, and wardens may repeat this at every field they encounter.
 - The arrow does not provide a full route or turn-by-turn directions.
 - Direction and hidden-route reveals are private. World-changing uses such as clearing a sword field are visible to everyone because the obstacle state is shared.

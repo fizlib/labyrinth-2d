@@ -85,6 +85,10 @@ const WARDEN_SPAWN_DIALOGUE_PAGES = [
   'Your goal is to delay and misdirect the survivors until time runs out. Use your complete map to lead them astray.',
 ];
 
+const SWORD_FIELD_WISDOM_REQUIRED_DIALOGUE_PAGES = [
+  'You need to find a Wisdom Orb to pass this sword field. Search the Maze, then return and press Q.',
+];
+
 // ── Input State ─────────────────────────────────────────────────────────────
 
 type MoveDirection = 'up' | 'down' | 'left' | 'right';
@@ -2102,7 +2106,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       interactPrompt.cursor = 'pointer';
       interactPrompt.on('pointertap', (event) => {
         event.stopPropagation();
-        triggerInteract();
+        if (interactPrompt?.text === '[ Q ]') {
+          triggerUseWisdomOrb('Click');
+        } else {
+          triggerInteract();
+        }
       });
       entityLayer.addChild(interactPrompt);
 
@@ -2414,8 +2422,25 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       console.warn(`[WisdomOrb][${source}] BLOCKED: local role has no wisdom orbs`);
       return;
     }
+    if (introDialogueHud?.isVisible()) return;
     if (minimap?.isExpanded()) {
       console.warn(`[WisdomOrb][${source}] BLOCKED: warden map is open`);
+      return;
+    }
+    if (localWisdomOrbs <= 0) {
+      const swordFieldTarget =
+        currentLayout && latestServerState
+          ? findSwordFieldWisdomTarget(
+              currentLayout.swordFields,
+              latestServerState.swordFieldStates,
+              localX,
+              localY,
+              TILE_SIZE,
+            )
+          : null;
+      if (swordFieldTarget) {
+        showDialoguePages(SWORD_FIELD_WISDOM_REQUIRED_DIALOGUE_PAGES);
+      }
       return;
     }
     console.info(
@@ -2574,6 +2599,18 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   setMobileInputEnabled = (enabled) => mobileControls.setInputEnabled(enabled);
   mobileControls.setWisdomAvailable(false);
 
+  const showDialoguePages = (pages: readonly string[]): void => {
+    introDialogueHud?.destroy();
+    introDialogueHud = new IntroDialogueHud(
+      INTERNAL_WIDTH,
+      INTERNAL_HEIGHT,
+      pages,
+      (bounds) => mobileControls.setDialogueExclusion(bounds),
+    );
+    introDialogueHud.addToStage(app.stage);
+    chatHud?.setSuppressed(true);
+  };
+
   applyLocalRoleUi = (role, wisdomOrbs, showIntroDialogue) => {
     localPlayerRole = role;
     localWisdomOrbs = wisdomOrbs;
@@ -2601,6 +2638,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         contractButtonTexture: assets.contractMapButtonTexture,
         onExpandedChange: (expanded) => {
           mobileControls.setExpandedMinimapVisible(expanded);
+          chatHud?.setSuppressed(
+            expanded || (introDialogueHud?.isVisible() ?? false),
+          );
         },
       },
     );
@@ -2627,13 +2667,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     introDialogueHud?.destroy();
     introDialogueHud = null;
     if (showIntroDialogue) {
-      introDialogueHud = new IntroDialogueHud(
-        INTERNAL_WIDTH,
-        INTERNAL_HEIGHT,
+      showDialoguePages(
         role === 'warden' ? WARDEN_SPAWN_DIALOGUE_PAGES : SURVIVOR_SPAWN_DIALOGUE_PAGES,
-        (bounds) => mobileControls.setDialogueExclusion(bounds),
       );
-      introDialogueHud.addToStage(app.stage);
     }
     chatHud?.setSuppressed(showIntroDialogue);
   };
@@ -2806,7 +2842,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       minimap.update(localX, localY, otherPlayerPositions);
     }
     introDialogueHud?.update(dtSeconds);
-    chatHud?.setSuppressed(introDialogueHud?.isVisible() ?? false);
+    chatHud?.setSuppressed(
+      (introDialogueHud?.isVisible() ?? false) || (minimap?.isExpanded() ?? false),
+    );
     wisdomArrow?.update(dtSeconds, localX, localY);
 
     // ── 4b. Screen shake ────────────────────────────────────────────
@@ -3016,8 +3054,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
 
       if (
-        (localPlayerRole === 'warden' ||
-          (localPlayerRole === 'survivor' && localWisdomOrbs > 0)) &&
+        (localPlayerRole === 'warden' || localPlayerRole === 'survivor') &&
         currentLayout &&
         latestServerState
       ) {
@@ -3196,16 +3233,25 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── Connect to Server ─────────────────────────────────────────────────
   const envUrl = import.meta.env.VITE_SERVER_URL;
-  // In development, connect straight to the game server. This avoids routing
-  // the long-lived game socket through Vite's HMR server/proxy. uWebSockets is
-  // bound to IPv4, so normalise localhost to IPv4 instead of relying on a
-  // browser's IPv4/IPv6 resolution preference (which differs in Chrome).
-  const devServerHost =
-    window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
-  const defaultWsUrl = import.meta.env.DEV
-    ? `ws://${devServerHost}:9001/ws`
-    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
-  const wsUrl = envUrl || defaultWsUrl;
+  // Use the page origin for the game socket in every environment. Vite proxies
+  // /ws to the local game server during development, so LAN clients need access
+  // only to the same port that already serves the page.
+  const defaultWsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+  let wsUrl = envUrl?.trim() || defaultWsUrl;
+
+  if (envUrl && !['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) {
+    try {
+      const configuredHostname = new URL(envUrl).hostname;
+      if (['localhost', '127.0.0.1', '[::1]'].includes(configuredHostname)) {
+        console.warn(
+          `[Main] Ignoring loopback-only VITE_SERVER_URL on LAN; using ${defaultWsUrl}`,
+        );
+        wsUrl = defaultWsUrl;
+      }
+    } catch {
+      // Let WebSocket report malformed explicit overrides with its normal error.
+    }
+  }
   const displayName = options.displayName;
 
   net.connect(wsUrl, 'default', displayName);
