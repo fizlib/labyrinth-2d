@@ -105,10 +105,12 @@ export interface SwordFieldPlacement {
   tileY: number;
 }
 
-/** Authored ruins/signpost decoration centered on a north-closed T-junction. */
+/** Authored ruins/signpost decoration centered on a north- or south-closed T-junction. */
 export interface TIntersectionDecorationPlacement {
   cellX: number;
   cellY: number;
+  /** The only supported authored variants currently close north or south. */
+  closedDirection: 'north' | 'south';
   /** Top-left tile of the walkable 6×6 intersection cell. */
   tileX: number;
   tileY: number;
@@ -157,7 +159,7 @@ export interface GeneratedMazeLayout {
   swamps: SwampPlacement[];
   /** Role-interactive sword barriers placed in qualifying horizontal passages. */
   swordFields: SwordFieldPlacement[];
-  /** Visual ruins/signpost prefabs spanning free cells around selected north-closed T-junctions. */
+  /** Visual ruins/signpost prefabs spanning free cells around selected T-junctions. */
   tIntersectionDecorations: TIntersectionDecorationPlacement[];
   /** Warden-visible 6x6 cells that can capture survivors when the network fires. */
   trapCells: TrapCellPlacement[];
@@ -701,12 +703,20 @@ const CHEST_RANDOM_SALT = 0x3c6ef017;
 const CHEST_DEAD_END_SELECTION_SALT = 0x9e3779b9;
 const TRAP_CELL_RANDOM_SALT = 0x6d2b79f5;
 const T_INTERSECTION_DECORATION_RANDOM_SALT = 0x243f6a88;
-const T_INTERSECTION_DECORATION_CELL_OFFSETS = [
-  [0, 0],
-  [-1, 0],
-  [1, 0],
-  [0, 1],
-] as const;
+const T_INTERSECTION_DECORATION_CELL_OFFSETS = {
+  north: [
+    [0, 0],
+    [-1, 0],
+    [1, 0],
+    [0, 1],
+  ],
+  south: [
+    [0, 0],
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+  ],
+} as const;
 export const TRAP_CELL_DENSITY = 0.06;
 export const MIN_TRAP_CELLS = 6;
 export const MAX_TRAP_CELLS = 10;
@@ -1649,8 +1659,12 @@ function getTIntersectionDecorationRank(
   seed: number,
   cellX: number,
   cellY: number,
+  closedDirection: TIntersectionDecorationPlacement['closedDirection'],
 ): number {
-  let value = seed ^ T_INTERSECTION_DECORATION_RANDOM_SALT;
+  let value =
+    seed ^
+    T_INTERSECTION_DECORATION_RANDOM_SALT ^
+    (closedDirection === 'north' ? 0 : 0x85ebca6b);
   value = Math.imul(value ^ (cellX + 1), 0x45d9f3b);
   value = Math.imul(value ^ (cellY + 1), 0x119de1f3);
   value ^= value >>> 16;
@@ -1658,8 +1672,9 @@ function getTIntersectionDecorationRank(
 }
 
 /**
- * Select compatible E/S/W T-junctions for the exact north-closed style-editor
- * prefab. The center plus its west, east, and south cells must all be free.
+ * Select compatible north- or south-closed T-junctions for their exact
+ * style-editor prefabs. The center, lateral cells, and open vertical cell must
+ * all be free of solid authored occupants.
  */
 export function computeTIntersectionDecorationPlacements(
   data: number[],
@@ -1713,9 +1728,16 @@ export function computeTIntersectionDecorationPlacements(
         cellY < GRID_CELLS - 1 && areCellsConnected(data, cellX, cellY, cellX, cellY + 1);
       const westOpen =
         cellX > 0 && areCellsConnected(data, cellX, cellY, cellX - 1, cellY);
-      if (northOpen || !eastOpen || !southOpen || !westOpen) continue;
+      const closedDirection =
+        !northOpen && eastOpen && southOpen && westOpen
+          ? 'north'
+          : northOpen && eastOpen && !southOpen && westOpen
+            ? 'south'
+            : null;
+      if (!closedDirection) continue;
+      const footprintOffsets = T_INTERSECTION_DECORATION_CELL_OFFSETS[closedDirection];
       if (
-        T_INTERSECTION_DECORATION_CELL_OFFSETS.some(([offsetX, offsetY]) => {
+        footprintOffsets.some(([offsetX, offsetY]) => {
           const footprintCellX = cellX + offsetX;
           const footprintCellY = cellY + offsetY;
           return (
@@ -1731,9 +1753,10 @@ export function computeTIntersectionDecorationPlacements(
       candidates.push({
         cellX,
         cellY,
+        closedDirection,
         tileX: tx,
         tileY: ty,
-        rank: getTIntersectionDecorationRank(seed, cellX, cellY),
+        rank: getTIntersectionDecorationRank(seed, cellX, cellY, closedDirection),
       });
     }
   }
@@ -1752,8 +1775,10 @@ export function computeTIntersectionDecorationPlacements(
 
   for (const candidate of candidates) {
     if (selected.length >= desiredCount) break;
+    const footprintOffsets =
+      T_INTERSECTION_DECORATION_CELL_OFFSETS[candidate.closedDirection];
     if (
-      T_INTERSECTION_DECORATION_CELL_OFFSETS.some(([offsetX, offsetY]) =>
+      footprintOffsets.some(([offsetX, offsetY]) =>
         selectedFootprintCells.has(
           `${candidate.cellX + offsetX},${candidate.cellY + offsetY}`,
         ),
@@ -1762,7 +1787,7 @@ export function computeTIntersectionDecorationPlacements(
       continue;
     }
     selected.push(candidate);
-    for (const [offsetX, offsetY] of T_INTERSECTION_DECORATION_CELL_OFFSETS) {
+    for (const [offsetX, offsetY] of footprintOffsets) {
       selectedFootprintCells.add(
         `${candidate.cellX + offsetX},${candidate.cellY + offsetY}`,
       );

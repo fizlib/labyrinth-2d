@@ -58,7 +58,7 @@ function connectionsForCell(map, cellX, cellY) {
     .join('');
 }
 
-test('decorative ruins select deterministic unoccupied north-closed T-junctions', () => {
+test('decorative ruins select deterministic unoccupied north- and south-closed T-junctions', () => {
   assert.equal(T_INTERSECTION_DECORATION_DENSITY, 0.85);
 
   for (const seed of [1, 2, 44, 99, 123456]) {
@@ -115,14 +115,19 @@ test('decorative ruins select deterministic unoccupied north-closed T-junctions'
       [0, 1],
     ];
     for (const placement of first.tIntersectionDecorations) {
+      const expectedConnections = placement.closedDirection === 'north' ? '-ESW' : 'NE-W';
       assert.equal(
         connectionsForCell(first.map, placement.cellX, placement.cellY),
-        '-ESW',
+        expectedConnections,
       );
       assert.equal(placement.tileX, WALL_WIDTH + placement.cellX * CELL_STEP_X);
       assert.equal(placement.tileY, WALL_HEIGHT + placement.cellY * CELL_STEP_Y);
 
-      for (const [offsetX, offsetY] of footprintOffsets) {
+      const orientedFootprintOffsets = footprintOffsets.map(([offsetX, offsetY]) => [
+        offsetX,
+        placement.closedDirection === 'south' ? -offsetY : offsetY,
+      ]);
+      for (const [offsetX, offsetY] of orientedFootprintOffsets) {
         const footprintCellX = placement.cellX + offsetX;
         const footprintCellY = placement.cellY + offsetY;
         const footprintKey = `${footprintCellX},${footprintCellY}`;
@@ -159,8 +164,8 @@ test('decorative ruins select deterministic unoccupied north-closed T-junctions'
   );
 });
 
-test('the expanded prefab is skipped when any neighboring footprint cell is occupied', () => {
-  const seed = 44;
+test('either expanded prefab is skipped when any neighboring footprint cell is occupied', () => {
+  const seed = 1;
   const layout = generateMazeLayout(seed, 10, 3);
   const portal = computePortalPosition(
     layout.map.data,
@@ -171,31 +176,47 @@ test('the expanded prefab is skipped when any neighboring footprint cell is occu
     layout.swordFields,
   );
 
-  for (const [cellX, cellY] of [
-    [3, 6],
-    [5, 6],
-    [4, 7],
-  ]) {
-    const placements = computeTIntersectionDecorationPlacements(
-      layout.map.data,
-      layout.spawnPoints,
-      [...layout.gates, { cellX, cellY }],
-      layout.bridges,
-      layout.swamps,
-      layout.swordFields,
-      layout.chestDeadEnds,
-      portal,
-      seed,
+  for (const closedDirection of ['north', 'south']) {
+    const candidate = layout.tIntersectionDecorations.find(
+      (placement) => placement.closedDirection === closedDirection,
     );
-    assert.equal(
-      placements.some((placement) => placement.cellX === 4 && placement.cellY === 6),
-      false,
-      `occupied footprint cell ${cellX},${cellY} must suppress the whole prefab`,
-    );
+    assert.ok(candidate, `seed ${seed} must contain a ${closedDirection}-closed fixture`);
+    const neighboringOffsets = [
+      [-1, 0],
+      [1, 0],
+      [0, closedDirection === 'north' ? 1 : -1],
+    ];
+
+    for (const [offsetX, offsetY] of neighboringOffsets) {
+      const occupiedCellX = candidate.cellX + offsetX;
+      const occupiedCellY = candidate.cellY + offsetY;
+      const placements = computeTIntersectionDecorationPlacements(
+        layout.map.data,
+        layout.spawnPoints,
+        [...layout.gates, { cellX: occupiedCellX, cellY: occupiedCellY }],
+        layout.bridges,
+        layout.swamps,
+        layout.swordFields,
+        layout.chestDeadEnds,
+        portal,
+        seed,
+      );
+      assert.equal(
+        placements.some(
+          (placement) =>
+            placement.cellX === candidate.cellX &&
+            placement.cellY === candidate.cellY &&
+            placement.closedDirection === closedDirection,
+        ),
+        false,
+        `occupied ${closedDirection} footprint cell ${occupiedCellX},${occupiedCellY} must suppress the whole prefab`,
+      );
+    }
   }
 });
 
-test('every maze with a valid candidate contains a north-closed decorated T-junction', () => {
+test('every maze with a valid candidate contains a supported decorated T-junction', () => {
+  const seenDirections = new Set();
   for (let seed = 1; seed <= 500; seed++) {
     const layout = generateMazeLayout(seed, 10, 3);
     const portal = computePortalPosition(
@@ -225,35 +246,25 @@ test('every maze with a valid candidate contains a north-closed decorated T-junc
       );
     }
     for (const placement of layout.tIntersectionDecorations) {
+      seenDirections.add(placement.closedDirection);
       assert.equal(
         connectionsForCell(layout.map, placement.cellX, placement.cellY),
-        '-ESW',
+        placement.closedDirection === 'north' ? '-ESW' : 'NE-W',
       );
     }
   }
+  assert.deepEqual([...seenDirections].sort(), ['north', 'south']);
 });
 
-test('all seven authored solid-object colliders block player feet', () => {
+test('both authored orientations use solid-object colliders that block player feet', () => {
   const map = {
     width: 20,
     height: 20,
     tileSize: 16,
     data: new Array(20 * 20).fill(TILE_FLOOR),
   };
-  const placement = { cellX: 0, cellY: 0, tileX: 4, tileY: 4 };
-  const anchorX = placement.tileX * map.tileSize;
-  const anchorY = placement.tileY * map.tileSize;
-  const bounds = getTIntersectionDecorationBounds(placement, map.tileSize);
-
-  assert.deepEqual(
-    bounds.map(({ kind, left, top, right, bottom }) => ({
-      kind,
-      x: left - anchorX,
-      y: top - anchorY,
-      width: right - left + 1,
-      height: bottom - top + 1,
-    })),
-    [
+  const expectedByDirection = {
+    north: [
       { kind: 'signpost', x: 67, y: 22, width: 5, height: 9 },
       { kind: 'bush', x: 45, y: 20, width: 19, height: 12 },
       { kind: 'bush', x: -70, y: 13, width: 19, height: 12 },
@@ -262,26 +273,51 @@ test('all seven authored solid-object colliders block player feet', () => {
       { kind: 'bush', x: 145, y: 66, width: 19, height: 18 },
       { kind: 'rock', x: 69, y: 114, width: 14, height: 14 },
     ],
-  );
+    south: [
+      { kind: 'signpost', x: 71, y: 22, width: 5, height: 9 },
+      { kind: 'bush', x: 102, y: 18, width: 19, height: 12 },
+      { kind: 'bush', x: -63, y: 16, width: 19, height: 12 },
+      { kind: 'bush', x: 11, y: 71, width: 21, height: 12 },
+      { kind: 'bush', x: -47, y: 74, width: 19, height: 12 },
+    ],
+  };
 
-  for (const obstacle of bounds) {
-    assert.equal(
-      isPositionValid(
-        (obstacle.left + obstacle.right) / 2,
-        obstacle.bottom + 1,
-        map,
-        null,
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        undefined,
-        [placement],
-      ),
-      false,
-      `${obstacle.kind} collider must block the player`,
+  for (const closedDirection of ['north', 'south']) {
+    const placement = { cellX: 0, cellY: 0, closedDirection, tileX: 4, tileY: 4 };
+    const anchorX = placement.tileX * map.tileSize;
+    const anchorY = placement.tileY * map.tileSize;
+    const bounds = getTIntersectionDecorationBounds(placement, map.tileSize);
+
+    assert.deepEqual(
+      bounds.map(({ kind, left, top, right, bottom }) => ({
+        kind,
+        x: left - anchorX,
+        y: top - anchorY,
+        width: right - left + 1,
+        height: bottom - top + 1,
+      })),
+      expectedByDirection[closedDirection],
     );
+
+    for (const obstacle of bounds) {
+      assert.equal(
+        isPositionValid(
+          (obstacle.left + obstacle.right) / 2,
+          obstacle.bottom + 1,
+          map,
+          null,
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          undefined,
+          [placement],
+        ),
+        false,
+        `${closedDirection} ${obstacle.kind} collider must block the player`,
+      );
+    }
   }
 });

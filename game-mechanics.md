@@ -28,7 +28,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - The central hub has **4 entrances**.
 - The squads approach the hub through three different entrances, leaving one entrance initially unexplored.
 - The routes and entrances should be visually distinguishable enough for players to describe and discuss them.
-- Compatible north-closed 6x6 T-junctions are decorated at an increased 85% density, with at least one selected whenever any valid candidate exists. The expanded stone-ruin, flower, bush, rock, and signpost composition spans the center plus its west, east, and south cells; all four must be free of solid authored placements, while floor-only trap cells may share the footprint. Its seven authored solid objects use matching client/server collision.
+- Compatible north- and south-closed 6x6 T-junctions are decorated at an 85% density, with at least one selected whenever any valid candidate exists. Each expanded stone-ruin, flower, bush, rock, and signpost composition spans the center, west, east, and open vertical cell; all four must be free of solid authored placements, while floor-only trap cells may share the footprint. Props use orientation-specific matching client/server collision.
 
 ## Wardstones
 

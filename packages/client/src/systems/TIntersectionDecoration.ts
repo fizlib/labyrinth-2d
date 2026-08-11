@@ -4,6 +4,7 @@ import {
   T_INTERSECTION_DECORATION_SPRITES,
   getTIntersectionDecorationAssetPath,
 } from './TIntersectionDecorationLayout';
+import { SOUTH_CLOSED_T_INTERSECTION_DECORATION_SPRITES } from './TIntersectionDecorationSouthLayout';
 
 const AUTHORING_TILE_SIZE = 16;
 
@@ -18,6 +19,10 @@ export function addTIntersectionDecorations(
   const entities: Container[] = [];
 
   for (const placement of placements) {
+    const spriteSpecs =
+      placement.closedDirection === 'south'
+        ? SOUTH_CLOSED_T_INTERSECTION_DECORATION_SPRITES
+        : T_INTERSECTION_DECORATION_SPRITES;
     const anchorX = placement.tileX * tileSize;
     const anchorY = placement.tileY * tileSize;
     const ground = new Container();
@@ -27,7 +32,7 @@ export function addTIntersectionDecorations(
     ground.zIndex = 0;
     const entityGroups = new Map<string, Container>();
 
-    for (const spec of T_INTERSECTION_DECORATION_SPRITES) {
+    for (const spec of spriteSpecs) {
       const texture = textures.get(getTIntersectionDecorationAssetPath(spec.asset));
       if (!texture) continue;
 
