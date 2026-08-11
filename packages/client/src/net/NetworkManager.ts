@@ -11,6 +11,7 @@ import {
   MessageType,
   DEFAULT_ROOM_ID,
   type GameState,
+  type MatchResultPlayer,
   type PlayerRole,
   type WisdomOrbHint,
   type JoinRoomMessage,
@@ -71,6 +72,7 @@ export interface NetworkCallbacks {
     escapedCount: number,
     escapeThreshold: number,
     remainingMs: number,
+    finalRoster: MatchResultPlayer[],
   ) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
@@ -307,6 +309,7 @@ export class NetworkManager {
           msg.escapedCount,
           msg.escapeThreshold,
           msg.remainingMs,
+          msg.finalRoster,
         );
         break;
 

@@ -97,7 +97,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `TRAP_ACTIVATION_RESULT` | Private result used for the activating Warden's empty-room feedback |
 | `CHAT_MESSAGE` | Transient message with the sender's public squad ID, delivered to players within 10 tiles at send time |
 | `PLAYER_ESCAPED` | Room-wide authoritative escape notification with portal coordinates and current victory progress |
-| `MATCH_ENDED` | Immutable survivor/warden result with final escape progress and remaining time |
+| `MATCH_ENDED` | Immutable survivor/warden result with final escape progress, remaining time, and the role-revealing final roster |
 | `ERROR` | Report room-join or protocol errors |
 
 ### Shared State Contracts
@@ -131,7 +131,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `tick` | `number` | Authoritative simulation tick counter |
-| `match` | `MatchState` | Running/ended status, remaining time, escape progress, threshold, and winner |
+| `match` | `MatchState` | Running/ended status, remaining time, escape progress, threshold, winner, and the role-revealing final roster after completion |
 | `players` | `PlayerInfo[]` | All connected players in the room |
 | `runestones` | `RunestoneInfo[]` | Three runestones with activation state |
 | `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
@@ -184,7 +184,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - The first player joining starts a server wall-clock deadline of `600000ms`; snapshots expose authoritative remaining time and the client interpolates the top-center `MM:SS` display between ticks.
 - A full room requires five survivor escapes. Underfilled rooms use `max(1, ceil(connected survivors × 5 / 7))`; connected escaped spectators remain in that population, and joins, leaves, and debug role changes recalculate it.
 - Reaching the threshold, or having every currently connected survivor escaped, ends the match immediately for survivors. Reaching the deadline below the threshold ends it for wardens, including action requests that race the next server tick.
-- Ending is immutable: queued input is cleared, the server loop stops, gameplay/chat requests are rejected, a final snapshot is broadcast, and clients freeze under a persistent result banner. Late joiners reconstruct that state from `GameState.match`.
+- Ending is immutable: queued input is cleared, the server loop stops, gameplay/chat requests are rejected, a final snapshot is broadcast, and clients freeze under a persistent result panel. The panel reveals Survivor and Warden rosters only after completion, and late joiners reconstruct the same roster from `GameState.match`.
 
 ### Hidden Roles and Wisdom Orbs
 

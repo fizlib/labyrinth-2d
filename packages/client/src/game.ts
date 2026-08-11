@@ -1495,6 +1495,8 @@ export interface GameLaunchOptions {
   displayName: string;
 }
 
+const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
+
 async function initializeGame(options: GameLaunchOptions): Promise<void> {
   startLoadingTheme();
   updateLoadingProgress(0.06, 'Lighting the first torch…');
@@ -1547,7 +1549,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   playerNameTagLayer.sortableChildren = true;
   app.stage.addChild(playerNameTagLayer);
 
-  const matchHud = new MatchHud(INTERNAL_WIDTH, INTERNAL_HEIGHT);
+  const matchHud = new MatchHud(INTERNAL_WIDTH, INTERNAL_HEIGHT, {
+    onPlayAgain: () => {
+      window.sessionStorage.setItem(PLAY_AGAIN_STORAGE_KEY, '1');
+      window.location.reload();
+    },
+    onExit: () => window.location.reload(),
+  });
   matchHud.addToStage(app.stage);
 
   let mapPixelW = MAZE_WIDTH * TILE_SIZE;
@@ -2568,7 +2576,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       );
     },
 
-    onMatchEnded: (winner, escapedCount, escapeThreshold, remainingMs) => {
+    onMatchEnded: (
+      winner,
+      escapedCount,
+      escapeThreshold,
+      remainingMs,
+      finalRoster,
+    ) => {
       resetAllInput();
       pendingInputs = [];
       minimap?.closeExpanded();
@@ -2584,6 +2598,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         escapedCount,
         escapeThreshold,
         winner,
+        finalRoster,
       });
       console.info(
         `[Main] Match ended: ${winner} win (${escapedCount}/${escapeThreshold})`,

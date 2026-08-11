@@ -85,6 +85,19 @@ test('only nearby survivors can escape an active portal and the fifth ends a ful
     sockets[0].sent.filter((message) => message.type === 'PLAYER_ESCAPED').length,
     5,
   );
+  const endedMessage = sockets[0].sent.findLast(
+    (message) => message.type === 'MATCH_ENDED',
+  );
+  assert.ok(endedMessage);
+  assert.equal(endedMessage.finalRoster.length, 9);
+  assert.equal(
+    endedMessage.finalRoster.filter((player) => player.role === 'survivor').length,
+    7,
+  );
+  assert.equal(
+    endedMessage.finalRoster.filter((player) => player.role === 'warden').length,
+    2,
+  );
 
   room.handleEscapePortal(survivors[5].id, { type: 'ESCAPE_PORTAL' });
   assert.equal(room.state.match.escapedCount, 5, 'ended matches reject later escapes');
@@ -142,6 +155,19 @@ test('an action racing an expired deadline resolves as a warden win', (t) => {
   assert.equal(room.state.match.status, 'ended');
   assert.equal(room.state.match.winner, 'wardens');
   assert.equal(room.state.match.remainingMs, 0);
+
+  const finalRoster = structuredClone(room.state.match.finalRoster);
+  const lateSocket = new FakeSocket('late-player');
+  room.addPlayer(lateSocket);
+  const joinedMessage = lateSocket.sent.find(
+    (message) => message.type === 'ROOM_JOINED',
+  );
+  assert.ok(joinedMessage);
+  assert.deepEqual(
+    joinedMessage.gameState.match.finalRoster,
+    finalRoster,
+    'late joiners receive the immutable role reveal from match completion',
+  );
 });
 
 test('debug timer changes the authoritative deadline and zero triggers timeout', (t) => {

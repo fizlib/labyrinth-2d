@@ -64,7 +64,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - Wardens do not count toward the escape total because they cannot escape.
 - This threshold allows up to two survivors to remain trapped without causing the entire survivor side to lose.
 - Escaped survivors cannot move, act, or use proximity chat, but continue to receive global system announcements.
-- When either side wins, simulation and gameplay input freeze and every player sees the result banner.
+- When either side wins, simulation and gameplay input freeze and every player sees a centered result panel that reveals the final Survivor and Warden rosters.
 
 ## Wisdom orbs
 

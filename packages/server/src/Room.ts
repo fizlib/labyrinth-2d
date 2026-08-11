@@ -451,6 +451,7 @@ export class Room {
         escapedCount: 0,
         escapeThreshold: 1,
         winner: null,
+        finalRoster: null,
       },
       players: [],
       runestones: this.runestones,
@@ -895,6 +896,7 @@ export class Room {
     this.matchEndsAtMs = now + MATCH_DURATION_MS;
     this.state.match.status = 'running';
     this.state.match.winner = null;
+    this.state.match.finalRoster = null;
     this.state.match.remainingMs = MATCH_DURATION_MS;
     this.syncMatchCounts();
     console.info(`[Room:${this.id}] Match started; deadline in 10 minutes`);
@@ -956,6 +958,12 @@ export class Room {
     this.refreshMatchTime(now);
     this.state.match.status = 'ended';
     this.state.match.winner = winner;
+    this.state.match.finalRoster = this.state.players.map((player) => ({
+      playerId: player.id,
+      displayName: player.displayName,
+      role: player.role,
+      escaped: player.escaped,
+    }));
     for (const player of this.state.players) this.clearQueuedInputs(player);
 
     const finalUpdate: TickUpdateMessage = {
@@ -970,6 +978,7 @@ export class Room {
       escapedCount: this.state.match.escapedCount,
       escapeThreshold: this.state.match.escapeThreshold,
       remainingMs: this.state.match.remainingMs,
+      finalRoster: this.state.match.finalRoster.map((player) => ({ ...player })),
     };
     this.broadcast(endedMessage);
     this.stopLoop();
@@ -2272,7 +2281,10 @@ export class Room {
     this.refreshMatchTime();
     return {
       tick: this.state.tick,
-      match: { ...this.state.match },
+      match: {
+        ...this.state.match,
+        finalRoster: this.state.match.finalRoster?.map((player) => ({ ...player })) ?? null,
+      },
       players: this.state.players.map(toPublicPlayerInfo),
       runestones: this.runestones.map((r) => ({ ...r })),
       portal: this.portalPosition ? { ...this.portalPosition } : null,

@@ -16,6 +16,8 @@ import {
   updateGuestProfile,
 } from './auth/guest';
 
+const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
+
 type AppView =
   | 'restoring'
   | 'auth'
@@ -414,6 +416,11 @@ class AppController {
     document.querySelector<HTMLButtonElement>('#sign-out')?.addEventListener('click', () => {
       void this.signOut();
     });
+
+    if (window.sessionStorage.getItem(PLAY_AGAIN_STORAGE_KEY) === '1') {
+      window.sessionStorage.removeItem(PLAY_AGAIN_STORAGE_KEY);
+      window.setTimeout(() => void this.launchGame(), 0);
+    }
   }
 
   private renderProfile(): void {

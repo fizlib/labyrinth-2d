@@ -637,6 +637,7 @@ export interface MatchEndedMessage {
   escapedCount: number;
   escapeThreshold: number;
   remainingMs: number;
+  finalRoster: MatchResultPlayer[];
 }
 
 // ── Runestone State ─────────────────────────────────────────────────────────
@@ -679,6 +680,14 @@ export interface ChestState {
 export type MatchStatus = 'waiting' | 'running' | 'ended';
 export type MatchWinner = 'survivors' | 'wardens';
 
+/** Public role reveal captured once, when the match becomes immutable. */
+export interface MatchResultPlayer {
+  playerId: string;
+  displayName: string;
+  role: PlayerRole;
+  escaped: boolean;
+}
+
 export interface MatchState {
   status: MatchStatus;
   /** Authoritative time remaining when this snapshot was produced. */
@@ -686,6 +695,8 @@ export interface MatchState {
   escapedCount: number;
   escapeThreshold: number;
   winner: MatchWinner | null;
+  /** Null during play so hidden roles are revealed only after match completion. */
+  finalRoster: MatchResultPlayer[] | null;
 }
 
 export interface GameState {
