@@ -86,6 +86,8 @@ const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment 
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
 const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot center
 const COL_TRAP: readonly number[] = [224, 37, 55, 255]; // warden-only trap network
+const COL_LOCAL_PLAYER = 0xffd43b; // warm yellow
+const COL_OTHER_PLAYER = 0x5acde0; // bright cyan map accent, visible on grass
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -101,6 +103,11 @@ export interface MinimapOptions {
   onExpandedChange?: (expanded: boolean) => void;
 }
 
+export interface MinimapPlayerPosition {
+  x: number;
+  y: number;
+}
+
 export class Minimap {
   // ── PixiJS display objects ──────────────────────────────────────────────
   private container: Container;
@@ -111,6 +118,9 @@ export class Minimap {
   private expandedOverlay: Container | null = null;
   private expandedTexture: Texture | null = null;
   private expandedPlayerMarker: Graphics | null = null;
+  private expandedOtherPlayersContainer: Container | null = null;
+  private compactOtherPlayerMarkers: Graphics[] = [];
+  private expandedOtherPlayerMarkers: Graphics[] = [];
   private expandedPortalMarker: Graphics | null = null;
   private expandedMapScale = 1;
 
@@ -254,11 +264,8 @@ export class Minimap {
     this.mapContainer.addChild(this.sprite);
     this.compactContainer.addChild(this.mapContainer);
 
-    // ── Player Icon (Overlayed, fixed in the center) ───────────────────
-    const playerMarker = new Graphics();
-    playerMarker.circle(0, 0, 2); // Smaller radius (was 3)
-    playerMarker.fill({ color: 0xffcc00 }); // Vibrant Gold
-    playerMarker.stroke({ color: 0x884400, width: 1 }); // Deep outline
+    // ── Player pixel (overlayed, fixed in the center) ──────────────────
+    const playerMarker = this.createPlayerPixel(COL_LOCAL_PLAYER);
     playerMarker.x = MINIMAP_PADDING + MINIMAP_SIZE / 2;
     playerMarker.y = MINIMAP_PADDING + MINIMAP_SIZE / 2;
     this.compactContainer.addChild(playerMarker);
@@ -337,7 +344,11 @@ export class Minimap {
    * Call every frame with the local player's precise pixel position.
    * Handles both optimized CPU fog updates and GPU smooth scrolling.
    */
-  update(playerPixelX: number, playerPixelY: number): void {
+  update(
+    playerPixelX: number,
+    playerPixelY: number,
+    otherPlayers: readonly MinimapPlayerPosition[] = [],
+  ): void {
     const ts = this.mapData.tileSize;
     const ptx = Math.floor(playerPixelX / ts);
     const pty = Math.floor(playerPixelY / ts);
@@ -368,11 +379,21 @@ export class Minimap {
     this.sprite.x = viewportCenterX - spriteCenterPixelX;
     this.sprite.y = viewportCenterY - spriteCenterPixelY;
 
+    this.updateOtherPlayerMarkers(
+      playerPixelX,
+      playerPixelY,
+      otherPlayers,
+      viewportCenterX,
+      viewportCenterY,
+    );
+
     if (this.expandedPlayerMarker) {
-      this.expandedPlayerMarker.x =
-        EXPANDED_PADDING + (playerPixelX / this.mapData.tileSize) * this.expandedMapScale;
-      this.expandedPlayerMarker.y =
-        EXPANDED_PADDING + (playerPixelY / this.mapData.tileSize) * this.expandedMapScale;
+      this.expandedPlayerMarker.x = Math.round(
+        EXPANDED_PADDING + (playerPixelX / this.mapData.tileSize) * this.expandedMapScale,
+      );
+      this.expandedPlayerMarker.y = Math.round(
+        EXPANDED_PADDING + (playerPixelY / this.mapData.tileSize) * this.expandedMapScale,
+      );
     }
   }
 
@@ -634,10 +655,10 @@ export class Minimap {
     panel.addChild(this.expandedPortalMarker);
     this.updateExpandedPortalMarker();
 
-    this.expandedPlayerMarker = new Graphics();
-    this.expandedPlayerMarker.circle(0, 0, 2);
-    this.expandedPlayerMarker.fill({ color: 0xffd43b });
-    this.expandedPlayerMarker.stroke({ color: 0x6b2f00, alpha: 1, width: 1 });
+    this.expandedOtherPlayersContainer = new Container();
+    panel.addChild(this.expandedOtherPlayersContainer);
+
+    this.expandedPlayerMarker = this.createPlayerPixel(COL_LOCAL_PLAYER);
     panel.addChild(this.expandedPlayerMarker);
 
     const contractButton = this.createMapToggleButton(
@@ -690,6 +711,73 @@ export class Minimap {
     }, 0);
   }
 
+  /** Create one exact screen pixel with no outline or antialiased edge shades. */
+  private createPlayerPixel(color: number): Graphics {
+    const marker = new Graphics();
+    marker.rect(0, 0, 1, 1);
+    marker.fill({ color });
+    return marker;
+  }
+
+  /** Keep remote-player pixels aligned to the compact and expanded map grids. */
+  private updateOtherPlayerMarkers(
+    playerPixelX: number,
+    playerPixelY: number,
+    otherPlayers: readonly MinimapPlayerPosition[],
+    viewportCenterX: number,
+    viewportCenterY: number,
+  ): void {
+    const tileSize = this.mapData.tileSize;
+
+    for (let index = 0; index < otherPlayers.length; index++) {
+      const otherPlayer = otherPlayers[index];
+
+      let compactMarker = this.compactOtherPlayerMarkers[index];
+      if (!compactMarker) {
+        compactMarker = this.createPlayerPixel(COL_OTHER_PLAYER);
+        this.compactOtherPlayerMarkers.push(compactMarker);
+        this.mapContainer.addChild(compactMarker);
+      }
+      compactMarker.visible = true;
+      compactMarker.x = Math.round(
+        viewportCenterX + ((otherPlayer.x - playerPixelX) / tileSize) * SCALE,
+      );
+      compactMarker.y = Math.round(
+        viewportCenterY + ((otherPlayer.y - playerPixelY) / tileSize) * SCALE,
+      );
+
+      if (this.expandedOtherPlayersContainer) {
+        let expandedMarker = this.expandedOtherPlayerMarkers[index];
+        if (!expandedMarker) {
+          expandedMarker = this.createPlayerPixel(COL_OTHER_PLAYER);
+          this.expandedOtherPlayerMarkers.push(expandedMarker);
+          this.expandedOtherPlayersContainer.addChild(expandedMarker);
+        }
+        expandedMarker.visible = true;
+        expandedMarker.x = Math.round(
+          EXPANDED_PADDING + (otherPlayer.x / tileSize) * this.expandedMapScale,
+        );
+        expandedMarker.y = Math.round(
+          EXPANDED_PADDING + (otherPlayer.y / tileSize) * this.expandedMapScale,
+        );
+      }
+    }
+
+    for (
+      let index = otherPlayers.length;
+      index < this.compactOtherPlayerMarkers.length;
+      index++
+    ) {
+      this.compactOtherPlayerMarkers[index].visible = false;
+    }
+    for (
+      let index = otherPlayers.length;
+      index < this.expandedOtherPlayerMarkers.length;
+      index++
+    ) {
+      this.expandedOtherPlayerMarkers[index].visible = false;
+    }
+  }
   /** Wooden corner button with outward expand or inward contract arrows. */
   private createMapToggleButton(
     contract: boolean,

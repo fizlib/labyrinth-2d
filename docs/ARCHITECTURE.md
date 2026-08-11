@@ -352,6 +352,7 @@ The client currently has multiple UI subsystems, not just the minimap:
   - screen-space HUD in the bottom-right corner
   - player-centered exploration view with fog of war
   - supports portal display from the beginning of the match
+  - renders the local player as one yellow pixel and other connected players as contrasting cyan pixels in both compact and expanded views
   - renders each revealed treasure dead end as a small chest glyph; wardens see every chest on the expanded whole-maze view
   - renders every revealed sword field as three downward-pointing sword glyphs; wardens see every field on the expanded whole-maze view
   - wardens receive a solid red frame with no fog-of-war and a wooden corner expand button; the fixed whole-maze view is scaled to fit the internal screen, marks the portal and the local warden's position, and provides a matching contract button

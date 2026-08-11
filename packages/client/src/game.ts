@@ -2754,7 +2754,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
 
     // ── 4. Minimap ────────────────────────────────────────────────────
-    if (minimap) minimap.update(localX, localY);
+    if (minimap) {
+      const otherPlayerPositions: Array<{ x: number; y: number }> = [];
+      for (const [playerId, data] of playerSprites) {
+        if (playerId === net.playerId) continue;
+        otherPlayerPositions.push({ x: data.container.x, y: data.container.y });
+      }
+      minimap.update(localX, localY, otherPlayerPositions);
+    }
     introDialogueHud?.update(dtSeconds);
     wisdomArrow?.update(dtSeconds, localX, localY);
 
