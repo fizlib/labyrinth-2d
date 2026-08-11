@@ -17,6 +17,15 @@ export interface ProximityChatMessage {
   text: string;
 }
 
+interface SystemChatMessage {
+  system: true;
+  text: string;
+}
+
+type ChatHistoryMessage =
+  | (ProximityChatMessage & { system: false })
+  | SystemChatMessage;
+
 interface ProximityChatHudOptions {
   parent: HTMLElement;
   canvas: HTMLCanvasElement;
@@ -33,7 +42,7 @@ export class ProximityChatHud {
   private readonly input: HTMLInputElement;
   private readonly counter: HTMLSpanElement;
   private readonly prompt: HTMLButtonElement;
-  private readonly messages: ProximityChatMessage[] = [];
+  private readonly messages: ChatHistoryMessage[] = [];
   private readonly resizeObserver: ResizeObserver | null;
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
@@ -148,6 +157,15 @@ export class ProximityChatHud {
   }
 
   addMessage(message: ProximityChatMessage): void {
+    this.addHistoryMessage({ ...message, system: false });
+  }
+
+  /** Add a server-triggered room-wide notice without attributing it to a player. */
+  addSystemMessage(text: string): void {
+    this.addHistoryMessage({ system: true, text });
+  }
+
+  private addHistoryMessage(message: ChatHistoryMessage): void {
     this.messages.push(message);
     if (this.messages.length > CHAT_HISTORY_LIMIT) this.messages.shift();
     this.historyVisible = true;
@@ -248,6 +266,12 @@ export class ProximityChatHud {
     const entries = this.messages.map((message) => {
       const entry = document.createElement('div');
       entry.className = 'proximity-chat__message';
+
+      if (message.system) {
+        entry.classList.add('proximity-chat__message--system');
+        entry.textContent = message.text;
+        return entry;
+      }
 
       const name = document.createElement('span');
       name.className = 'proximity-chat__name';

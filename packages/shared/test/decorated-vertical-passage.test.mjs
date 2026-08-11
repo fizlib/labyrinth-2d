@@ -21,7 +21,7 @@ function occupy(set, cellX, cellY) {
 }
 
 test('decorated vertical passages deterministically reserve otherwise empty cell pairs', () => {
-  assert.equal(DECORATED_VERTICAL_PASSAGE_DENSITY, 0.08);
+  assert.equal(DECORATED_VERTICAL_PASSAGE_DENSITY, 0.16);
 
   for (const seed of [1, 2, 44, 99, 123456]) {
     const first = generateMazeLayout(seed, 10, 3);

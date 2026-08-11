@@ -160,6 +160,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - The server uses current authoritative player positions to deliver each message to the sender and every player within `160` world pixels (10 tiles). Walls do not block chat.
 - Chat events are transient: they are not stored in `GameState` and are not replayed to late joiners.
 - The client keeps only the latest four locally received messages. They fade after ten inactive seconds and return when the player reopens chat.
+- The room-wide `ALL_RUNESTONES_ACTIVATED` event adds a gold system message to every connected player's chat announcing that the escape portal is open.
 
 ### Runestones and Portal Flow
 
@@ -249,7 +250,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 12. Exclude actual safe player spawn cells, identify every dead end in all four orientations, deterministically select 60% of the eligible cells, then attach each cell's weighted one-, two-, or three-chest direction-mapped prefab. Portal placement excludes those reserved cells.
 13. After portal and sword-field placement, choose 6-10 deterministic trap cells from the remaining complete 6x6 walkable cells, preferring at least one cell of spacing between highlights.
 14. From the remaining north-closed E/S/W and south-closed N/E/W T-junctions, deterministically select up to 85% for the matching authored stone-ruin, signpost, and vegetation decoration, always selecting at least one whenever a compatible footprint exists. Each prefab reserves its center, west, east, and open vertical cell and is skipped when any is occupied by an objective, solid authored obstacle, spawn, hub, portal platform, or another selected prefab; floor-only trap cells may overlap it.
-15. Deterministically decorate 8% of the remaining open north-south cell boundaries, always selecting at least one when a compatible pair exists. Each exact style-editor (22) prefab reserves both adjacent 6x6 cells and cannot overlap any other generated cell occupant, trap, or decorated T-junction footprint.
+15. Deterministically decorate 16% of the remaining open north-south cell boundaries, always selecting at least one when a compatible pair exists. Each exact style-editor (22) prefab reserves both adjacent 6x6 cells and cannot overlap any other generated cell occupant, trap, or decorated T-junction footprint.
 
 ### Spawns and Objective Placement
 

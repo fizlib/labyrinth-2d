@@ -80,6 +80,9 @@ const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
   'Together, activate the three ancient runes to unlock the portal and escape… before the Maze claims you forever.',
 ];
 
+const WARDSTONES_ACTIVATED_CHAT_MESSAGE =
+  'All wardstones have been activated. The escape portal is now open!';
+
 const WARDEN_SPAWN_DIALOGUE_PAGES = [
   'You are a Warden. Keep your role hidden from the survivors.',
   'Your goal is to delay and misdirect the survivors until time runs out. Use your complete map to lead them astray.',
@@ -2286,6 +2289,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       console.info(
         `[Main] All runestones activated! Portal at (${Math.round(portalX)}, ${Math.round(portalY)})`,
       );
+      chatHud?.addSystemMessage(WARDSTONES_ACTIVATED_CHAT_MESSAGE);
       // Start screen shake — portal will light up after it completes
       shakeTimeRemaining = SHAKE_DURATION;
       pendingPortalPos = { x: portalX, y: portalY };

@@ -1167,6 +1167,13 @@ canvas {
   overflow-wrap: anywhere;
 }
 
+.proximity-chat__message--system {
+  color: #ffe06a;
+  text-shadow:
+    calc(1px * var(--chat-scale)) calc(1px * var(--chat-scale)) 0 #07100c,
+    0 calc(1px * var(--chat-scale)) 0 #07100c;
+}
+
 .proximity-chat__name {
   text-shadow:
     calc(1px * var(--chat-scale)) calc(1px * var(--chat-scale)) 0 #07100c,
