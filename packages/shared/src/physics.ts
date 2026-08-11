@@ -18,6 +18,7 @@ import {
   type ChestDeadEndVariant,
   type SwampPlacement,
   type SwordFieldPlacement,
+  type TIntersectionDecorationPlacement,
   type TileMapData,
 } from './maps/level1.js';
 import {
@@ -76,7 +77,21 @@ export interface ChestDeadEndCollisionBounds extends PortalBounds {
   kind: 'backdrop' | 'rock' | 'chest';
 }
 
+export interface TIntersectionDecorationCollisionBounds extends PortalBounds {
+  kind: 'signpost' | 'bush' | 'rock';
+}
+
 const BRIDGE_AUTHORING_TILE_SIZE = 16;
+
+const T_INTERSECTION_DECORATION_COLLIDER_SPECS = [
+  { kind: 'signpost', x: 67, y: 22, width: 5, height: 9 },
+  { kind: 'bush', x: 45, y: 20, width: 19, height: 12 },
+  { kind: 'bush', x: -70, y: 13, width: 19, height: 12 },
+  { kind: 'bush', x: -46, y: 69, width: 21, height: 12 },
+  { kind: 'bush', x: 8, y: 144, width: 21, height: 12 },
+  { kind: 'bush', x: 145, y: 66, width: 19, height: 18 },
+  { kind: 'rock', x: 69, y: 114, width: 14, height: 14 },
+] as const;
 
 /** Pixel radius within which a player may open a treasure chest. */
 export const CHEST_INTERACTION_RANGE = 28;
@@ -302,6 +317,24 @@ export function getChestDeadEndBounds(
   }));
 }
 
+/** Exact solid-object rectangles exported with the expanded T-junction prefab. */
+export function getTIntersectionDecorationBounds(
+  placement: TIntersectionDecorationPlacement,
+  tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
+): TIntersectionDecorationCollisionBounds[] {
+  const scale = tileSize / BRIDGE_AUTHORING_TILE_SIZE;
+  const anchorX = placement.tileX * tileSize;
+  const anchorY = placement.tileY * tileSize;
+
+  return T_INTERSECTION_DECORATION_COLLIDER_SPECS.map((spec) => ({
+    kind: spec.kind,
+    left: anchorX + spec.x * scale,
+    top: anchorY + spec.y * scale,
+    right: anchorX + (spec.x + spec.width) * scale - 1,
+    bottom: anchorY + (spec.y + spec.height) * scale - 1,
+  }));
+}
+
 /** Authored chest interaction point used by matching client and server checks. */
 export function getChestInteractionPoint(
   placement: ChestDeadEndPlacement,
@@ -428,6 +461,7 @@ export function isPositionValid(
   swordFieldStates: readonly SwordFieldState[] = [],
   cages: readonly CageState[] = [],
   movingPlayerId?: string,
+  tIntersectionDecorations: readonly TIntersectionDecorationPlacement[] = [],
 ): boolean {
   const ts = map.tileSize;
 
@@ -480,6 +514,12 @@ export function isPositionValid(
     );
     for (const bounds of getSwordFieldCollisionBounds(swordFields[swordFieldIndex], ts)) {
       if (bounds.kind === 'barrier' && state?.cleared) continue;
+      if (intersectsBounds(left, top, right, bottom, bounds)) return false;
+    }
+  }
+
+  for (const decoration of tIntersectionDecorations) {
+    for (const bounds of getTIntersectionDecorationBounds(decoration, ts)) {
       if (intersectsBounds(left, top, right, bottom, bounds)) return false;
     }
   }
@@ -542,6 +582,7 @@ export function applyInputWithCollision(
   swordFieldStates: readonly SwordFieldState[] = [],
   cages: readonly CageState[] = [],
   movingPlayerId?: string,
+  tIntersectionDecorations: readonly TIntersectionDecorationPlacement[] = [],
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
@@ -577,6 +618,7 @@ export function applyInputWithCollision(
         swordFieldStates,
         cages,
         movingPlayerId,
+        tIntersectionDecorations,
       )
     ) {
       newX = candidateX;
@@ -598,6 +640,7 @@ export function applyInputWithCollision(
         swordFieldStates,
         cages,
         movingPlayerId,
+        tIntersectionDecorations,
       )
     ) {
       newY = candidateY;

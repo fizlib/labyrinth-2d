@@ -28,6 +28,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - The central hub has **4 entrances**.
 - The squads approach the hub through three different entrances, leaving one entrance initially unexplored.
 - The routes and entrances should be visually distinguishable enough for players to describe and discuss them.
+- Compatible north-closed 6x6 T-junctions are decorated at an increased 85% density, with at least one selected whenever any valid candidate exists. The expanded stone-ruin, flower, bush, rock, and signpost composition spans the center plus its west, east, and south cells; all four must be free of solid authored placements, while floor-only trap cells may share the footprint. Its seven authored solid objects use matching client/server collision.
 
 ## Wardstones
 
@@ -75,7 +76,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 
 ### Trap cells and cages
 
-- Every room deterministically places 6-10 trap cells on otherwise empty 6x6 maze cells. They avoid all spawns, the hub, gates, authored obstacles, treasure cells, and the portal platform.
+- Every room deterministically places 6-10 trap cells on otherwise empty 6x6 maze cells. They avoid all spawns, the hub, gates, solid authored obstacles, treasure cells, and the portal platform, but may share cells with visual T-junction decorations.
 - Wardens see trap cells as translucent red floor regions in the world and as red cells on both versions of their minimap. Survivors do not see either indicator.
 - A warden inside or within 20 pixels of a trap cell sees a red `[ E ]` above their head. Keyboard/mobile `E`, or clicking the prompt, asks the server to activate that nearby cell.
 - One activation checks every trap cell simultaneously. Each uncaged survivor currently standing in any trap cell receives a cage at their exact position.

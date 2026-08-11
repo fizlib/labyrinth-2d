@@ -18,7 +18,7 @@ import {
   isPositionValid,
 } from '../dist/index.js';
 
-test('trap cells are deterministic, complete 6x6 floors, and avoid authored placements', () => {
+test('trap cells are deterministic, complete 6x6 floors, and avoid solid authored placements', () => {
   for (const seed of [1, 2, 44, 99, 123456]) {
     const first = generateMazeLayout(seed, 10, 3);
     const second = generateMazeLayout(seed, 10, 3);
@@ -48,7 +48,6 @@ test('trap cells are deterministic, complete 6x6 floors, and avoid authored plac
     }
     for (const chest of first.chestDeadEnds)
       occupied.add(`${chest.cellX},${chest.cellY}`);
-
     for (const trap of first.trapCells) {
       assert.equal(occupied.has(`${trap.cellX},${trap.cellY}`), false);
       for (let dy = 0; dy < CELL_SIZE; dy++) {
@@ -60,6 +59,18 @@ test('trap cells are deterministic, complete 6x6 floors, and avoid authored plac
       }
     }
   }
+});
+
+test('trap cells may share the center of a decorated T-junction', () => {
+  const layout = generateMazeLayout(7, 10, 3);
+  const trapKeys = new Set(
+    layout.trapCells.map(({ cellX, cellY }) => `${cellX},${cellY}`),
+  );
+  assert.ok(
+    layout.tIntersectionDecorations.some(({ cellX, cellY }) =>
+      trapKeys.has(`${cellX},${cellY}`),
+    ),
+  );
 });
 
 test('trap membership and interaction use the full cell rectangle', () => {

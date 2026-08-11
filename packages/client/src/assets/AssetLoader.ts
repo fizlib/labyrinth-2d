@@ -39,6 +39,7 @@ import { SWORD_FIELD_ASSET_PATHS } from '../systems/SwordFieldLayout';
 import { CHARACTER_ATLAS_MANIFEST, CHARACTER_ATLAS_PATH } from './characterAtlasManifest';
 import { getFiorwoodsRuntimeAssetPath } from './runtimeAssetPaths';
 import { CAGE_GROUND_ASSET_PATHS } from '../systems/CageGroundLayout';
+import { T_INTERSECTION_DECORATION_ASSET_PATHS } from '../systems/TIntersectionDecorationLayout';
 
 export interface FrontGateTextures {
   topLeft: Texture;
@@ -196,6 +197,8 @@ export interface GameAssets {
   swordFieldTextures: ReadonlyMap<string, Texture>;
   /** Authored tree backing, chest, and rock used by treasure dead ends. */
   chestDeadEndTextures: ReadonlyMap<string, Texture>;
+  /** Authored ruins, signpost, bushes, rock, and flowers used at decorated T-junctions. */
+  tIntersectionDecorationTextures: ReadonlyMap<string, Texture>;
   /** Number of activation frames (the rest are active idle frames). */
   portalActivationCount: number;
   /** Wisdom orb HUD texture. */
@@ -271,6 +274,7 @@ export async function loadAssets(
   let swampObstacleTextures = new Map<string, Texture>();
   let swordFieldTextures = new Map<string, Texture>();
   let chestDeadEndTextures = new Map<string, Texture>();
+  let tIntersectionDecorationTextures = new Map<string, Texture>();
   let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
   let expandMapButtonTexture: Texture | null = null;
@@ -1023,6 +1027,25 @@ export async function loadAssets(
     console.warn('[Assets] Chest dead-end modules unavailable', error);
   }
 
+  // ── Authored T-intersection decoration modules ───────────────────────
+  try {
+    tIntersectionDecorationTextures = new Map(
+      await Promise.all(
+        T_INTERSECTION_DECORATION_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded T-intersection decorations (${tIntersectionDecorationTextures.size} source modules)`,
+    );
+  } catch (error) {
+    tIntersectionDecorationTextures.clear();
+    console.warn('[Assets] T-intersection decoration modules unavailable', error);
+  }
+
   // ── Authored magical cage prefab ────────────────────────────────────────
   try {
     const [back, closed, open, ...ground] = await Promise.all([
@@ -1166,6 +1189,7 @@ export async function loadAssets(
     swampObstacleTextures,
     swordFieldTextures,
     chestDeadEndTextures,
+    tIntersectionDecorationTextures,
     portalActivationCount,
     wisdomOrbTexture,
     expandMapButtonTexture,

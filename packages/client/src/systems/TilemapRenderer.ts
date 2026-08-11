@@ -24,6 +24,7 @@ import type {
   SwordFieldPlacement,
   SwordFieldState,
   TrapCellPlacement,
+  TIntersectionDecorationPlacement,
   ChestDeadEndPlacement,
   ChestState,
   BridgeEntrySide,
@@ -58,6 +59,7 @@ import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
 import { addSwampObstacles, type SwampObstacleVisual } from './SwampObstacle';
 import { addSwordFields, type SwordFieldVisual } from './SwordField';
 import { addChestDeadEnds, type ChestDeadEndVisual } from './ChestDeadEnd';
+import { addTIntersectionDecorations } from './TIntersectionDecoration';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -403,6 +405,8 @@ export class TilemapRenderer {
   readonly swordFieldVisuals: SwordFieldVisual[];
   /** Authored tree backing and collidable props in treasure dead ends. */
   readonly chestDeadEndSprites: Container[];
+  /** Authored signposts and vegetation that Y-sort around decorated T-junctions. */
+  readonly tIntersectionDecorationSprites: Container[];
   /** Stateful closed/open chest visuals in generated placement order. */
   readonly chestDeadEndVisuals: ChestDeadEndVisual[];
 
@@ -420,6 +424,7 @@ export class TilemapRenderer {
     swordFields: SwordFieldPlacement[],
     trapCells: TrapCellPlacement[],
     chestDeadEnds: ChestDeadEndPlacement[],
+    tIntersectionDecorations: TIntersectionDecorationPlacement[],
     dirtMask: Uint8Array,
     assets: GameAssets,
     renderer: Renderer,
@@ -826,6 +831,12 @@ export class TilemapRenderer {
     );
     this.chestDeadEndSprites = chestRender.entities;
     this.chestDeadEndVisuals = chestRender.visuals;
+    this.tIntersectionDecorationSprites = addTIntersectionDecorations(
+      tIntersectionDecorations,
+      ts,
+      assets.tIntersectionDecorationTextures,
+      this.groundDetailLayer,
+    );
 
     // ── Step 3: Extract Special Entities ──────────────────────────────
 
@@ -1095,6 +1106,11 @@ export class TilemapRenderer {
       sprite.destroy({ children: true });
     }
 
+    for (const sprite of this.tIntersectionDecorationSprites) {
+      sprite.parent?.removeChild(sprite);
+      sprite.destroy({ children: true });
+    }
+
     for (const rs of this.runestoneSprites) {
       rs.sprite.parent?.removeChild(rs.sprite);
       rs.sprite.destroy();
@@ -1120,6 +1136,7 @@ export class TilemapRenderer {
     this.swordFieldVisuals.length = 0;
     this.chestDeadEndSprites.length = 0;
     this.chestDeadEndVisuals.length = 0;
+    this.tIntersectionDecorationSprites.length = 0;
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;
     this.pressurePlateSprites.length = 0;

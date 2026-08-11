@@ -14,6 +14,7 @@ import {
   getBridgeBounds,
   getChestDeadEndBounds,
   getHubTileBounds,
+  getTIntersectionDecorationBounds,
   getPortalBounds,
   getPortalPlatformBounds,
   getPortalWallOpeningBounds,
@@ -58,6 +59,10 @@ import {
   getChestDeadEndAssetPath,
   getChestDeadEndScenerySprites,
 } from '../systems/ChestDeadEndLayout';
+import {
+  T_INTERSECTION_DECORATION_SPRITES,
+  getTIntersectionDecorationAssetPath,
+} from '../systems/TIntersectionDecorationLayout';
 import type { EditorCollider, EditorElement, SemanticRole, StyleEditorDocumentV1 } from './types';
 
 const TILE = 16;
@@ -86,6 +91,8 @@ const SWAMP_SAMPLE_CELL_Y = 5;
 const SWAMP_SAMPLE_LENGTH_CELLS = 2;
 const CHEST_SAMPLE_CELL_X = 2;
 const CHEST_SAMPLE_CELL_Y = 9;
+const T_INTERSECTION_SAMPLE_CELL_X = 4;
+const T_INTERSECTION_SAMPLE_CELL_Y = 6;
 const PORTAL_SAMPLE_CELL_X = 8;
 const PORTAL_SAMPLE_CELL_Y = 14;
 const PORTAL_TERRAIN_Z = 1;
@@ -668,6 +675,54 @@ function addChestDeadEndElements(
   }
 }
 
+function addTIntersectionDecorationElements(
+  elements: EditorElement[],
+  colliders: EditorCollider[],
+): void {
+  const cropPixelX = CROP_TILE_X * TILE;
+  const cropPixelY = CROP_TILE_Y * TILE;
+  // Keep the full authored prefab pinned in the editor reference even when the
+  // generated seed correctly omits it because one of its four cells is occupied.
+  const placement = {
+    cellX: T_INTERSECTION_SAMPLE_CELL_X,
+    cellY: T_INTERSECTION_SAMPLE_CELL_Y,
+    tileX: WALL_WIDTH + T_INTERSECTION_SAMPLE_CELL_X * CELL_STEP_X,
+    tileY: WALL_HEIGHT + T_INTERSECTION_SAMPLE_CELL_Y * CELL_STEP_Y,
+  };
+  const anchorX = placement.tileX * TILE - cropPixelX;
+  const anchorY = placement.tileY * TILE - cropPixelY;
+
+  for (const spec of T_INTERSECTION_DECORATION_SPRITES) {
+    elements.push(
+      assetElement(
+        spec.name,
+        spec.role,
+        getTIntersectionDecorationAssetPath(spec.asset),
+        spec.nativeWidth,
+        spec.nativeHeight,
+        anchorX + spec.x,
+        anchorY + spec.y,
+        spec.w,
+        spec.h,
+        spec.z,
+      ),
+    );
+  }
+
+  for (const bounds of getTIntersectionDecorationBounds(placement, TILE)) {
+    colliders.push(
+      collider(
+        `T-intersection decoration · ${bounds.kind}`,
+        bounds.left - cropPixelX,
+        bounds.top - cropPixelY,
+        bounds.right - bounds.left + 1,
+        bounds.bottom - bounds.top + 1,
+        'freeform',
+      ),
+    );
+  }
+}
+
 function gateIsInSample(gate: GatePlacement): boolean {
   return gate.orientation === 'horizontal' &&
     gate.tileX + CELL_SIZE > CROP_TILE_X && gate.tileX < CROP_TILE_X + SAMPLE_TILES_WIDE &&
@@ -1064,6 +1119,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
   addCentralHubElements(map, elements, colliders);
   addPortalCellElements(elements, colliders);
   addChestDeadEndElements(layout, elements, colliders);
+  addTIntersectionDecorationElements(elements, colliders);
 
   const topologyGrid = Array.from({ length: CROP_CELLS_HIGH }, (_, row) =>
     topology
@@ -1091,6 +1147,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
       'The bridge obstacle is anchored between seed-44 cells (5,11) and (5,12), with forest banks on both sides and open north/south cells. It includes the exact water repaint, stone walkway, bank decorations, and six authored colliders.',
       'The swamp obstacle spans seed-44 cells (2,5) and (3,5), with its exact authored water, banks, lilies, reeds, and cattails preserved as the editor reference.',
       'The chest cell at seed-44 cell (2,9) is the reusable three-chest south/east dead-end prefab, including its right-side tree and flowers, closed and opened chest states, terrain stamp, rock, and count-specific authored colliders.',
+      'The authoring reference pins the expanded north-closed T-junction composition at cell (4,6) across its center, west, east, and south cells, including all seven authored prop colliders from style export (16). Runtime generation omits the whole prefab when a footprint cell has a solid authored occupant; floor-only trap cells may overlap it.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',

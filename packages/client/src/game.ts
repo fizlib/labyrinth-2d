@@ -1772,6 +1772,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       entityLayer.addChild(chestDeadEndSprite);
     }
 
+    for (const decoration of renderer.tIntersectionDecorationSprites) {
+      entityLayer.addChild(decoration);
+    }
+
     for (const tree of renderer.treeSprites) {
       entityLayer.addChild(tree);
     }
@@ -1812,6 +1816,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout.swordFields,
         currentLayout.trapCells,
         currentLayout.chestDeadEnds,
+        currentLayout.tIntersectionDecorations,
         currentLayout.dirtMask,
         assets,
         app.renderer,
@@ -1986,6 +1991,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         layout.swordFields,
         layout.trapCells,
         layout.chestDeadEnds,
+        layout.tIntersectionDecorations,
         layout.dirtMask,
         assets,
         app.renderer,
@@ -2189,6 +2195,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
               gameState.swordFieldStates,
               gameState.cageStates,
               localPlayerId ?? undefined,
+              currentLayout?.tIntersectionDecorations,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -2737,6 +2744,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         latestServerState?.swordFieldStates,
         latestServerState?.cageStates,
         net.playerId,
+        currentLayout?.tIntersectionDecorations,
       );
       localX = result.x;
       localY = result.y;
