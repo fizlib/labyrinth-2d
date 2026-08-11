@@ -43,6 +43,7 @@ import {
   findOpenableCage,
   getCageInteractionPoint,
   deriveFacingDirection,
+  isWithinPortalInteractionRange,
 } from '@labyrinth/shared';
 import type {
   GameState,
@@ -73,6 +74,7 @@ import { IntroDialogueHud } from './systems/IntroDialogueHud';
 import { MobileControls, type MobileControlDirection } from './systems/MobileControls';
 import { CageVisual } from './systems/Cage';
 import { ProximityChatHud } from './systems/ProximityChatHud';
+import { MatchHud } from './systems/MatchHud';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
@@ -730,6 +732,10 @@ interface DebugUiDom {
   tick: HTMLSpanElement;
   pending: HTMLSpanElement;
   snapshot: HTMLSpanElement;
+  matchTimerForm: HTMLFormElement;
+  matchTimerMinutes: HTMLInputElement;
+  matchTimerSeconds: HTMLInputElement;
+  setMatchTimerButton: HTMLButtonElement;
   playerList: HTMLUListElement;
   playerActions: HTMLDivElement;
   playerActionName: HTMLElement;
@@ -794,6 +800,19 @@ function createDebugUI(): DebugUiDom {
           <span class="stat-value" id="snapshot-count">0</span>
         </div>
       </div>
+      <h2>Match Timer</h2>
+      <form class="debug-match-timer" id="debug-match-timer">
+        <label>
+          <span>Min</span>
+          <input id="debug-match-minutes" type="number" min="0" max="1439" step="1" value="10" inputmode="numeric" aria-label="Match timer minutes">
+        </label>
+        <span class="debug-time-separator">:</span>
+        <label>
+          <span>Sec</span>
+          <input id="debug-match-seconds" type="number" min="0" max="59" step="1" value="0" inputmode="numeric" aria-label="Match timer seconds">
+        </label>
+        <button id="debug-set-match-timer" type="submit">Set</button>
+      </form>
       <h2>Players</h2>
       <ul id="player-list"></ul>
       <div class="debug-player-actions" id="debug-player-actions" hidden>
@@ -864,6 +883,18 @@ function createDebugUI(): DebugUiDom {
   const tick = debugDiv.querySelector<HTMLSpanElement>('#tick-counter');
   const pending = debugDiv.querySelector<HTMLSpanElement>('#pending-count');
   const snapshot = debugDiv.querySelector<HTMLSpanElement>('#snapshot-count');
+  const matchTimerForm = debugDiv.querySelector<HTMLFormElement>(
+    '#debug-match-timer',
+  );
+  const matchTimerMinutes = debugDiv.querySelector<HTMLInputElement>(
+    '#debug-match-minutes',
+  );
+  const matchTimerSeconds = debugDiv.querySelector<HTMLInputElement>(
+    '#debug-match-seconds',
+  );
+  const setMatchTimerButton = debugDiv.querySelector<HTMLButtonElement>(
+    '#debug-set-match-timer',
+  );
   const playerList = debugDiv.querySelector<HTMLUListElement>('#player-list');
   const playerActions = debugDiv.querySelector<HTMLDivElement>('#debug-player-actions');
   const playerActionName = debugDiv.querySelector<HTMLElement>(
@@ -893,6 +924,10 @@ function createDebugUI(): DebugUiDom {
     !tick ||
     !pending ||
     !snapshot ||
+    !matchTimerForm ||
+    !matchTimerMinutes ||
+    !matchTimerSeconds ||
+    !setMatchTimerButton ||
     !playerList ||
     !playerActions ||
     !playerActionName ||
@@ -918,6 +953,10 @@ function createDebugUI(): DebugUiDom {
     tick,
     pending,
     snapshot,
+    matchTimerForm,
+    matchTimerMinutes,
+    matchTimerSeconds,
+    setMatchTimerButton,
     playerList,
     playerActions,
     playerActionName,
@@ -997,6 +1036,23 @@ function setupDebugPlayerActions(
     const state = getState();
     if (state) updateDebugUI(debugUi, state, getLocalPlayerId(), true);
   };
+
+  debugUi.matchTimerForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const minutes = Number.parseInt(debugUi.matchTimerMinutes.value, 10);
+    const seconds = Number.parseInt(debugUi.matchTimerSeconds.value, 10);
+    if (
+      !Number.isInteger(minutes) ||
+      !Number.isInteger(seconds) ||
+      minutes < 0 ||
+      minutes > 1439 ||
+      seconds < 0 ||
+      seconds > 59
+    ) {
+      return;
+    }
+    net.sendDebugSetMatchTime((minutes * 60 + seconds) * 1_000);
+  });
 
   debugUi.playerList.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return;
@@ -1089,6 +1145,22 @@ function updateDebugUI(
     debugUi.pending.textContent = pendingText;
   if (debugUi.snapshot.textContent !== snapshotText)
     debugUi.snapshot.textContent = snapshotText;
+
+  const timerControls = [
+    debugUi.matchTimerMinutes,
+    debugUi.matchTimerSeconds,
+    debugUi.setMatchTimerButton,
+  ];
+  const matchEnded = state.match.status === 'ended';
+  for (const control of timerControls) control.disabled = matchEnded;
+  const timerInputFocused =
+    document.activeElement === debugUi.matchTimerMinutes ||
+    document.activeElement === debugUi.matchTimerSeconds;
+  if (!timerInputFocused) {
+    const totalSeconds = Math.ceil(state.match.remainingMs / 1_000);
+    debugUi.matchTimerMinutes.value = String(Math.floor(totalSeconds / 60));
+    debugUi.matchTimerSeconds.value = String(totalSeconds % 60);
+  }
 
   const playerListMarkup = state.players
     .map((p) => {
@@ -1453,6 +1525,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── World Container ───────────────────────────────────────────────────
   const worldContainer = new Container();
+  app.stage.sortableChildren = true;
   app.stage.addChild(worldContainer);
 
   // Dynamic cage grass belongs above static ground details but below every entity.
@@ -1473,6 +1546,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const playerNameTagLayer = new Container();
   playerNameTagLayer.sortableChildren = true;
   app.stage.addChild(playerNameTagLayer);
+
+  const matchHud = new MatchHud(INTERNAL_WIDTH, INTERNAL_HEIGHT);
+  matchHud.addToStage(app.stage);
 
   let mapPixelW = MAZE_WIDTH * TILE_SIZE;
   let mapPixelH = MAZE_HEIGHT * TILE_SIZE;
@@ -1696,6 +1772,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   }
 
   function removePlayerSprite(playerId: string): void {
+    portalEscapeAnimations.delete(playerId);
     const data = playerSprites.get(playerId);
     if (data) {
       data.sprite.mask = null;
@@ -1709,6 +1786,70 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       entityLayer.removeChild(data.container);
       data.container.destroy({ children: true });
       playerSprites.delete(playerId);
+    }
+  }
+
+  const PORTAL_ESCAPE_ANIMATION_DURATION = 0.6;
+  interface PortalEscapeAnimation {
+    playerId: string;
+    startX: number;
+    startY: number;
+    portalX: number;
+    portalY: number;
+    elapsed: number;
+  }
+  const portalEscapeAnimations = new Map<string, PortalEscapeAnimation>();
+
+  function startPortalEscapeAnimation(
+    playerId: string,
+    portalX: number,
+    portalY: number,
+  ): void {
+    const data = playerSprites.get(playerId);
+    if (!data || portalEscapeAnimations.has(playerId)) return;
+    syncPlayerNameTag(data, '', false);
+    data.container.visible = true;
+    data.container.alpha = 1;
+    data.container.scale.set(1);
+    portalEscapeAnimations.set(playerId, {
+      playerId,
+      startX: data.container.x,
+      startY: data.container.y,
+      portalX,
+      portalY,
+      elapsed: 0,
+    });
+  }
+
+  function updatePortalEscapeAnimations(dtSeconds: number): void {
+    for (const animation of portalEscapeAnimations.values()) {
+      const data = playerSprites.get(animation.playerId);
+      if (!data) {
+        portalEscapeAnimations.delete(animation.playerId);
+        continue;
+      }
+
+      animation.elapsed += dtSeconds;
+      const progress = Math.min(
+        1,
+        animation.elapsed / PORTAL_ESCAPE_ANIMATION_DURATION,
+      );
+      const eased = 1 - (1 - progress) ** 3;
+      data.container.x = Math.round(
+        animation.startX + (animation.portalX - animation.startX) * eased,
+      );
+      data.container.y = Math.round(
+        animation.startY + (animation.portalY - animation.startY) * eased,
+      );
+      data.container.zIndex = Math.round(data.container.y);
+      data.container.alpha = 1 - progress;
+      data.container.scale.set(Math.max(0.08, 1 - progress * 0.92));
+
+      if (progress < 1) continue;
+      data.container.visible = false;
+      data.container.alpha = 1;
+      data.container.scale.set(1);
+      portalEscapeAnimations.delete(animation.playerId);
     }
   }
 
@@ -1962,6 +2103,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       debugPlayerRoles.set(playerId, role);
       chatHud?.clear();
       chatHud?.setEnabled(true);
+      matchHud.sync(gameState.match);
 
       // Clear previous slide states on new room join
       gateSlideStates.clear();
@@ -1977,6 +2119,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       clearCageVisuals();
       emptyTrapPromptShakeRemaining = 0;
       emptyTrapPromptShakeElapsed = 0;
+      portalEscapeAnimations.clear();
 
       const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
       currentMap = layout.map;
@@ -2029,7 +2172,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         localPlayerInitialized = true;
       }
 
-      applyLocalRoleUi(role, wisdomOrbs, true);
+      const canLocalPlayerAct =
+        gameState.match.status === 'running' && !(me?.escaped ?? false);
+      chatHud?.setCanSend(canLocalPlayerAct);
+      setMobileInputEnabled(canLocalPlayerAct);
+      applyLocalRoleUi(role, wisdomOrbs, gameState.match.status === 'running');
 
       // ── Sync runestone activation state from initial GameState ─────
       for (const rsInfo of gameState.runestones) {
@@ -2132,14 +2279,15 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           player.spriteIndex,
           player.teamId,
           player.displayName,
-          !isLocal,
+          !isLocal && !player.escaped,
         );
         setPlayerAnimation(
           data,
           getAnimationKey(player.facing, player.isMoving, player.isDead),
         );
         setPlayerPosition(data, player.x, player.y, gameState.portal);
-        if (!isLocal) knownRemotePlayers.add(player.id);
+        data.container.visible = !player.escaped;
+        if (!isLocal && !player.escaped) knownRemotePlayers.add(player.id);
       }
 
       snapshotBuffer.push(gameState);
@@ -2155,6 +2303,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onTickUpdate: (gameState) => {
       const localPlayerId = net.playerId;
+      matchHud.sync(gameState.match);
       snapshotBuffer.push(gameState);
       tilemapRenderer?.syncBridgeStates(gameState.bridgeStates, true);
       tilemapRenderer?.syncSwordFieldStates(
@@ -2175,7 +2324,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           false,
         );
 
-        if (!debugTeleportActive) {
+        const localEscapeAnimating = portalEscapeAnimations.has(localPlayerData.id);
+        if (localPlayerData.escaped && !localEscapeAnimating) {
+          data.container.visible = false;
+        } else if (!localEscapeAnimating && !debugTeleportActive) {
           // Compute reconciled position from server state + pending input replay
           let reconciledX = localPlayerData.x;
           let reconciledY = localPlayerData.y;
@@ -2223,20 +2375,28 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           }
         }
 
-        setPlayerPosition(data, localX, localY, gameState.portal);
+        if (!localEscapeAnimating && !localPlayerData.escaped) {
+          data.container.visible = true;
+          setPlayerPosition(data, localX, localY, gameState.portal);
+        }
       }
 
       knownRemotePlayers.clear();
       for (const player of gameState.players) {
         if (player.id !== localPlayerId) {
-          knownRemotePlayers.add(player.id);
-          ensurePlayerSprite(
+          const data = ensurePlayerSprite(
             player.id,
             player.spriteIndex,
             player.teamId,
             player.displayName,
-            true,
+            !player.escaped,
           );
+          if (player.escaped) {
+            if (!portalEscapeAnimations.has(player.id)) data.container.visible = false;
+          } else {
+            data.container.visible = true;
+            knownRemotePlayers.add(player.id);
+          }
         }
       }
 
@@ -2249,6 +2409,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
 
       latestServerState = gameState;
+      const canLocalPlayerAct =
+        gameState.match.status === 'running' && !(localPlayerData?.escaped ?? false);
+      if (!canLocalPlayerAct) {
+        resetAllInput();
+        pendingInputs = [];
+      }
+      chatHud?.setCanSend(canLocalPlayerAct);
+      setMobileInputEnabled(canLocalPlayerAct && !chatInputActive);
       if (debugUi) updateDebugUI(debugUi, gameState, localPlayerId);
     },
 
@@ -2375,6 +2543,53 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       chatHud?.addMessage({ playerId, displayName, teamId, text });
     },
 
+    onPlayerEscaped: (
+      playerId,
+      displayName,
+      portalX,
+      portalY,
+      escapedCount,
+      escapeThreshold,
+      remainingToEscape,
+    ) => {
+      const noun = remainingToEscape === 1 ? 'survivor' : 'survivors';
+      chatHud?.addSystemMessage(
+        `${displayName} has escaped the maze via portal. ${remainingToEscape} more ${noun} need to escape.`,
+      );
+      startPortalEscapeAnimation(playerId, portalX, portalY);
+      if (playerId === net.playerId) {
+        resetAllInput();
+        pendingInputs = [];
+        chatHud?.setCanSend(false);
+        setMobileInputEnabled(false);
+      }
+      console.info(
+        `[Main] ${displayName} escaped via portal (${escapedCount}/${escapeThreshold})`,
+      );
+    },
+
+    onMatchEnded: (winner, escapedCount, escapeThreshold, remainingMs) => {
+      resetAllInput();
+      pendingInputs = [];
+      minimap?.closeExpanded();
+      introDialogueHud?.destroy();
+      introDialogueHud = null;
+      chatHud?.setSuppressed(false);
+      chatHud?.setCanSend(false);
+      setMobileInputEnabled(false);
+      if (interactPrompt) interactPrompt.visible = false;
+      matchHud.sync({
+        status: 'ended',
+        remainingMs,
+        escapedCount,
+        escapeThreshold,
+        winner,
+      });
+      console.info(
+        `[Main] Match ended: ${winner} win (${escapedCount}/${escapeThreshold})`,
+      );
+    },
+
     onDisconnect: () => {
       console.info('[Main] Disconnected from server');
       updateLoadingProgress(0.98, 'The gate is resisting. Retrying…');
@@ -2385,6 +2600,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       debugPlayerRoles.clear();
       chatHud?.clear();
       chatHud?.setEnabled(false);
+      chatHud?.setCanSend(false);
       mobileControls.setWisdomAvailable(false);
       if (statusEl) {
         statusEl.textContent = '🔴 Disconnected';
@@ -2419,6 +2635,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── Interaction Helpers + Mobile Controls ────────────────────────────
 
+  const isLocalPlayerActionable = (): boolean => {
+    const playerId = net.playerId;
+    if (!playerId || latestServerState?.match.status !== 'running') return false;
+    const player = latestServerState.players.find((candidate) => candidate.id === playerId);
+    return Boolean(player && !player.escaped && !portalEscapeAnimations.has(playerId));
+  };
+
   const triggerUseWisdomOrb = (source: 'Click' | 'KeyQ' | 'MobileQ'): void => {
     console.info(
       `[WisdomOrb][${source}] Triggered. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`,
@@ -2432,6 +2655,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       console.warn(`[WisdomOrb][${source}] BLOCKED: not connected`);
       return;
     }
+    if (!isLocalPlayerActionable()) return;
     if (localPlayerRole !== 'survivor') {
       console.warn(`[WisdomOrb][${source}] BLOCKED: local role has no wisdom orbs`);
       return;
@@ -2464,8 +2688,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   };
 
   const canLocalPlayerOpenChest = (): boolean =>
-    localPlayerRole === 'warden' ||
-    (localPlayerRole === 'survivor' && localWisdomOrbs < MAX_WISDOM_ORBS);
+    isLocalPlayerActionable() &&
+    (localPlayerRole === 'warden' ||
+      (localPlayerRole === 'survivor' && localWisdomOrbs < MAX_WISDOM_ORBS));
 
   triggerInteract = (): void => {
     if (chatInputActive) return;
@@ -2479,7 +2704,20 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       return;
     }
 
-    if (!localPlayerInitialized || !tilemapRenderer) return;
+    if (!localPlayerInitialized || !tilemapRenderer || !isLocalPlayerActionable()) return;
+
+    if (
+      localPlayerRole === 'survivor' &&
+      latestServerState?.portal &&
+      latestServerState.runestones.every((runestone) => runestone.activated) &&
+      isWithinPortalInteractionRange(
+        { x: localX, y: localY },
+        latestServerState.portal,
+      )
+    ) {
+      net.sendEscapePortal();
+      return;
+    }
 
     const localTeamId = latestServerState?.players.find(
       (player) => player.id === net.playerId,
@@ -2690,6 +2928,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     'beforeunload',
     () => {
       chatHud?.destroy();
+      matchHud.destroy();
       mobileControls.destroy();
     },
     { once: true },
@@ -2697,6 +2936,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── 60 FPS Game Loop ──────────────────────────────────────────────────
   app.ticker.add((ticker) => {
+    matchHud.update();
     if (!net.isConnected || !localPlayerInitialized || !net.playerId) return;
 
     // Cap dt to prevent massive physics jumps when mobile browsers drop frames
@@ -2708,16 +2948,25 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       (player) => player.id === net.playerId,
     );
     const isLocalDead = localPlayerState?.isDead ?? false;
+    const isLocalEscaped =
+      (localPlayerState?.escaped ?? false) || portalEscapeAnimations.has(net.playerId);
+    const localCanAct = isLocalPlayerActionable();
     const activeLocalCage = latestServerState
       ? findActivePlayerCage(latestServerState.cageStates, net.playerId)
       : null;
     const movementInput = {
-      up: chatInputActive ? false : activeKeys.up,
-      down: chatInputActive ? false : activeKeys.down,
+      up: chatInputActive || !localCanAct ? false : activeKeys.up,
+      down: chatInputActive || !localCanAct ? false : activeKeys.down,
       // Once opened, the cage permits only its north/south escape route. A
       // closed prisoner still animates against all four sides without moving.
-      left: chatInputActive || activeLocalCage?.opened ? false : activeKeys.left,
-      right: chatInputActive || activeLocalCage?.opened ? false : activeKeys.right,
+      left:
+        chatInputActive || !localCanAct || activeLocalCage?.opened
+          ? false
+          : activeKeys.left,
+      right:
+        chatInputActive || !localCanAct || activeLocalCage?.opened
+          ? false
+          : activeKeys.right,
     };
     const isMoving =
       movementInput.up || movementInput.down || movementInput.left || movementInput.right;
@@ -2768,7 +3017,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
 
     const localData = playerSprites.get(net.playerId);
-    if (localData) {
+    if (localData && !isLocalEscaped) {
       setPlayerPosition(localData, localX, localY);
 
       const localAnimKey = getAnimationKey(localFacing, isMoving, isLocalDead);
@@ -2783,6 +3032,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     for (const remoteId of knownRemotePlayers) {
       const data = playerSprites.get(remoteId);
       if (!data) continue;
+      if (portalEscapeAnimations.has(remoteId)) continue;
 
       const interp = getInterpolatedPlayer(remoteId, interpolationPair, latestSnapshot);
       if (interp) {
@@ -2796,6 +3046,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         setPlayerAnimation(data, remoteAnimKey);
       }
     }
+    updatePortalEscapeAnimations(dtSeconds);
 
     // ── 3. Camera follow + zoom ─────────────────────────────────────
     let camTargetX = localX;
@@ -2963,6 +3214,22 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         (player) => player.id === net.playerId,
       )?.teamId;
 
+      if (
+        localPlayerRole === 'survivor' &&
+        latestServerState?.match.status === 'running' &&
+        latestServerState.portal &&
+        portal &&
+        latestServerState.runestones.every((runestone) => runestone.activated) &&
+        isWithinPortalInteractionRange(
+          { x: localX, y: localY },
+          latestServerState.portal,
+        )
+      ) {
+        const dx = localX - latestServerState.portal.x;
+        const dy = localY - latestServerState.portal.y;
+        considerPrompt(-1, dx * dx + dy * dy, portal.sprite.x, portal.sprite.y - 25);
+      }
+
       for (const rs of tilemapRenderer.runestoneSprites) {
         if (rs.activated || rs.index !== localTeamId) continue;
         const rsCenterX = rs.tileX * TILE_SIZE + TILE_SIZE / 2;
@@ -3090,7 +3357,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         }
       }
 
-      if (nearestDistSq < Infinity) {
+      if (nearestDistSq < Infinity && isLocalPlayerActionable()) {
         if (interactPrompt.text !== promptText) interactPrompt.text = promptText;
         if (!interactPrompt.visible) interactPrompt.visible = true;
         if (interactPrompt.x !== promptX) interactPrompt.x = promptX;

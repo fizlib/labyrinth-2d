@@ -194,6 +194,14 @@ uWS
             break;
           }
 
+          case MessageType.EscapePortal: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) room.handleEscapePortal(data.id, msg);
+            }
+            break;
+          }
+
           case MessageType.DebugTeleport: {
             if (data.roomId) {
               const room = rooms.get(data.roomId);
@@ -210,6 +218,14 @@ uWS
               if (room) {
                 room.handleDebugPlayerAction(data.id, msg);
               }
+            }
+            break;
+          }
+
+          case MessageType.DebugSetMatchTime: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) room.handleDebugSetMatchTime(data.id, msg);
             }
             break;
           }

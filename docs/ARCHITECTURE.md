@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-08-11 - Proximity text chat
+Last updated: 2026-08-11 - Portal escape and match lifecycle
 
 ## Project Overview
 
@@ -76,7 +76,9 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `OPEN_CAGE` | Outside-player request to open a nearby prisoner's cage |
 | `USE_WISDOM_ORB` | Survivors spend an orb on a nearby reveal/clear or request direction; wardens may use the same proximity request only to clear sword fields |
 | `SEND_CHAT_MESSAGE` | Submit one server-validated proximity-chat message |
+| `ESCAPE_PORTAL` | Survivor request to enter the active portal after a shared 28px proximity check |
 | `DEBUG_TELEPORT` | Debug-only teleport helper used by developer tooling |
+| `DEBUG_SET_MATCH_TIME` | Debug-only authoritative match timer adjustment |
 
 #### Server -> Client
 
@@ -94,6 +96,8 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
 | `TRAP_ACTIVATION_RESULT` | Private result used for the activating Warden's empty-room feedback |
 | `CHAT_MESSAGE` | Transient message with the sender's public squad ID, delivered to players within 10 tiles at send time |
+| `PLAYER_ESCAPED` | Room-wide authoritative escape notification with portal coordinates and current victory progress |
+| `MATCH_ENDED` | Immutable survivor/warden result with final escape progress and remaining time |
 | `ERROR` | Report room-join or protocol errors |
 
 ### Shared State Contracts
@@ -109,6 +113,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `x`, `y` | `number` | Bottom-center feet position in world pixels |
 | `facing` | `'up' \| 'down' \| 'left' \| 'right'` | Authoritative sprite facing |
 | `isMoving` | `boolean` | Current movement animation state |
+| `escaped` | `boolean` | Survivor has entered the portal and is now an inactive spectator |
 | `lastProcessedInput` | `number` | Highest acknowledged local input sequence |
 
 Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and public snapshots. `ROOM_JOINED` privately provides the recipient's `role` (`'survivor' | 'warden'`) and starting `wisdomOrbs`; later orb changes use the private `WISDOM_ORB_USED` response.
@@ -126,6 +131,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `tick` | `number` | Authoritative simulation tick counter |
+| `match` | `MatchState` | Running/ended status, remaining time, escape progress, threshold, and winner |
 | `players` | `PlayerInfo[]` | All connected players in the room |
 | `runestones` | `RunestoneInfo[]` | Three runestones with activation state |
 | `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
@@ -161,6 +167,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Chat events are transient: they are not stored in `GameState` and are not replayed to late joiners.
 - The client keeps only the latest four locally received messages. They fade after ten inactive seconds and return when the player reopens chat.
 - The room-wide `ALL_RUNESTONES_ACTIVATED` event adds a gold system message to every connected player's chat announcing that the escape portal is open.
+- `PLAYER_ESCAPED` is also room-wide and adds a gold system message with the survivor's name and the remaining escape target. Escaped spectators receive these system events but are excluded from normal proximity-chat sending and delivery.
 
 ### Runestones and Portal Flow
 
@@ -168,8 +175,16 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - The server validates runestone activation by proximity before accepting a request.
 - During room creation, the server computes one portal position farther from the hub than player spawns. It is centered at the wall between two vertically adjacent 6×6 cells, and both cells must retain their north forest walls.
 - When all three runestones are active, the server broadcasts the existing portal position and the client plays its light-up animation.
+- Only an unescaped survivor within `28` pixels of the active portal may submit `ESCAPE_PORTAL`. The server marks that player escaped before broadcasting the event; clients animate the character into the portal and hide it.
 - Wisdom orbs switch from hub guidance to portal guidance only after the portal is activated.
 - The portal is a world entity, not a tilemap tile.
+
+### Match Timer and Victory
+
+- The first player joining starts a server wall-clock deadline of `600000ms`; snapshots expose authoritative remaining time and the client interpolates the top-center `MM:SS` display between ticks.
+- A full room requires five survivor escapes. Underfilled rooms use `max(1, ceil(connected survivors × 5 / 7))`; connected escaped spectators remain in that population, and joins, leaves, and debug role changes recalculate it.
+- Reaching the threshold, or having every currently connected survivor escaped, ends the match immediately for survivors. Reaching the deadline below the threshold ends it for wardens, including action requests that race the next server tick.
+- Ending is immutable: queued input is cleared, the server loop stops, gameplay/chat requests are rejected, a final snapshot is broadcast, and clients freeze under a persistent result banner. Late joiners reconstruct that state from `GameState.match`.
 
 ### Hidden Roles and Wisdom Orbs
 
@@ -415,7 +430,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
 - Sword-field clear: survivors use the wisdom-orb controls while `[ Q ]` is visible; wardens use `E` or the mobile `E` button while their red `[ E ]` is visible
 - Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.
-- Debug-only tools can enable scroll zoom, zoom toggling, and click teleport
+- Debug-only tools can enable scroll zoom, zoom toggling, and click teleport. The debug panel can also replace the authoritative running-match timer using minute/second inputs; setting it to zero immediately resolves a Warden timeout win.
 - The debug player menu privately fetches a selected player's current role and can authoritatively change it. The server updates that seat and privately rebuilds the affected player's role-specific HUD and inventory.
 
 ## Monorepo Structure

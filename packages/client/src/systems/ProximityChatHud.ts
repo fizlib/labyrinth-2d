@@ -47,6 +47,7 @@ export class ProximityChatHud {
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private enabled = false;
+  private canSend = true;
   private suppressed = false;
   private historyVisible = false;
 
@@ -120,8 +121,17 @@ export class ProximityChatHud {
     if (this.enabled === enabled) return;
     this.enabled = enabled;
     this.root.classList.toggle('proximity-chat--disabled', !enabled);
-    this.prompt.disabled = !enabled;
+    this.prompt.disabled = !enabled || !this.canSend;
     if (!enabled && this.active) this.close();
+  }
+
+  /** Keep global history visible while disabling player-authored chat. */
+  setCanSend(canSend: boolean): void {
+    if (this.canSend === canSend) return;
+    this.canSend = canSend;
+    this.root.classList.toggle('proximity-chat--read-only', !canSend);
+    this.prompt.disabled = !this.enabled || !canSend;
+    if (!canSend && this.active) this.close();
   }
 
   /** Temporarily yield the bottom HUD area to a higher-priority game panel. */
@@ -133,7 +143,7 @@ export class ProximityChatHud {
   }
 
   open(): void {
-    if (!this.enabled || this.suppressed || this.active) return;
+    if (!this.enabled || !this.canSend || this.suppressed || this.active) return;
     this.cancelInactivityTimer();
     this.active = true;
     this.historyVisible = this.messages.length > 0;

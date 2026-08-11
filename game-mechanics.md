@@ -38,13 +38,14 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - All three wardstones must be activated before the escape doors unlock.
 - Once every wardstone is active, players can travel back into the labyrinth to locate an escape door.
 
-## Escape doors
+## Escape portal
 
-- Escape doors are placed within the labyrinth at the beginning of the match, but start locked.
-- Players can discover and remember the locations of locked escape doors while travelling toward the central hub.
-- Activating all three wardstones unlocks the escape doors.
-- A discovered escape door can be used by the survivors once it is unlocked.
-- Wardens cannot pass through escape doors and are not supposed to escape.
+- The escape portal is placed within the labyrinth at the beginning of the match, but starts inactive.
+- Players can discover and remember the inactive portal while travelling toward the central hub.
+- Activating all three wardstones opens the portal.
+- A nearby active survivor sees `[ E ]`; pressing it makes that survivor vanish into the portal and become an inactive spectator.
+- Wardens never see the portal prompt and cannot escape.
+- Each escape is announced to the whole room with the number of additional survivors still needed.
 
 ### Finding an escape door
 
@@ -55,11 +56,15 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 
 ## Time limit and victory conditions
 
-- The match has a time limit for unlocking the labyrinth and escaping.
+- The match lasts **10 minutes**, starting when the first player joins, with a live top-center timer.
 - **Survivors win immediately when 5 of the 7 survivors have escaped.** The match ends as soon as the fifth survivor escapes.
 - **Wardens win when the timer expires and 4 or fewer survivors have escaped.**
+- With fewer than seven connected survivors, the target is `ceil(connected survivors × 5 / 7)` and is recalculated as survivors join or leave.
+- Survivors also win immediately when every survivor currently connected to the match has escaped.
 - Wardens do not count toward the escape total because they cannot escape.
 - This threshold allows up to two survivors to remain trapped without causing the entire survivor side to lose.
+- Escaped survivors cannot move, act, or use proximity chat, but continue to receive global system announcements.
+- When either side wins, simulation and gameplay input freeze and every player sees the result banner.
 
 ## Wisdom orbs
 

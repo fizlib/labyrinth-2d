@@ -60,6 +60,10 @@ import {
   CHAT_SEND_COOLDOWN_MS,
   normalizeChatMessageText,
   isWithinChatProximity,
+  MATCH_DURATION_MS,
+  getSurvivorEscapeThreshold,
+  getRemainingSurvivorsToEscape,
+  isWithinPortalInteractionRange,
   SWORD_FIELD_LOWER_DURATION_MS,
   getBridgeCollapseMask,
   getBridgeRepairCollapsedMask,
@@ -97,7 +101,9 @@ import {
   type ActivateTrapCellMessage,
   type OpenCageMessage,
   type SendChatMessage,
+  type EscapePortalMessage,
   type DebugTeleportMessage,
+  type DebugSetMatchTimeMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
   type TickUpdateMessage,
@@ -112,6 +118,9 @@ import {
   type GateStateChangedMessage,
   type TrapActivationResultMessage,
   type ChatMessage,
+  type PlayerEscapedMessage,
+  type MatchEndedMessage,
+  type MatchWinner,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -132,6 +141,8 @@ interface QueuedInput {
   right: boolean;
   dt: number;
 }
+
+const DEBUG_MAX_MATCH_TIME_MS = 24 * 60 * 60 * 1_000;
 
 interface BridgeTraversalState {
   bridgeIndex: number;
@@ -194,6 +205,7 @@ function toPublicPlayerInfo(player: RoomPlayerInfo): PlayerInfo {
     facing: player.facing,
     isMoving: player.isMoving,
     isDead: player.isDead,
+    escaped: player.escaped,
     lastProcessedInput: player.lastProcessedInput,
   };
 }
@@ -258,6 +270,9 @@ export class Room {
   private inputQueues: Map<string, QueuedInput[]> = new Map();
   private readonly lastChatSentAt = new Map<string, number>();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
+
+  /** Server wall-clock deadline, initialized when the first player joins. */
+  private matchEndsAtMs: number | null = null;
 
   /** Hidden role assigned to every seat in the room. */
   private readonly roleSeats: PlayerRole[][];
@@ -430,6 +445,13 @@ export class Room {
 
     this.state = {
       tick: 0,
+      match: {
+        status: 'waiting',
+        remainingMs: MATCH_DURATION_MS,
+        escapedCount: 0,
+        escapeThreshold: 1,
+        winner: null,
+      },
       players: [],
       runestones: this.runestones,
       portal: this.portalPosition,
@@ -543,10 +565,17 @@ export class Room {
       facing: 'down',
       isMoving: false,
       isDead: false,
+      escaped: false,
       lastProcessedInput: 0,
       wisdomOrbs,
     };
     this.state.players.push(playerInfo);
+
+    if (this.state.match.status === 'waiting') {
+      this.startMatch();
+    } else if (this.state.match.status === 'running') {
+      this.syncMatchCounts();
+    }
 
     data.roomId = this.id;
 
@@ -585,11 +614,19 @@ export class Room {
     }
     this.state.players = this.state.players.filter((p) => p.id !== playerId);
 
+    if (this.state.match.status === 'running') {
+      this.syncMatchCounts();
+    }
+
     const leftMsg: PlayerLeftMessage = {
       type: MessageType.PlayerLeft,
       playerId,
     };
     this.broadcast(leftMsg);
+
+    if (this.state.match.status === 'running') {
+      this.checkSurvivorVictory();
+    }
 
     console.info(
       `[Room:${this.id}] Player left: ${playerId} — ${this.playerCount} player(s) remaining`,
@@ -603,6 +640,7 @@ export class Room {
   // ── Input Handling ────────────────────────────────────────────────────
 
   handleInput(playerId: string, msg: PlayerInputMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
     const queue = this.inputQueues.get(playerId);
     if (queue) {
       queue.push({
@@ -618,6 +656,7 @@ export class Room {
 
   /** Validate and deliver one transient message to players near the sender. */
   handleSendChatMessage(playerId: string, msg: SendChatMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
     const sender = this.state.players.find((player) => player.id === playerId);
     const text = normalizeChatMessageText(msg.text);
     if (!sender || text === null) return;
@@ -636,6 +675,7 @@ export class Room {
     };
 
     for (const recipient of this.state.players) {
+      if (recipient.escaped) continue;
       if (!isWithinChatProximity(sender, recipient)) continue;
       const socket = this.sockets.get(recipient.id);
       if (socket) this.send(socket, chatMessage);
@@ -644,6 +684,7 @@ export class Room {
 
   /** Debug: teleport a player to an arbitrary position (updates authoritative state). */
   handleDebugTeleport(playerId: string, msg: DebugTeleportMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player) return;
     this.clearQueuedInputs(player);
@@ -656,8 +697,43 @@ export class Room {
     );
   }
 
+  /** Debug: replace the authoritative time remaining for the running match. */
+  handleDebugSetMatchTime(
+    requesterId: string,
+    msg: DebugSetMatchTimeMessage,
+  ): void {
+    if (!this.isMatchRunning() || !this.sockets.has(requesterId)) return;
+    if (
+      typeof msg.remainingMs !== 'number' ||
+      !Number.isInteger(msg.remainingMs) ||
+      msg.remainingMs < 0 ||
+      msg.remainingMs > DEBUG_MAX_MATCH_TIME_MS
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    this.matchEndsAtMs = now + msg.remainingMs;
+    this.state.match.remainingMs = msg.remainingMs;
+
+    if (msg.remainingMs === 0) {
+      this.endMatch('wardens', now);
+      return;
+    }
+
+    const update: TickUpdateMessage = {
+      type: MessageType.TickUpdate,
+      gameState: this.cloneState(),
+    };
+    this.broadcast(update);
+    console.info(
+      `[Room:${this.id}] Debug set match timer to ${Math.ceil(msg.remainingMs / 1_000)} seconds`,
+    );
+  }
+
   /** Debug: apply a player-menu action using authoritative room state. */
   handleDebugPlayerAction(requesterId: string, msg: DebugPlayerActionMessage): void {
+    if (!this.canPlayerAct(requesterId)) return;
     const requester = this.state.players.find((player) => player.id === requesterId);
     const target = this.state.players.find((player) => player.id === msg.targetPlayerId);
     if (!requester || !target) return;
@@ -727,6 +803,9 @@ export class Room {
         target.role = msg.role;
         target.wisdomOrbs = msg.role === 'survivor' ? INITIAL_WISDOM_ORBS : 0;
         this.roleSeats[target.teamId][target.teamSlot] = msg.role;
+
+        this.syncMatchCounts();
+        this.checkSurvivorVictory();
 
         const targetSocket = this.sockets.get(target.id);
         if (targetSocket) {
@@ -810,6 +889,95 @@ export class Room {
     player.isMoving = false;
   }
 
+  private startMatch(): void {
+    if (this.state.match.status !== 'waiting') return;
+    const now = Date.now();
+    this.matchEndsAtMs = now + MATCH_DURATION_MS;
+    this.state.match.status = 'running';
+    this.state.match.winner = null;
+    this.state.match.remainingMs = MATCH_DURATION_MS;
+    this.syncMatchCounts();
+    console.info(`[Room:${this.id}] Match started; deadline in 10 minutes`);
+  }
+
+  /** Keep public progress derived from the currently connected private roles. */
+  private syncMatchCounts(): void {
+    if (this.state.match.status === 'ended') return;
+    const survivors = this.state.players.filter((player) => player.role === 'survivor');
+    this.state.match.escapedCount = survivors.filter((player) => player.escaped).length;
+    this.state.match.escapeThreshold = getSurvivorEscapeThreshold(survivors.length);
+  }
+
+  private refreshMatchTime(now = Date.now()): void {
+    if (this.state.match.status !== 'running' || this.matchEndsAtMs === null) return;
+    this.state.match.remainingMs = Math.max(0, this.matchEndsAtMs - now);
+  }
+
+  /** End at the deadline before accepting an action that raced the game loop. */
+  private isMatchRunning(now = Date.now()): boolean {
+    if (this.state.match.status !== 'running') return false;
+    if (this.matchEndsAtMs !== null && now >= this.matchEndsAtMs) {
+      this.endMatch('wardens', now);
+      return false;
+    }
+    this.refreshMatchTime(now);
+    return true;
+  }
+
+  private canPlayerAct(playerId: string): boolean {
+    if (!this.isMatchRunning()) return false;
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    return Boolean(player && !player.escaped);
+  }
+
+  private checkSurvivorVictory(): void {
+    if (this.state.match.status !== 'running') return;
+    const connectedSurvivorPlayers = this.state.players.filter(
+      (player) => player.role === 'survivor',
+    );
+    const connectedSurvivors = connectedSurvivorPlayers.length;
+    this.syncMatchCounts();
+    const allConnectedSurvivorsEscaped =
+      connectedSurvivors > 0 &&
+      connectedSurvivorPlayers.every((player) => player.escaped);
+    if (
+      allConnectedSurvivorsEscaped ||
+      (connectedSurvivors > 0 &&
+        this.state.match.escapedCount >= this.state.match.escapeThreshold)
+    ) {
+      this.endMatch('survivors');
+    }
+  }
+
+  private endMatch(winner: MatchWinner, now = Date.now()): void {
+    if (this.state.match.status === 'ended') return;
+
+    this.syncMatchCounts();
+    this.refreshMatchTime(now);
+    this.state.match.status = 'ended';
+    this.state.match.winner = winner;
+    for (const player of this.state.players) this.clearQueuedInputs(player);
+
+    const finalUpdate: TickUpdateMessage = {
+      type: MessageType.TickUpdate,
+      gameState: this.cloneState(),
+    };
+    this.broadcast(finalUpdate);
+
+    const endedMessage: MatchEndedMessage = {
+      type: MessageType.MatchEnded,
+      winner,
+      escapedCount: this.state.match.escapedCount,
+      escapeThreshold: this.state.match.escapeThreshold,
+      remainingMs: this.state.match.remainingMs,
+    };
+    this.broadcast(endedMessage);
+    this.stopLoop();
+    console.info(
+      `[Room:${this.id}] Match ended: ${winner} win (${this.state.match.escapedCount}/${this.state.match.escapeThreshold} escapes)`,
+    );
+  }
+
   /** Reply privately with a selected player's authoritative role for debug UI. */
   private sendDebugPlayerRole(requester: RoomPlayerInfo, target: RoomPlayerInfo): void {
     const requesterSocket = this.sockets.get(requester.id);
@@ -825,6 +993,7 @@ export class Room {
 
   /** Handle a runestone activation request. Validates proximity server-side. */
   handleActivateRunestone(playerId: string, msg: ActivateRunestoneMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
     const idx = msg.runestoneIndex;
     const rs = this.runestones.find((r) => r.index === idx);
     if (!rs || rs.activated) return; // invalid or already active
@@ -879,8 +1048,52 @@ export class Room {
     }
   }
 
+  /** Escape through the active portal after authoritative role/proximity checks. */
+  handleEscapePortal(playerId: string, _msg: EscapePortalMessage): void {
+    if (!this.isMatchRunning()) return;
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    if (
+      !player ||
+      player.role !== 'survivor' ||
+      player.escaped ||
+      !this.portalActivated ||
+      !this.portalPosition ||
+      !isWithinPortalInteractionRange(player, this.portalPosition)
+    ) {
+      return;
+    }
+
+    player.escaped = true;
+    this.clearQueuedInputs(player);
+    this.bridgeTraversals.delete(playerId);
+    this.bridgeRepairOccupancy.delete(playerId);
+    this.syncMatchCounts();
+
+    const remainingToEscape = getRemainingSurvivorsToEscape(
+      this.state.match.escapedCount,
+      this.state.players.filter((candidate) => candidate.role === 'survivor').length,
+    );
+    const escapedMessage: PlayerEscapedMessage = {
+      type: MessageType.PlayerEscaped,
+      playerId,
+      displayName: player.displayName,
+      portalX: this.portalPosition.x,
+      portalY: this.portalPosition.y,
+      escapedCount: this.state.match.escapedCount,
+      escapeThreshold: this.state.match.escapeThreshold,
+      remainingToEscape,
+    };
+    this.broadcast(escapedMessage);
+    console.info(
+      `[Room:${this.id}] ${player.displayName} escaped via portal; ${remainingToEscape} more needed`,
+    );
+
+    this.checkSurvivorVictory();
+  }
+
   /** Open one nearby shared chest, rewarding survivors while wardens destroy it. */
   handleOpenChest(playerId: string, msg: OpenChestMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
     if (!Number.isInteger(msg.chestIndex)) return;
     const placement = this.chestDeadEnds[msg.chestIndex];
     const state = this.chestStates[msg.chestIndex];
@@ -927,6 +1140,7 @@ export class Room {
 
   /** Latch one nearby gate button when requested by a warden. */
   handlePressPressurePlate(playerId: string, msg: PressPressurePlateMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
     if (!Number.isInteger(msg.plateId)) return;
 
     const player = this.state.players.find((candidate) => candidate.id === playerId);
@@ -963,6 +1177,7 @@ export class Room {
 
   /** Fire the shared trap network from one nearby trap cell as a warden. */
   handleActivateTrapCell(playerId: string, msg: ActivateTrapCellMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
     if (!Number.isInteger(msg.trapCellIndex)) return;
     const player = this.state.players.find((candidate) => candidate.id === playerId);
     const placement = this.trapCells[msg.trapCellIndex];
@@ -1093,6 +1308,7 @@ export class Room {
 
   /** Open a nearby prisoner's cage; the prisoner cannot open their own gate. */
   handleOpenCage(playerId: string, msg: OpenCageMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
     if (!Number.isInteger(msg.cageId)) return;
     const player = this.state.players.find((candidate) => candidate.id === playerId);
     const cage = this.cageStates.find((candidate) => candidate.cageId === msg.cageId);
@@ -1109,6 +1325,7 @@ export class Room {
 
   /** Handle survivor wisdom use or a warden's orb-free nearby sword clear. */
   handleUseWisdomOrb(playerId: string): void {
+    if (!this.canPlayerAct(playerId)) return;
     console.info(`[Room:${this.id}][WisdomOrb] USE request from ${playerId}`);
 
     const player = this.state.players.find((p) => p.id === playerId);
@@ -1311,11 +1528,16 @@ export class Room {
   }
 
   private tick(): void {
+    if (!this.isMatchRunning()) return;
     this.state.tick++;
     this.advanceSwordFields();
 
     for (const player of this.state.players) {
       const queue = this.inputQueues.get(player.id);
+      if (player.escaped) {
+        this.clearQueuedInputs(player);
+        continue;
+      }
       const activeCage = findActivePlayerCage(this.cageStates, player.id);
       if (activeCage && !activeCage.opened) {
         if (!queue || queue.length === 0) {
@@ -2047,8 +2269,10 @@ export class Room {
   }
 
   private cloneState(): GameState {
+    this.refreshMatchTime();
     return {
       tick: this.state.tick,
+      match: { ...this.state.match },
       players: this.state.players.map(toPublicPlayerInfo),
       runestones: this.runestones.map((r) => ({ ...r })),
       portal: this.portalPosition ? { ...this.portalPosition } : null,

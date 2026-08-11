@@ -135,6 +135,16 @@ export {
   type TrapCellInteractionTarget,
 } from './trap-cell.js';
 
+export {
+  MATCH_DURATION_MS,
+  PORTAL_INTERACTION_RANGE,
+  SURVIVOR_ESCAPE_RATIO_NUMERATOR,
+  SURVIVOR_ESCAPE_RATIO_DENOMINATOR,
+  getSurvivorEscapeThreshold,
+  getRemainingSurvivorsToEscape,
+  isWithinPortalInteractionRange,
+} from './match.js';
+
 // ── Re-export map data ──────────────────────────────────────────────────────
 export {
   TILE_FLOOR,
@@ -320,7 +330,9 @@ export enum MessageType {
   UseWisdomOrb = 'USE_WISDOM_ORB',
   DebugTeleport = 'DEBUG_TELEPORT',
   DebugPlayerAction = 'DEBUG_PLAYER_ACTION',
+  DebugSetMatchTime = 'DEBUG_SET_MATCH_TIME',
   SendChatMessage = 'SEND_CHAT_MESSAGE',
+  EscapePortal = 'ESCAPE_PORTAL',
 
   // ── Server → Client ──
   RoomJoined = 'ROOM_JOINED',
@@ -336,6 +348,8 @@ export enum MessageType {
   GateStateChanged = 'GATE_STATE_CHANGED',
   TrapActivationResult = 'TRAP_ACTIVATION_RESULT',
   ChatMessage = 'CHAT_MESSAGE',
+  PlayerEscaped = 'PLAYER_ESCAPED',
+  MatchEnded = 'MATCH_ENDED',
   Error = 'ERROR',
 }
 
@@ -397,10 +411,20 @@ export interface SendChatMessage {
   text: string;
 }
 
+export interface EscapePortalMessage {
+  type: MessageType.EscapePortal;
+}
+
 export interface DebugTeleportMessage {
   type: MessageType.DebugTeleport;
   x: number;
   y: number;
+}
+
+export interface DebugSetMatchTimeMessage {
+  type: MessageType.DebugSetMatchTime;
+  /** New authoritative time remaining. Zero resolves the match as a timeout. */
+  remainingMs: number;
 }
 
 export type DebugPlayerAction =
@@ -467,6 +491,8 @@ export interface PlayerInfo {
   isMoving: boolean;
   /** Debug death state; currently rendered as the character's lying pose. */
   isDead: boolean;
+  /** Whether this survivor has escaped and become an inactive spectator. */
+  escaped: boolean;
   lastProcessedInput: number;
 }
 
@@ -592,6 +618,27 @@ export interface ChatMessage {
   text: string;
 }
 
+/** Global authoritative notification that one survivor entered the portal. */
+export interface PlayerEscapedMessage {
+  type: MessageType.PlayerEscaped;
+  playerId: string;
+  displayName: string;
+  portalX: number;
+  portalY: number;
+  escapedCount: number;
+  escapeThreshold: number;
+  remainingToEscape: number;
+}
+
+/** Global immutable match result. */
+export interface MatchEndedMessage {
+  type: MessageType.MatchEnded;
+  winner: MatchWinner;
+  escapedCount: number;
+  escapeThreshold: number;
+  remainingMs: number;
+}
+
 // ── Runestone State ─────────────────────────────────────────────────────────
 
 export interface RunestoneInfo {
@@ -629,8 +676,21 @@ export interface ChestState {
 
 // ── Game State ──────────────────────────────────────────────────────────────
 
+export type MatchStatus = 'waiting' | 'running' | 'ended';
+export type MatchWinner = 'survivors' | 'wardens';
+
+export interface MatchState {
+  status: MatchStatus;
+  /** Authoritative time remaining when this snapshot was produced. */
+  remainingMs: number;
+  escapedCount: number;
+  escapeThreshold: number;
+  winner: MatchWinner | null;
+}
+
 export interface GameState {
   tick: number;
+  match: MatchState;
   players: PlayerInfo[];
   runestones: RunestoneInfo[];
   /** Portal position in pixel coordinates, selected when the room is created. */
@@ -661,7 +721,9 @@ export type ClientToServerMessage =
   | OpenCageMessage
   | UseWisdomOrbMessage
   | SendChatMessage
+  | EscapePortalMessage
   | DebugTeleportMessage
+  | DebugSetMatchTimeMessage
   | DebugPlayerActionMessage;
 
 export type ServerToClientMessage =
@@ -678,4 +740,6 @@ export type ServerToClientMessage =
   | GateStateChangedMessage
   | TrapActivationResultMessage
   | ChatMessage
+  | PlayerEscapedMessage
+  | MatchEndedMessage
   | ErrorMessage;

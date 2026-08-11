@@ -22,7 +22,9 @@ import {
   type OpenCageMessage,
   type UseWisdomOrbMessage,
   type SendChatMessage,
+  type EscapePortalMessage,
   type DebugTeleportMessage,
+  type DebugSetMatchTimeMessage,
   type DebugPlayerAction,
   type DebugPlayerActionMessage,
   type ServerToClientMessage,
@@ -54,6 +56,21 @@ export interface NetworkCallbacks {
     displayName: string,
     teamId: number,
     text: string,
+  ) => void;
+  onPlayerEscaped: (
+    playerId: string,
+    displayName: string,
+    portalX: number,
+    portalY: number,
+    escapedCount: number,
+    escapeThreshold: number,
+    remainingToEscape: number,
+  ) => void;
+  onMatchEnded: (
+    winner: 'survivors' | 'wardens',
+    escapedCount: number,
+    escapeThreshold: number,
+    remainingMs: number,
   ) => void;
   onError: (code: string, message: string) => void;
   onDisconnect: () => void;
@@ -272,6 +289,27 @@ export class NetworkManager {
         this.callbacks.onChatMessage(msg.playerId, msg.displayName, msg.teamId, msg.text);
         break;
 
+      case MessageType.PlayerEscaped:
+        this.callbacks.onPlayerEscaped(
+          msg.playerId,
+          msg.displayName,
+          msg.portalX,
+          msg.portalY,
+          msg.escapedCount,
+          msg.escapeThreshold,
+          msg.remainingToEscape,
+        );
+        break;
+
+      case MessageType.MatchEnded:
+        this.callbacks.onMatchEnded(
+          msg.winner,
+          msg.escapedCount,
+          msg.escapeThreshold,
+          msg.remainingMs,
+        );
+        break;
+
       default:
         console.warn('[Net] Unknown message type:', (msg as { type: string }).type);
     }
@@ -366,12 +404,29 @@ export class NetworkManager {
     this.send(msg);
   }
 
+  /** Request escape through the active portal. */
+  sendEscapePortal(): void {
+    const msg: EscapePortalMessage = {
+      type: MessageType.EscapePortal,
+    };
+    this.send(msg);
+  }
+
   /** Send a debug teleport position to the server. */
   sendDebugTeleport(x: number, y: number): void {
     const msg: DebugTeleportMessage = {
       type: MessageType.DebugTeleport,
       x,
       y,
+    };
+    this.send(msg);
+  }
+
+  /** Replace the running match's authoritative time remaining. */
+  sendDebugSetMatchTime(remainingMs: number): void {
+    const msg: DebugSetMatchTimeMessage = {
+      type: MessageType.DebugSetMatchTime,
+      remainingMs,
     };
     this.send(msg);
   }
