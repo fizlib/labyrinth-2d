@@ -37,6 +37,7 @@ export {
   getBridgeBounds,
   getChestDeadEndBounds,
   getTIntersectionDecorationBounds,
+  getDecoratedVerticalPassageBounds,
   getChestInteractionPoint,
   applyInput,
   isPositionValid,
@@ -46,6 +47,7 @@ export {
   type PortalCollider,
   type ChestDeadEndCollisionBounds,
   type TIntersectionDecorationCollisionBounds,
+  type DecoratedVerticalPassageCollisionBounds,
 } from './physics.js';
 
 export {
@@ -169,6 +171,7 @@ export {
   computePortalPosition,
   CHEST_DEAD_END_DENSITY,
   T_INTERSECTION_DECORATION_DENSITY,
+  DECORATED_VERTICAL_PASSAGE_DENSITY,
   TRAP_CELL_DENSITY,
   MIN_TRAP_CELLS,
   MAX_TRAP_CELLS,
@@ -179,6 +182,7 @@ export {
   computeTeamRouteSwordFieldPlacements,
   computeTrapCellPlacements,
   computeTIntersectionDecorationPlacements,
+  computeDecoratedVerticalPassagePlacements,
   generateMazeLayout,
   generateMaze,
   type TileMapData,
@@ -191,6 +195,7 @@ export {
   type SwampPlacement,
   type SwordFieldPlacement,
   type TIntersectionDecorationPlacement,
+  type DecoratedVerticalPassagePlacement,
   type TrapCellPlacement,
   type ChestCount,
   type ChestSlot,

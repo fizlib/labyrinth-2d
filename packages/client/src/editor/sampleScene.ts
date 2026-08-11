@@ -14,6 +14,7 @@ import {
   getBridgeBounds,
   getChestDeadEndBounds,
   getHubTileBounds,
+  getDecoratedVerticalPassageBounds,
   getTIntersectionDecorationBounds,
   getPortalBounds,
   getPortalPlatformBounds,
@@ -22,6 +23,7 @@ import {
   type GeneratedMazeLayout,
   type GatePlacement,
   type BridgePlacement,
+  type DecoratedVerticalPassagePlacement,
   type PortalBounds,
   type SwampPlacement,
   type TileMapData,
@@ -64,7 +66,16 @@ import {
   getTIntersectionDecorationAssetPath,
 } from '../systems/TIntersectionDecorationLayout';
 import { SOUTH_CLOSED_T_INTERSECTION_DECORATION_SPRITES } from '../systems/TIntersectionDecorationSouthLayout';
-import type { EditorCollider, EditorElement, SemanticRole, StyleEditorDocumentV1 } from './types';
+import {
+  DECORATED_VERTICAL_PASSAGE_SPRITES,
+  getDecoratedVerticalPassageAssetPath,
+} from '../systems/DecoratedVerticalPassageLayout';
+import type {
+  EditorCollider,
+  EditorElement,
+  SemanticRole,
+  StyleEditorDocumentV1,
+} from './types';
 
 const TILE = 16;
 const MAZE_SEED = 44;
@@ -95,6 +106,8 @@ const CHEST_SAMPLE_CELL_Y = 9;
 const T_INTERSECTION_SAMPLE_CELL_X = 4;
 const T_INTERSECTION_SAMPLE_CELL_Y = 6;
 const SOUTH_CLOSED_T_INTERSECTION_SAMPLE_CELL_Y = 5;
+const DECORATED_VERTICAL_PASSAGE_SAMPLE_CELL_X = 3;
+const DECORATED_VERTICAL_PASSAGE_SAMPLE_NORTH_CELL_Y = 7;
 const PORTAL_SAMPLE_CELL_X = 8;
 const PORTAL_SAMPLE_CELL_Y = 14;
 const PORTAL_TERRAIN_Z = 1;
@@ -182,16 +195,18 @@ function bridgeHidesSampleForestPlacement(placement: ForestStylePlacementSpec): 
   const northCellTileY = WALL_HEIGHT + BRIDGE_SAMPLE_NORTH_CELL_Y * CELL_STEP_Y;
   const anchorX = tileX * TILE;
   const anchorY = (northCellTileY + CELL_SIZE) * TILE;
-  return BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES.some((hidden) =>
-    placement.assetId === hidden.assetId &&
-    placement.x === anchorX + hidden.x &&
-    placement.y === anchorY + hidden.y &&
-    placement.width === hidden.w &&
-    placement.height === hidden.h &&
-    placement.zIndex === hidden.z &&
-    placement.direction === hidden.direction &&
-    placement.flipX === hidden.flipX &&
-    placement.flipY === hidden.flipY);
+  return BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES.some(
+    (hidden) =>
+      placement.assetId === hidden.assetId &&
+      placement.x === anchorX + hidden.x &&
+      placement.y === anchorY + hidden.y &&
+      placement.width === hidden.w &&
+      placement.height === hidden.h &&
+      placement.zIndex === hidden.z &&
+      placement.direction === hidden.direction &&
+      placement.flipX === hidden.flipX &&
+      placement.flipY === hidden.flipY,
+  );
 }
 
 function assetElement(
@@ -286,8 +301,13 @@ function collider(
 }
 
 function isDirtAt(layout: GeneratedMazeLayout, x: number, y: number): boolean {
-  return x >= 0 && x < layout.map.width && y >= 0 && y < layout.map.height &&
-    layout.dirtMask[y * layout.map.width + x] === 1;
+  return (
+    x >= 0 &&
+    x < layout.map.width &&
+    y >= 0 &&
+    y < layout.map.height &&
+    layout.dirtMask[y * layout.map.width + x] === 1
+  );
 }
 
 function gateApproachAsset(layout: GeneratedMazeLayout, x: number, y: number): string {
@@ -352,8 +372,15 @@ function connectionsForCell(map: TileMapData, cellX: number, cellY: number): str
   for (const direction of DIRECTIONS) {
     const nextCellX = cellX + direction.dx;
     const nextCellY = cellY + direction.dy;
-    if (nextCellX < 0 || nextCellX >= GRID_CELLS || nextCellY < 0 || nextCellY >= GRID_CELLS) continue;
-    if (areCellsConnected(map, cellX, cellY, nextCellX, nextCellY)) connections += direction.key;
+    if (
+      nextCellX < 0 ||
+      nextCellX >= GRID_CELLS ||
+      nextCellY < 0 ||
+      nextCellY >= GRID_CELLS
+    )
+      continue;
+    if (areCellsConnected(map, cellX, cellY, nextCellX, nextCellY))
+      connections += direction.key;
   }
   return connections;
 }
@@ -361,18 +388,22 @@ function connectionsForCell(map: TileMapData, cellX: number, cellY: number): str
 function topologyLabel(connections: string): string {
   if (connections.length === 0) return 'isolated cell';
   if (connections.length === 1) {
-    const direction = DIRECTIONS.find((candidate) => candidate.key === connections)?.name ?? connections;
+    const direction =
+      DIRECTIONS.find((candidate) => candidate.key === connections)?.name ?? connections;
     return `dead end open ${direction}`;
   }
   if (connections === 'NS') return 'north-south straight';
   if (connections === 'EW') return 'east-west straight';
   if (connections.length === 2) {
-    const names = [...connections].map((key) =>
-      DIRECTIONS.find((candidate) => candidate.key === key)?.name ?? key);
+    const names = [...connections].map(
+      (key) => DIRECTIONS.find((candidate) => candidate.key === key)?.name ?? key,
+    );
     return `${names.join('-')} turn`;
   }
   if (connections.length === 3) {
-    const closedDirection = DIRECTIONS.find((direction) => !connections.includes(direction.key));
+    const closedDirection = DIRECTIONS.find(
+      (direction) => !connections.includes(direction.key),
+    );
     return `T-junction closed ${closedDirection?.name ?? 'unknown'}`;
   }
   return 'four-way cross';
@@ -382,25 +413,37 @@ function placementRole(placement: ForestStylePlacementSpec): SemanticRole {
   if (placement.name.startsWith('Inner north-west corner ground')) return 'ground.grass';
   if (placement.name.startsWith('South-west corner ground')) return 'ground.grass';
   if (placement.name.startsWith('South-west corner wall')) return 'wall.south.face';
-  if (placement.name.startsWith('South-west corner vertical')) return 'wall.vertical.face';
+  if (placement.name.startsWith('South-west corner vertical'))
+    return 'wall.vertical.face';
   if (placement.name.startsWith('South-east corner ground')) return 'ground.grass';
   if (placement.name.startsWith('South-east corner wall')) return 'wall.south.face';
   if (placement.name.startsWith('South face')) return 'wall.south.face';
-  if (placement.name.startsWith('West wall') ||
-      placement.name.startsWith('East wall') ||
-      placement.name.startsWith('Hub north-west corner west') ||
-      placement.name.startsWith('Hub north-east corner east')) {
+  if (
+    placement.name.startsWith('West wall') ||
+    placement.name.startsWith('East wall') ||
+    placement.name.startsWith('Hub north-west corner west') ||
+    placement.name.startsWith('Hub north-east corner east')
+  ) {
     return 'wall.vertical.face';
   }
   if (placement.name.startsWith('North wall')) return 'wall.north.face';
   return 'wall.canopy';
 }
 
-function placementCellReference(map: TileMapData, placement: ForestStylePlacementSpec): string {
+function placementCellReference(
+  map: TileMapData,
+  placement: ForestStylePlacementSpec,
+): string {
   const centerTileX = (placement.x + placement.width / 2) / TILE;
   const centerTileY = (placement.y + placement.height / 2) / TILE;
-  const cellX = Math.max(0, Math.min(GRID_CELLS - 1, Math.floor((centerTileX - WALL_WIDTH) / CELL_STEP_X)));
-  const cellY = Math.max(0, Math.min(GRID_CELLS - 1, Math.floor((centerTileY - WALL_HEIGHT) / CELL_STEP_Y)));
+  const cellX = Math.max(
+    0,
+    Math.min(GRID_CELLS - 1, Math.floor((centerTileX - WALL_WIDTH) / CELL_STEP_X)),
+  );
+  const cellY = Math.max(
+    0,
+    Math.min(GRID_CELLS - 1, Math.floor((centerTileY - WALL_HEIGHT) / CELL_STEP_Y)),
+  );
   const connections = connectionsForCell(map, cellX, cellY);
   return `cell ${cellX},${cellY} ${connections || '-'} (${topologyLabel(connections)})`;
 }
@@ -415,46 +458,57 @@ function addGroundElements(layout: GeneratedMazeLayout, elements: EditorElement[
       const tileId = map.data[mapY * map.width + mapX];
       const forest = isForestWallTileId(tileId);
       const gateApproach = layout.dirtMask[mapY * map.width + mapX] === 1;
-      const centralHub = mapX >= hub.left && mapX <= hub.right && mapY >= hub.top && mapY <= hub.bottom;
+      const centralHub =
+        mapX >= hub.left && mapX <= hub.right && mapY >= hub.top && mapY <= hub.bottom;
       if (gateApproach) {
-        elements.push(assetElement(
-          `Gate obstacle approach path · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
-          'ground.path',
-          gateApproachAsset(layout, mapX, mapY),
-          TILE,
-          TILE,
-          sampleX * TILE,
-          sampleY * TILE,
-          TILE,
-          TILE,
-          0,
-        ));
+        elements.push(
+          assetElement(
+            `Gate obstacle approach path · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
+            'ground.path',
+            gateApproachAsset(layout, mapX, mapY),
+            TILE,
+            TILE,
+            sampleX * TILE,
+            sampleY * TILE,
+            TILE,
+            TILE,
+            0,
+          ),
+        );
         continue;
       }
-      const assetId = forest ? getForestGroundAssetId(mapX, mapY, map) : grassAssetId(mapX, mapY);
-      const underlayAssetId = forest ? getForestGroundUnderlayAssetId(mapX, mapY, map) : null;
+      const assetId = forest
+        ? getForestGroundAssetId(mapX, mapY, map)
+        : grassAssetId(mapX, mapY);
+      const underlayAssetId = forest
+        ? getForestGroundUnderlayAssetId(mapX, mapY, map)
+        : null;
       if (underlayAssetId !== null) {
-        elements.push(element(
-          `South-west corner grass base underlay · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
-          'ground.grass',
-          underlayAssetId,
+        elements.push(
+          element(
+            `South-west corner grass base underlay · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
+            'ground.grass',
+            underlayAssetId,
+            sampleX * TILE,
+            sampleY * TILE,
+            TILE,
+            TILE,
+            -1,
+          ),
+        );
+      }
+      elements.push(
+        element(
+          `${centralHub ? 'Central hub · ' : ''}${forest ? 'Forest underlay' : 'Grass'} · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
+          forest ? 'ground.forest' : 'ground.grass',
+          assetId,
           sampleX * TILE,
           sampleY * TILE,
           TILE,
           TILE,
-          -1,
-        ));
-      }
-      elements.push(element(
-        `${centralHub ? 'Central hub · ' : ''}${forest ? 'Forest underlay' : 'Grass'} · sample tile ${sampleX},${sampleY} · map tile ${mapX},${mapY}`,
-        forest ? 'ground.forest' : 'ground.grass',
-        assetId,
-        sampleX * TILE,
-        sampleY * TILE,
-        TILE,
-        TILE,
-        forest ? getForestGroundZIndex(mapX, mapY, map) : 0,
-      ));
+          forest ? getForestGroundZIndex(mapX, mapY, map) : 0,
+        ),
+      );
     }
   }
 }
@@ -481,17 +535,23 @@ function addBridgeObstacleElements(
   for (const spec of BRIDGE_OBSTACLE_TERRAIN_SPRITES) {
     const x = localX + spec.x;
     const y = localY + spec.y;
-    const terrain = elements.find((candidate) =>
-      candidate.x === x && candidate.y === y &&
-      candidate.width === spec.w && candidate.height === spec.h &&
-      candidate.zIndex === spec.z && candidate.role.startsWith('ground.'));
+    const terrain = elements.find(
+      (candidate) =>
+        candidate.x === x &&
+        candidate.y === y &&
+        candidate.width === spec.w &&
+        candidate.height === spec.h &&
+        candidate.zIndex === spec.z &&
+        candidate.role.startsWith('ground.'),
+    );
     if (!terrain) {
       throw new Error(`Bridge obstacle terrain is missing at sample pixel ${x},${y}`);
     }
 
-    terrain.name = spec.x < 0 || spec.x >= CELL_SIZE * TILE
-      ? bridgeAssetName(spec.asset)
-      : `Bridge obstacle · terrain · ${bridgeAssetName(spec.asset)}`;
+    terrain.name =
+      spec.x < 0 || spec.x >= CELL_SIZE * TILE
+        ? bridgeAssetName(spec.asset)
+        : `Bridge obstacle · terrain · ${bridgeAssetName(spec.asset)}`;
     terrain.assetPath = getBridgeObstacleAssetPath(spec.asset);
     [terrain.nativeWidth, terrain.nativeHeight] = bridgeNativeSize(spec.asset);
   }
@@ -525,18 +585,20 @@ function addBridgeObstacleElements(
     'south-east bank slope',
   ] as const;
   for (const [index, bounds] of getBridgeBounds(bridge, TILE).entries()) {
-    colliders.push(collider(
-      `Bridge obstacle · ${colliderNames[index]}`,
-      bounds.left - CROP_TILE_X * TILE,
-      bounds.top - CROP_TILE_Y * TILE,
-      bounds.right - bounds.left + 1,
-      bounds.bottom - bounds.top + 1,
-      'freeform',
-      null,
-      bounds.shape,
-      bounds.flipX,
-      bounds.flipY,
-    ));
+    colliders.push(
+      collider(
+        `Bridge obstacle · ${colliderNames[index]}`,
+        bounds.left - CROP_TILE_X * TILE,
+        bounds.top - CROP_TILE_Y * TILE,
+        bounds.right - bounds.left + 1,
+        bounds.bottom - bounds.top + 1,
+        'freeform',
+        null,
+        bounds.shape,
+        bounds.flipX,
+        bounds.flipY,
+      ),
+    );
   }
 }
 
@@ -557,10 +619,15 @@ function addSwampObstacleElements(elements: EditorElement[]): void {
   for (const spec of getSwampObstacleTerrainSprites(swamp)) {
     const x = localX + spec.x;
     const y = localY + spec.y;
-    const terrain = elements.find((candidate) =>
-      candidate.x === x && candidate.y === y &&
-      candidate.width === spec.w && candidate.height === spec.h &&
-      candidate.zIndex === spec.z && candidate.role.startsWith('ground.'));
+    const terrain = elements.find(
+      (candidate) =>
+        candidate.x === x &&
+        candidate.y === y &&
+        candidate.width === spec.w &&
+        candidate.height === spec.h &&
+        candidate.zIndex === spec.z &&
+        candidate.role.startsWith('ground.'),
+    );
     if (!terrain) {
       throw new Error(`Swamp obstacle terrain is missing at sample pixel ${x},${y}`);
     }
@@ -573,18 +640,20 @@ function addSwampObstacleElements(elements: EditorElement[]): void {
 
   for (const spec of SWAMP_OBSTACLE_AUTHORED_DETAIL_SPRITES) {
     const [nativeWidth, nativeHeight] = swampNativeSize(spec.asset);
-    elements.push(assetElement(
-      swampAssetName(spec.asset),
-      swampAssetRole(spec.z),
-      getSwampObstacleAssetPath(spec.asset),
-      nativeWidth,
-      nativeHeight,
-      localX + spec.x,
-      localY + spec.y,
-      spec.w,
-      spec.h,
-      spec.z,
-    ));
+    elements.push(
+      assetElement(
+        swampAssetName(spec.asset),
+        swampAssetRole(spec.z),
+        getSwampObstacleAssetPath(spec.asset),
+        nativeWidth,
+        nativeHeight,
+        localX + spec.x,
+        localY + spec.y,
+        spec.w,
+        spec.h,
+        spec.z,
+      ),
+    );
   }
 }
 
@@ -595,8 +664,7 @@ function addChestDeadEndElements(
 ): void {
   const chestPlacements = layout.chestDeadEnds.filter(
     (candidate) =>
-      candidate.cellX === CHEST_SAMPLE_CELL_X &&
-      candidate.cellY === CHEST_SAMPLE_CELL_Y,
+      candidate.cellX === CHEST_SAMPLE_CELL_X && candidate.cellY === CHEST_SAMPLE_CELL_Y,
   );
   const placement = chestPlacements[0];
   if (!placement) {
@@ -609,10 +677,15 @@ function addChestDeadEndElements(
     if (spec.layer === 'terrain') {
       const x = localX + spec.x;
       const y = localY + spec.y;
-      const terrain = elements.find((candidate) =>
-        candidate.x === x && candidate.y === y &&
-        candidate.width === spec.w && candidate.height === spec.h &&
-        candidate.zIndex === spec.z && candidate.role.startsWith('ground.'));
+      const terrain = elements.find(
+        (candidate) =>
+          candidate.x === x &&
+          candidate.y === y &&
+          candidate.width === spec.w &&
+          candidate.height === spec.h &&
+          candidate.zIndex === spec.z &&
+          candidate.role.startsWith('ground.'),
+      );
       if (!terrain) {
         throw new Error(`Chest dead-end terrain is missing at sample pixel ${x},${y}`);
       }
@@ -625,18 +698,20 @@ function addChestDeadEndElements(
       continue;
     }
 
-    elements.push(assetElement(
-      spec.name,
-      spec.asset === 'goldflowers9' ? 'bush' : 'ground.grass',
-      getChestDeadEndAssetPath(spec.asset),
-      spec.nativeWidth,
-      spec.nativeHeight,
-      localX + spec.x,
-      localY + spec.y,
-      spec.w,
-      spec.h,
-      spec.z,
-    ));
+    elements.push(
+      assetElement(
+        spec.name,
+        spec.asset === 'goldflowers9' ? 'bush' : 'ground.grass',
+        getChestDeadEndAssetPath(spec.asset),
+        spec.nativeWidth,
+        spec.nativeHeight,
+        localX + spec.x,
+        localY + spec.y,
+        spec.w,
+        spec.h,
+        spec.z,
+      ),
+    );
   }
 
   for (const chestPlacement of chestPlacements) {
@@ -646,18 +721,20 @@ function addChestDeadEndElements(
       chestPlacement.chestSlot,
     );
     for (const chest of [chestSprites.closed, chestSprites.open]) {
-      elements.push(assetElement(
-        chest.name,
-        'decoration',
-        getChestDeadEndAssetPath(chest.asset),
-        chest.nativeWidth,
-        chest.nativeHeight,
-        localX + chest.x,
-        localY + chest.y,
-        chest.w,
-        chest.h,
-        chest.z,
-      ));
+      elements.push(
+        assetElement(
+          chest.name,
+          'decoration',
+          getChestDeadEndAssetPath(chest.asset),
+          chest.nativeWidth,
+          chest.nativeHeight,
+          localX + chest.x,
+          localY + chest.y,
+          chest.w,
+          chest.h,
+          chest.z,
+        ),
+      );
     }
   }
 
@@ -665,14 +742,16 @@ function addChestDeadEndElements(
   const cropPixelY = CROP_TILE_Y * TILE;
   for (const chestPlacement of chestPlacements) {
     for (const bounds of getChestDeadEndBounds(chestPlacement, TILE)) {
-      colliders.push(collider(
-        `Chest dead end · ${bounds.kind}`,
-        bounds.left - cropPixelX,
-        bounds.top - cropPixelY,
-        bounds.right - bounds.left + 1,
-        bounds.bottom - bounds.top + 1,
-        'freeform',
-      ));
+      colliders.push(
+        collider(
+          `Chest dead end · ${bounds.kind}`,
+          bounds.left - cropPixelX,
+          bounds.top - cropPixelY,
+          bounds.right - bounds.left + 1,
+          bounds.bottom - bounds.top + 1,
+          'freeform',
+        ),
+      );
     }
   }
 }
@@ -741,10 +820,84 @@ function addTIntersectionDecorationElements(
   }
 }
 
+function addDecoratedVerticalPassageElements(
+  elements: EditorElement[],
+  colliders: EditorCollider[],
+): void {
+  const placement: DecoratedVerticalPassagePlacement = {
+    cellX: DECORATED_VERTICAL_PASSAGE_SAMPLE_CELL_X,
+    northCellY: DECORATED_VERTICAL_PASSAGE_SAMPLE_NORTH_CELL_Y,
+    tileX: WALL_WIDTH + DECORATED_VERTICAL_PASSAGE_SAMPLE_CELL_X * CELL_STEP_X,
+    tileY:
+      WALL_HEIGHT +
+      DECORATED_VERTICAL_PASSAGE_SAMPLE_NORTH_CELL_Y * CELL_STEP_Y +
+      CELL_SIZE,
+  };
+  const localX = (placement.tileX - CROP_TILE_X) * TILE;
+  const localY = (placement.tileY - CROP_TILE_Y) * TILE;
+
+  for (const spec of DECORATED_VERTICAL_PASSAGE_SPRITES) {
+    if (spec.z === 0) {
+      const x = localX + spec.x;
+      const y = localY + spec.y;
+      const terrain = elements.find(
+        (candidate) =>
+          candidate.x === x &&
+          candidate.y === y &&
+          candidate.width === spec.w &&
+          candidate.height === spec.h &&
+          candidate.zIndex === spec.z &&
+          candidate.role.startsWith('ground.'),
+      );
+      if (!terrain) {
+        throw new Error(`Decorated vertical-passage terrain is missing at ${x},${y}`);
+      }
+      terrain.name = spec.name;
+      terrain.role = 'ground.grass';
+      terrain.assetPath = getDecoratedVerticalPassageAssetPath(spec.asset);
+      terrain.nativeWidth = spec.nativeWidth;
+      terrain.nativeHeight = spec.nativeHeight;
+      continue;
+    }
+
+    elements.push(
+      assetElement(
+        spec.name,
+        'ground.grass',
+        getDecoratedVerticalPassageAssetPath(spec.asset),
+        spec.nativeWidth,
+        spec.nativeHeight,
+        localX + spec.x,
+        localY + spec.y,
+        spec.w,
+        spec.h,
+        spec.z,
+      ),
+    );
+  }
+
+  for (const bounds of getDecoratedVerticalPassageBounds(placement, TILE)) {
+    colliders.push(
+      collider(
+        `Decorated vertical passage · ${bounds.kind}`,
+        bounds.left - CROP_TILE_X * TILE,
+        bounds.top - CROP_TILE_Y * TILE,
+        bounds.right - bounds.left + 1,
+        bounds.bottom - bounds.top + 1,
+        'freeform',
+      ),
+    );
+  }
+}
+
 function gateIsInSample(gate: GatePlacement): boolean {
-  return gate.orientation === 'horizontal' &&
-    gate.tileX + CELL_SIZE > CROP_TILE_X && gate.tileX < CROP_TILE_X + SAMPLE_TILES_WIDE &&
-    gate.tileY >= CROP_TILE_Y && gate.tileY < CROP_TILE_Y + SAMPLE_TILES_HIGH;
+  return (
+    gate.orientation === 'horizontal' &&
+    gate.tileX + CELL_SIZE > CROP_TILE_X &&
+    gate.tileX < CROP_TILE_X + SAMPLE_TILES_WIDE &&
+    gate.tileY >= CROP_TILE_Y &&
+    gate.tileY < CROP_TILE_Y + SAMPLE_TILES_HIGH
+  );
 }
 
 function addGateObstacleElements(
@@ -765,60 +918,78 @@ function addGateObstacleElements(
       for (let column = 0; column < CELL_SIZE; column++) {
         const sourceColumn = column === 0 ? 0 : column === CELL_SIZE - 1 ? 2 : 1;
         const section = row === 0 ? 'top' : row === 3 ? 'bottom' : `middle row ${row}`;
-        elements.push(assetElement(
-          `Gate obstacle · gate ${gateIndex} team ${gate.teamIndex + 1} · ${section} tile ${column + 1} of ${CELL_SIZE}`,
-          'gate',
-          GATE_SHEET,
-          TILE,
-          TILE,
-          localGateX + column * TILE,
-          localGateY + row * TILE,
-          TILE,
-          TILE,
-          zIndex,
-          false,
-          false,
-          { x: sourceColumn * TILE, y: gateSourceRows[row] * TILE, width: TILE, height: TILE },
-        ));
+        elements.push(
+          assetElement(
+            `Gate obstacle · gate ${gateIndex} team ${gate.teamIndex + 1} · ${section} tile ${column + 1} of ${CELL_SIZE}`,
+            'gate',
+            GATE_SHEET,
+            TILE,
+            TILE,
+            localGateX + column * TILE,
+            localGateY + row * TILE,
+            TILE,
+            TILE,
+            zIndex,
+            false,
+            false,
+            {
+              x: sourceColumn * TILE,
+              y: gateSourceRows[row] * TILE,
+              width: TILE,
+              height: TILE,
+            },
+          ),
+        );
       }
     }
 
-    colliders.push(collider(
-      `Gate obstacle · gate ${gateIndex} closed barrier`,
-      localGateX,
-      (gate.tileY - CROP_TILE_Y) * TILE,
-      CELL_SIZE * TILE,
-      TILE,
-      'gate',
-    ));
+    colliders.push(
+      collider(
+        `Gate obstacle · gate ${gateIndex} closed barrier`,
+        localGateX,
+        (gate.tileY - CROP_TILE_Y) * TILE,
+        CELL_SIZE * TILE,
+        TILE,
+        'gate',
+      ),
+    );
   }
 
   for (const plate of layout.pressurePlates) {
     const gate = layout.gates[plate.gateIndex];
     if (!gate || !gateIsInSample(gate)) continue;
-    if (plate.tileX < CROP_TILE_X || plate.tileX >= CROP_TILE_X + SAMPLE_TILES_WIDE ||
-        plate.tileY < CROP_TILE_Y || plate.tileY >= CROP_TILE_Y + SAMPLE_TILES_HIGH) continue;
+    if (
+      plate.tileX < CROP_TILE_X ||
+      plate.tileX >= CROP_TILE_X + SAMPLE_TILES_WIDE ||
+      plate.tileY < CROP_TILE_Y ||
+      plate.tileY >= CROP_TILE_Y + SAMPLE_TILES_HIGH
+    )
+      continue;
 
     const hubSide = plate.side === 'hub';
-    const matchingSide = layout.pressurePlates.filter((candidate) =>
-      candidate.gateIndex === plate.gateIndex && candidate.side === plate.side);
+    const matchingSide = layout.pressurePlates.filter(
+      (candidate) =>
+        candidate.gateIndex === plate.gateIndex && candidate.side === plate.side,
+    );
     const sideIndex = matchingSide.findIndex((candidate) => candidate.id === plate.id);
     const width = hubSide ? 24 : TILE;
-    elements.push(assetElement(
-      `Gate obstacle · gate ${plate.gateIndex} · ${plate.side}-side button ${sideIndex + 1}`,
-      'pressure-plate',
-      PLATE_SHEET,
-      width,
-      TILE,
-      (plate.tileX - CROP_TILE_X) * TILE - (hubSide ? 4 : 0),
-      (plate.tileY - CROP_TILE_Y) * TILE,
-      width,
-      TILE,
-      1000 + plate.tileY * 1000 + 200,
-      false,
-      false,
-      { x: 0, y: hubSide ? TILE : 0, width, height: TILE },
-    ));
+    elements.push(
+      assetElement(
+        `Gate obstacle · gate ${plate.gateIndex} · ${plate.side}-side button ${sideIndex + 1}`,
+        'pressure-plate',
+        PLATE_SHEET,
+        width,
+        TILE,
+        (plate.tileX - CROP_TILE_X) * TILE - (hubSide ? 4 : 0),
+        (plate.tileY - CROP_TILE_Y) * TILE,
+        width,
+        TILE,
+        1000 + plate.tileY * 1000 + 200,
+        false,
+        false,
+        { x: 0, y: hubSide ? TILE : 0, width, height: TILE },
+      ),
+    );
   }
 }
 
@@ -834,18 +1005,20 @@ function addCentralHubElements(
       const localTileY = (mapY - CROP_TILE_Y) * TILE;
 
       if (tileId === TILE_TREE) {
-        elements.push(assetElement(
-          `Central hub · tree contact shadow · map tile ${mapX},${mapY}`,
-          'shadow',
-          HUB_TREE_SHADOW,
-          50,
-          50,
-          localTileX + TILE / 2 - 27,
-          localTileY + TILE - 4 - 12,
-          54,
-          24,
-          100,
-        ));
+        elements.push(
+          assetElement(
+            `Central hub · tree contact shadow · map tile ${mapX},${mapY}`,
+            'shadow',
+            HUB_TREE_SHADOW,
+            50,
+            50,
+            localTileX + TILE / 2 - 27,
+            localTileY + TILE - 4 - 12,
+            54,
+            24,
+            100,
+          ),
+        );
         const tree = assetElement(
           `Central hub · sacred tree · map tile ${mapX},${mapY}`,
           'tree.large',
@@ -859,19 +1032,26 @@ function addCentralHubElements(
           1000 + (mapY + 1) * 1000 + 800,
         );
         elements.push(tree);
-        colliders.push(collider(
-          `Central hub · sacred tree solid tile ${mapX},${mapY}`,
-          localTileX,
-          localTileY,
-          TILE,
-          TILE,
-          'tree.large',
-          tree.id,
-        ));
+        colliders.push(
+          collider(
+            `Central hub · sacred tree solid tile ${mapX},${mapY}`,
+            localTileX,
+            localTileY,
+            TILE,
+            TILE,
+            'tree.large',
+            tree.id,
+          ),
+        );
         continue;
       }
 
-      if (tileId !== TILE_RUNESTONE_1 && tileId !== TILE_RUNESTONE_2 && tileId !== TILE_RUNESTONE_3) continue;
+      if (
+        tileId !== TILE_RUNESTONE_1 &&
+        tileId !== TILE_RUNESTONE_2 &&
+        tileId !== TILE_RUNESTONE_3
+      )
+        continue;
       const runestoneIndex = tileId - TILE_RUNESTONE_1;
       const runestone = assetElement(
         `Central hub · runestone ${runestoneIndex + 1} · map tile ${mapX},${mapY}`,
@@ -889,15 +1069,17 @@ function addCentralHubElements(
         { x: runestoneIndex * TILE * 2, y: 0, width: TILE, height: TILE * 2 },
       );
       elements.push(runestone);
-      colliders.push(collider(
-        `Central hub · runestone ${runestoneIndex + 1} solid tile ${mapX},${mapY}`,
-        localTileX,
-        localTileY,
-        TILE,
-        TILE,
-        'runestone',
-        runestone.id,
-      ));
+      colliders.push(
+        collider(
+          `Central hub · runestone ${runestoneIndex + 1} solid tile ${mapX},${mapY}`,
+          localTileX,
+          localTileY,
+          TILE,
+          TILE,
+          'runestone',
+          runestone.id,
+        ),
+      );
     }
   }
 }
@@ -916,48 +1098,54 @@ function addPortalCellElements(
   const centerY = centerMapY - CROP_TILE_Y * TILE;
 
   for (const spec of PORTAL_PLATFORM_GROUND_SPRITES) {
-    elements.push(assetElement(
-      `Portal cell · clearing ground · ${spec.asset}`,
-      'ground.path',
-      getPortalPlatformAssetPath(spec.asset),
-      spec.w,
-      spec.h,
-      centerX + spec.x,
-      centerY + spec.y,
-      spec.w,
-      spec.h,
-      PORTAL_TERRAIN_Z,
-    ));
+    elements.push(
+      assetElement(
+        `Portal cell · clearing ground · ${spec.asset}`,
+        'ground.path',
+        getPortalPlatformAssetPath(spec.asset),
+        spec.w,
+        spec.h,
+        centerX + spec.x,
+        centerY + spec.y,
+        spec.w,
+        spec.h,
+        PORTAL_TERRAIN_Z,
+      ),
+    );
   }
 
   for (const spec of PORTAL_PLATFORM_GROUND_DETAIL_SPRITES) {
-    elements.push(assetElement(
-      `Portal cell · clearing ground detail · ${spec.asset}`,
-      'ground.grass',
-      getPortalPlatformAssetPath(spec.asset),
-      spec.w,
-      spec.h,
-      centerX + spec.x,
-      centerY + spec.y,
-      spec.w,
-      spec.h,
-      PORTAL_GROUND_DETAIL_Z,
-    ));
+    elements.push(
+      assetElement(
+        `Portal cell · clearing ground detail · ${spec.asset}`,
+        'ground.grass',
+        getPortalPlatformAssetPath(spec.asset),
+        spec.w,
+        spec.h,
+        centerX + spec.x,
+        centerY + spec.y,
+        spec.w,
+        spec.h,
+        PORTAL_GROUND_DETAIL_Z,
+      ),
+    );
   }
 
   for (const spec of PORTAL_PLATFORM_STRUCTURE_SPRITES) {
-    elements.push(assetElement(
-      `Portal cell · raised platform · ${spec.asset}`,
-      'landmark',
-      getPortalPlatformAssetPath(spec.asset),
-      spec.w,
-      spec.h,
-      centerX + spec.x,
-      centerY + spec.y,
-      spec.w,
-      spec.h,
-      PORTAL_PLATFORM_STRUCTURE_Z + (spec.z ?? 0),
-    ));
+    elements.push(
+      assetElement(
+        `Portal cell · raised platform · ${spec.asset}`,
+        'landmark',
+        getPortalPlatformAssetPath(spec.asset),
+        spec.w,
+        spec.h,
+        centerX + spec.x,
+        centerY + spec.y,
+        spec.w,
+        spec.h,
+        PORTAL_PLATFORM_STRUCTURE_Z + (spec.z ?? 0),
+      ),
+    );
   }
 
   const portal = assetElement(
@@ -980,15 +1168,17 @@ function addPortalCellElements(
   const wallOpening = getPortalWallOpeningBounds({ x: centerX, y: centerY });
   splitWallColliderAroundOpening(colliders, wallOpening);
   const portalBounds = getPortalBounds({ x: centerX, y: centerY });
-  colliders.push(collider(
-    `Portal cell · escape portal collider · lower cell ${PORTAL_SAMPLE_CELL_X},${PORTAL_SAMPLE_CELL_Y}`,
-    portalBounds.left,
-    portalBounds.top,
-    portalBounds.right - portalBounds.left + 1,
-    portalBounds.bottom - portalBounds.top + 1,
-    'portal',
-    portal.id,
-  ));
+  colliders.push(
+    collider(
+      `Portal cell · escape portal collider · lower cell ${PORTAL_SAMPLE_CELL_X},${PORTAL_SAMPLE_CELL_Y}`,
+      portalBounds.left,
+      portalBounds.top,
+      portalBounds.right - portalBounds.left + 1,
+      portalBounds.bottom - portalBounds.top + 1,
+      'portal',
+      portal.id,
+    ),
+  );
 
   const platformColliderNames = [
     'left upper edge',
@@ -998,19 +1188,24 @@ function addPortalCellElements(
     'right inner slope',
     'right stair base',
   ] as const;
-  for (const [index, bounds] of getPortalPlatformBounds({ x: centerX, y: centerY }).entries()) {
-    colliders.push(collider(
-      `Portal cell · ${platformColliderNames[index]} · stairs remain open`,
-      bounds.left,
-      bounds.top,
-      bounds.right - bounds.left + 1,
-      bounds.bottom - bounds.top + 1,
-      'portal',
-      portal.id,
-      bounds.shape,
-      bounds.flipX,
-      bounds.flipY,
-    ));
+  for (const [index, bounds] of getPortalPlatformBounds({
+    x: centerX,
+    y: centerY,
+  }).entries()) {
+    colliders.push(
+      collider(
+        `Portal cell · ${platformColliderNames[index]} · stairs remain open`,
+        bounds.left,
+        bounds.top,
+        bounds.right - bounds.left + 1,
+        bounds.bottom - bounds.top + 1,
+        'portal',
+        portal.id,
+        bounds.shape,
+        bounds.flipX,
+        bounds.flipY,
+      ),
+    );
   }
 }
 
@@ -1023,22 +1218,27 @@ function splitWallColliderAroundOpening(
     const bottom = existing.y + existing.height;
     const openingRight = opening.right + 1;
     const openingBottom = opening.bottom + 1;
-    const coversOpening = existing.ownerRole === 'wall.solid' &&
+    const coversOpening =
+      existing.ownerRole === 'wall.solid' &&
       existing.shape === 'rectangle' &&
-      existing.x < opening.left && right > openingRight &&
-      existing.y >= opening.top && bottom <= openingBottom;
+      existing.x < opening.left &&
+      right > openingRight &&
+      existing.y >= opening.top &&
+      bottom <= openingBottom;
     if (!coversOpening) continue;
 
     existing.width = opening.left - existing.x;
-    colliders.push(collider(
-      existing.name,
-      openingRight,
-      existing.y,
-      right - openingRight,
-      existing.height,
-      existing.ownerRole,
-      existing.ownerId,
-    ));
+    colliders.push(
+      collider(
+        existing.name,
+        openingRight,
+        existing.y,
+        right - openingRight,
+        existing.height,
+        existing.ownerRole,
+        existing.ownerId,
+      ),
+    );
     return;
   }
 }
@@ -1052,13 +1252,19 @@ function addWallElements(map: TileMapData, elements: EditorElement[]): void {
 
   for (const [renderRow, placements] of rows) {
     for (const placement of placements) {
-      if (placement.x + placement.width <= cropLeft || placement.x >= cropRight ||
-          placement.y + placement.height <= cropTop || placement.y >= cropBottom) continue;
+      if (
+        placement.x + placement.width <= cropLeft ||
+        placement.x >= cropRight ||
+        placement.y + placement.height <= cropTop ||
+        placement.y >= cropBottom
+      )
+        continue;
 
       const centerTileX = Math.floor((placement.x + placement.width / 2) / TILE);
       const centerTileY = Math.floor((placement.y + placement.height / 2) / TILE);
       const role = placementRole(placement);
-      const usesRenderRowLayer = placement.direction === 'ground' || !role.startsWith('ground.');
+      const usesRenderRowLayer =
+        placement.direction === 'ground' || !role.startsWith('ground.');
       const wallElement = element(
         `${placement.name} · ${placementCellReference(map, placement)} · map tile ${centerTileX},${centerTileY}`,
         role,
@@ -1067,7 +1273,9 @@ function addWallElements(map: TileMapData, elements: EditorElement[]): void {
         placement.y - cropTop,
         placement.width,
         placement.height,
-        usesRenderRowLayer ? 1000 + renderRow * 1000 + placement.zIndex : placement.zIndex,
+        usesRenderRowLayer
+          ? 1000 + renderRow * 1000 + placement.zIndex
+          : placement.zIndex,
         placement.flipX,
         placement.flipY,
       );
@@ -1093,13 +1301,15 @@ function addWallColliders(map: TileMapData, colliders: EditorCollider[]): void {
         if (!isForestWallTileId(map.data[mapY * map.width + runMapX])) break;
         sampleX++;
       }
-      colliders.push(collider(
-        `Solid forest · sample row ${sampleY} · map row ${mapY} · columns ${runStart}-${sampleX - 1}`,
-        runStart * TILE,
-        sampleY * TILE,
-        (sampleX - runStart) * TILE,
-        TILE,
-      ));
+      colliders.push(
+        collider(
+          `Solid forest · sample row ${sampleY} · map row ${mapY} · columns ${runStart}-${sampleX - 1}`,
+          runStart * TILE,
+          sampleY * TILE,
+          (sampleX - runStart) * TILE,
+          TILE,
+        ),
+      );
     }
   }
 }
@@ -1138,13 +1348,14 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
   addPortalCellElements(elements, colliders);
   addChestDeadEndElements(layout, elements, colliders);
   addTIntersectionDecorationElements(elements, colliders);
+  addDecoratedVerticalPassageElements(elements, colliders);
 
   const topologyGrid = Array.from({ length: CROP_CELLS_HIGH }, (_, row) =>
     topology
       .filter((cell) => cell.sampleRow === row)
       .map((cell) => cell.connections.padEnd(4, '-'))
-      .join('  '))
-    .join('\n');
+      .join('  '),
+  ).join('\n');
   const now = new Date().toISOString();
 
   return {
@@ -1167,6 +1378,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
       'The chest cell at seed-44 cell (2,9) is the reusable three-chest south/east dead-end prefab, including its right-side tree and flowers, closed and opened chest states, terrain stamp, rock, and count-specific authored colliders.',
       'The authoring reference pins the expanded north-closed T-junction composition at cell (4,6) across its center, west, east, and south cells, including all seven authored prop colliders from style export (16). Runtime generation omits the whole prefab when a footprint cell has a solid authored occupant; floor-only trap cells may overlap it.',
       'The south-closed T-junction composition from style export (19) is pinned at cell (4,5), spans its center, west, east, and north cells, and uses inferred signpost and bush colliders matching the established prefab dimensions.',
+      'The decorated vertical passage from style export (22) is pinned between cells (3,7) and (3,8), with its exact 6x12 terrain repaint, foliage, tree assembly, and four authored colliders. Runtime generation requires both logical cells to be otherwise unoccupied.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',

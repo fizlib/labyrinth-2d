@@ -25,6 +25,7 @@ import type {
   SwordFieldState,
   TrapCellPlacement,
   TIntersectionDecorationPlacement,
+  DecoratedVerticalPassagePlacement,
   ChestDeadEndPlacement,
   ChestState,
   BridgeEntrySide,
@@ -60,6 +61,7 @@ import { addSwampObstacles, type SwampObstacleVisual } from './SwampObstacle';
 import { addSwordFields, type SwordFieldVisual } from './SwordField';
 import { addChestDeadEnds, type ChestDeadEndVisual } from './ChestDeadEnd';
 import { addTIntersectionDecorations } from './TIntersectionDecoration';
+import { addDecoratedVerticalPassages } from './DecoratedVerticalPassage';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -425,6 +427,7 @@ export class TilemapRenderer {
     trapCells: TrapCellPlacement[],
     chestDeadEnds: ChestDeadEndPlacement[],
     tIntersectionDecorations: TIntersectionDecorationPlacement[],
+    decoratedVerticalPassages: DecoratedVerticalPassagePlacement[],
     dirtMask: Uint8Array,
     assets: GameAssets,
     renderer: Renderer,
@@ -835,6 +838,12 @@ export class TilemapRenderer {
       tIntersectionDecorations,
       ts,
       assets.tIntersectionDecorationTextures,
+      this.groundDetailLayer,
+    );
+    addDecoratedVerticalPassages(
+      decoratedVerticalPassages,
+      ts,
+      assets.decoratedVerticalPassageTextures,
       this.groundDetailLayer,
     );
 

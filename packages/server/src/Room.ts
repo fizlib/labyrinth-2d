@@ -79,6 +79,7 @@ import {
   type SwampPlacement,
   type SwordFieldPlacement,
   type TIntersectionDecorationPlacement,
+  type DecoratedVerticalPassagePlacement,
   type TrapCellPlacement,
   type CageState,
   type SwordFieldState,
@@ -300,6 +301,9 @@ export class Room {
   /** Decorative, collidable ruins/signpost prefabs in north-closed T-junctions. */
   private readonly tIntersectionDecorations: TIntersectionDecorationPlacement[];
 
+  /** Decorative, collidable foliage compositions spanning vertical cell pairs. */
+  private readonly decoratedVerticalPassages: DecoratedVerticalPassagePlacement[];
+
   /** Shared lowering/cleared state for every sword barrier. */
   private readonly swordFieldStates: SwordFieldState[];
 
@@ -370,6 +374,7 @@ export class Room {
     this.swordFields = layout.swordFields;
     this.trapCells = layout.trapCells;
     this.tIntersectionDecorations = layout.tIntersectionDecorations;
+    this.decoratedVerticalPassages = layout.decoratedVerticalPassages;
     this.swordFieldStates = this.swordFields.map((_, swordFieldIndex) => ({
       swordFieldIndex,
       loweringStartedTick: null,
@@ -1066,6 +1071,7 @@ export class Room {
             this.cageStates,
             warden.id,
             this.tIntersectionDecorations,
+            this.decoratedVerticalPassages,
           ),
         );
         if (!destination) continue;
@@ -1362,6 +1368,7 @@ export class Room {
           this.cageStates,
           player.id,
           this.tIntersectionDecorations,
+          this.decoratedVerticalPassages,
         );
         player.x = result.x;
         player.y = result.y;

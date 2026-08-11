@@ -116,6 +116,17 @@ export interface TIntersectionDecorationPlacement {
   tileY: number;
 }
 
+/** Authored visual composition spanning one open north-south cell boundary. */
+export interface DecoratedVerticalPassagePlacement {
+  /** Shared cell column. */
+  cellX: number;
+  /** Row of the logical cell north of the decorated passage. */
+  northCellY: number;
+  /** Top-left tile of the authored 6x12 passage composition. */
+  tileX: number;
+  tileY: number;
+}
+
 /** One complete 6x6 maze cell belonging to the wardens' trap network. */
 export interface TrapCellPlacement {
   cellX: number;
@@ -161,6 +172,8 @@ export interface GeneratedMazeLayout {
   swordFields: SwordFieldPlacement[];
   /** Visual ruins/signpost prefabs spanning free cells around selected T-junctions. */
   tIntersectionDecorations: TIntersectionDecorationPlacement[];
+  /** Visual-only authored compositions spanning free vertical cell pairs. */
+  decoratedVerticalPassages: DecoratedVerticalPassagePlacement[];
   /** Warden-visible 6x6 cells that can capture survivors when the network fires. */
   trapCells: TrapCellPlacement[];
   /** Independently openable treasure instances placed in every maze dead end. */
@@ -703,6 +716,7 @@ const CHEST_RANDOM_SALT = 0x3c6ef017;
 const CHEST_DEAD_END_SELECTION_SALT = 0x9e3779b9;
 const TRAP_CELL_RANDOM_SALT = 0x6d2b79f5;
 const T_INTERSECTION_DECORATION_RANDOM_SALT = 0x243f6a88;
+const DECORATED_VERTICAL_PASSAGE_RANDOM_SALT = 0x13198a2e;
 const T_INTERSECTION_DECORATION_CELL_OFFSETS = {
   north: [
     [0, 0],
@@ -722,6 +736,7 @@ export const MIN_TRAP_CELLS = 6;
 export const MAX_TRAP_CELLS = 10;
 export const CHEST_DEAD_END_DENSITY = 0.6;
 export const T_INTERSECTION_DECORATION_DENSITY = 0.85;
+export const DECORATED_VERTICAL_PASSAGE_DENSITY = 0.08;
 export const MIN_SWAMP_LENGTH_CELLS = 2;
 export const MAX_SWAMP_LENGTH_CELLS = 5;
 const SWAMP_LENGTH_WEIGHT_MULTIPLIER = 6;
@@ -1799,6 +1814,127 @@ export function computeTIntersectionDecorationPlacements(
     .sort((a, b) => a.cellY - b.cellY || a.cellX - b.cellX);
 }
 
+function getDecoratedVerticalPassageRank(
+  seed: number,
+  cellX: number,
+  northCellY: number,
+): number {
+  let value = seed ^ DECORATED_VERTICAL_PASSAGE_RANDOM_SALT;
+  value = Math.imul(value ^ (cellX + 1), 0x45d9f3b);
+  value = Math.imul(value ^ (northCellY + 1), 0x119de1f3);
+  value = Math.imul(value ^ (value >>> 16), 0x85ebca6b);
+  value = Math.imul(value ^ (value >>> 13), 0xc2b2ae35);
+  value ^= value >>> 16;
+  return value >>> 0;
+}
+
+/**
+ * Select non-overlapping open north-south passages for the exact two-cell
+ * style-editor composition. Both logical cells must be free of every other
+ * generated cell occupant, including traps and decorated T-junctions.
+ */
+export function computeDecoratedVerticalPassagePlacements(
+  data: number[],
+  spawnPoints: readonly SpawnPoint[],
+  gates: readonly GatePlacement[],
+  bridges: readonly BridgePlacement[],
+  swamps: readonly SwampPlacement[],
+  swordFields: readonly SwordFieldPlacement[],
+  trapCells: readonly TrapCellPlacement[],
+  chestDeadEnds: readonly ChestDeadEndPlacement[],
+  tIntersectionDecorations: readonly TIntersectionDecorationPlacement[],
+  portalPosition: SpawnPoint | null,
+  seed: number,
+  density: number = DECORATED_VERTICAL_PASSAGE_DENSITY,
+): DecoratedVerticalPassagePlacement[] {
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
+  const occupiedCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+
+  for (const spawnPoint of spawnPoints) {
+    const { cx, cy } = spawnPointToCell(spawnPoint);
+    occupiedCells.add(`${cx},${cy}`);
+  }
+  for (const gate of gates) occupiedCells.add(`${gate.cellX},${gate.cellY}`);
+  for (const bridge of bridges) {
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY}`);
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
+  }
+  for (const swamp of swamps) {
+    for (let offset = 0; offset < swamp.lengthCells; offset++) {
+      occupiedCells.add(`${swamp.westCellX + offset},${swamp.cellY}`);
+    }
+  }
+  for (const swordField of swordFields) occupySwordFieldCells(occupiedCells, swordField);
+  for (const trapCell of trapCells)
+    occupiedCells.add(`${trapCell.cellX},${trapCell.cellY}`);
+  for (const chest of chestDeadEnds) occupiedCells.add(`${chest.cellX},${chest.cellY}`);
+  for (const decoration of tIntersectionDecorations) {
+    for (const [offsetX, offsetY] of T_INTERSECTION_DECORATION_CELL_OFFSETS[
+      decoration.closedDirection
+    ]) {
+      occupiedCells.add(`${decoration.cellX + offsetX},${decoration.cellY + offsetY}`);
+    }
+  }
+
+  if (portalPosition) {
+    const portalCellX = Math.round(
+      (portalPosition.x - CELL_SIZE / 2 - WALL_WIDTH) / CELL_STEP_X,
+    );
+    const portalCellY = Math.round((portalPosition.y + 0.75 - WALL_HEIGHT) / CELL_STEP_Y);
+    occupiedCells.add(`${portalCellX},${portalCellY}`);
+    occupiedCells.add(`${portalCellX},${portalCellY - 1}`);
+  }
+
+  const candidates: Array<DecoratedVerticalPassagePlacement & { rank: number }> = [];
+  for (let northCellY = 0; northCellY < GRID_CELLS - 1; northCellY++) {
+    for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
+      const northKey = `${cellX},${northCellY}`;
+      const southKey = `${cellX},${northCellY + 1}`;
+      if (occupiedCells.has(northKey) || occupiedCells.has(southKey)) continue;
+      if (!isEmptyObstacleCell(data, cellX, northCellY)) continue;
+      if (!isEmptyObstacleCell(data, cellX, northCellY + 1)) continue;
+      if (!areCellsConnected(data, cellX, northCellY, cellX, northCellY + 1)) continue;
+
+      const { tx, ty } = cellToTile(cellX, northCellY);
+      candidates.push({
+        cellX,
+        northCellY,
+        tileX: tx,
+        tileY: ty + CELL_SIZE,
+        rank: getDecoratedVerticalPassageRank(seed, cellX, northCellY),
+      });
+    }
+  }
+
+  candidates.sort(
+    (a, b) => a.rank - b.rank || a.northCellY - b.northCellY || a.cellX - b.cellX,
+  );
+  const clampedDensity = Math.max(0, Math.min(1, density));
+  const desiredCount = Math.min(
+    candidates.length,
+    Math.max(
+      candidates.length > 0 && clampedDensity > 0 ? 1 : 0,
+      Math.round(candidates.length * clampedDensity),
+    ),
+  );
+  const selected: typeof candidates = [];
+  const selectedCells = new Set(occupiedCells);
+
+  for (const candidate of candidates) {
+    if (selected.length >= desiredCount) break;
+    const northKey = `${candidate.cellX},${candidate.northCellY}`;
+    const southKey = `${candidate.cellX},${candidate.northCellY + 1}`;
+    if (selectedCells.has(northKey) || selectedCells.has(southKey)) continue;
+    selected.push(candidate);
+    selectedCells.add(northKey);
+    selectedCells.add(southKey);
+  }
+
+  return selected
+    .map(({ rank: _rank, ...placement }) => placement)
+    .sort((a, b) => a.northCellY - b.northCellY || a.cellX - b.cellX);
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 export const MAZE_WIDTH = MAP_WIDTH;
@@ -1934,6 +2070,19 @@ export function generateMazeLayout(
     portalPosition,
     seed,
   );
+  const decoratedVerticalPassages = computeDecoratedVerticalPassagePlacements(
+    gatedData,
+    safeSpawnPoints,
+    gates,
+    bridges,
+    swamps,
+    swordFields,
+    trapCells,
+    chestDeadEnds,
+    tIntersectionDecorations,
+    portalPosition,
+    seed,
+  );
 
   return {
     map: {
@@ -1949,6 +2098,7 @@ export function generateMazeLayout(
     swamps,
     swordFields,
     tIntersectionDecorations,
+    decoratedVerticalPassages,
     trapCells,
     chestDeadEnds,
     dirtMask,

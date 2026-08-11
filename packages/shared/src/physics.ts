@@ -16,6 +16,7 @@ import {
   type ChestCount,
   type ChestDeadEndPlacement,
   type ChestDeadEndVariant,
+  type DecoratedVerticalPassagePlacement,
   type SwampPlacement,
   type SwordFieldPlacement,
   type TIntersectionDecorationPlacement,
@@ -81,6 +82,10 @@ export interface TIntersectionDecorationCollisionBounds extends PortalBounds {
   kind: 'signpost' | 'bush' | 'rock';
 }
 
+export interface DecoratedVerticalPassageCollisionBounds extends PortalBounds {
+  kind: 'foliage';
+}
+
 const BRIDGE_AUTHORING_TILE_SIZE = 16;
 
 const T_INTERSECTION_DECORATION_COLLIDER_SPECS = {
@@ -101,6 +106,13 @@ const T_INTERSECTION_DECORATION_COLLIDER_SPECS = {
     { kind: 'bush', x: -47, y: 74, width: 19, height: 12 },
   ],
 } as const;
+
+const DECORATED_VERTICAL_PASSAGE_COLLIDER_SPECS = [
+  { kind: 'foliage', x: 80, y: 1, width: 15, height: 14 },
+  { kind: 'foliage', x: 1, y: 65, width: 13, height: 14 },
+  { kind: 'foliage', x: 77, y: 72, width: 15, height: 52 },
+  { kind: 'foliage', x: 64, y: 149, width: 15, height: 10 },
+] as const;
 
 /** Pixel radius within which a player may open a treasure chest. */
 export const CHEST_INTERACTION_RANGE = 28;
@@ -346,6 +358,24 @@ export function getTIntersectionDecorationBounds(
   );
 }
 
+/** Four visual-prop rectangles exported with the decorated vertical passage. */
+export function getDecoratedVerticalPassageBounds(
+  placement: DecoratedVerticalPassagePlacement,
+  tileSize: number = BRIDGE_AUTHORING_TILE_SIZE,
+): DecoratedVerticalPassageCollisionBounds[] {
+  const scale = tileSize / BRIDGE_AUTHORING_TILE_SIZE;
+  const anchorX = placement.tileX * tileSize;
+  const anchorY = placement.tileY * tileSize;
+
+  return DECORATED_VERTICAL_PASSAGE_COLLIDER_SPECS.map((spec) => ({
+    kind: spec.kind,
+    left: anchorX + spec.x * scale,
+    top: anchorY + spec.y * scale,
+    right: anchorX + (spec.x + spec.width) * scale - 1,
+    bottom: anchorY + (spec.y + spec.height) * scale - 1,
+  }));
+}
+
 /** Authored chest interaction point used by matching client and server checks. */
 export function getChestInteractionPoint(
   placement: ChestDeadEndPlacement,
@@ -473,6 +503,7 @@ export function isPositionValid(
   cages: readonly CageState[] = [],
   movingPlayerId?: string,
   tIntersectionDecorations: readonly TIntersectionDecorationPlacement[] = [],
+  decoratedVerticalPassages: readonly DecoratedVerticalPassagePlacement[] = [],
 ): boolean {
   const ts = map.tileSize;
 
@@ -531,6 +562,12 @@ export function isPositionValid(
 
   for (const decoration of tIntersectionDecorations) {
     for (const bounds of getTIntersectionDecorationBounds(decoration, ts)) {
+      if (intersectsBounds(left, top, right, bottom, bounds)) return false;
+    }
+  }
+
+  for (const passage of decoratedVerticalPassages) {
+    for (const bounds of getDecoratedVerticalPassageBounds(passage, ts)) {
       if (intersectsBounds(left, top, right, bottom, bounds)) return false;
     }
   }
@@ -594,6 +631,7 @@ export function applyInputWithCollision(
   cages: readonly CageState[] = [],
   movingPlayerId?: string,
   tIntersectionDecorations: readonly TIntersectionDecorationPlacement[] = [],
+  decoratedVerticalPassages: readonly DecoratedVerticalPassagePlacement[] = [],
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
@@ -630,6 +668,7 @@ export function applyInputWithCollision(
         cages,
         movingPlayerId,
         tIntersectionDecorations,
+        decoratedVerticalPassages,
       )
     ) {
       newX = candidateX;
@@ -652,6 +691,7 @@ export function applyInputWithCollision(
         cages,
         movingPlayerId,
         tIntersectionDecorations,
+        decoratedVerticalPassages,
       )
     ) {
       newY = candidateY;

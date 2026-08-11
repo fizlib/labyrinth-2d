@@ -149,6 +149,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
 - Directional treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
 - Decorated north- and south-closed T-junctions use orientation-specific style-editor rectangles for their bushes, rock, and signpost on both the predicting client and authoritative server. The south-closed variant's inferred prop colliders reuse the established object hitbox dimensions.
+- Decorated vertical passages use the four foliage rectangles exported with style-editor layout (22) on both the predicting client and authoritative server.
 - Sword fields preserve the ten small fence/marker colliders from the first editor export. The additional `149×32` central blocker from the second export remains solid through the shake-and-sink sequence and is removed only when the server marks the field cleared.
 - Spawned cages use the shared dynamic-collider path and the editor-authored 18x14 base collider. Closed prisoners cannot change position, but their movement input still drives replicated facing and walk animation; opened prisoners may move only north/south until clear, while every other player collides with the cage. A vacated cage remains permanently solid.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
@@ -219,7 +220,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 
 Map generation lives in `packages/shared/src/maps/level1.ts`.
 
-`generateMazeLayout()` returns the tile map, spawn points, gate, bridge, swamp, sword-field, decorated T-junction, trap-cell, and chest placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable obstacle and cage state lives in `GameState`.
+`generateMazeLayout()` returns the tile map, spawn points, gate, bridge, swamp, sword-field, decorated T-junction, decorated vertical-passage, trap-cell, and chest placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable obstacle and cage state lives in `GameState`.
 
 ### Core Layout
 
@@ -248,6 +249,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 12. Exclude actual safe player spawn cells, identify every dead end in all four orientations, deterministically select 60% of the eligible cells, then attach each cell's weighted one-, two-, or three-chest direction-mapped prefab. Portal placement excludes those reserved cells.
 13. After portal and sword-field placement, choose 6-10 deterministic trap cells from the remaining complete 6x6 walkable cells, preferring at least one cell of spacing between highlights.
 14. From the remaining north-closed E/S/W and south-closed N/E/W T-junctions, deterministically select up to 85% for the matching authored stone-ruin, signpost, and vegetation decoration, always selecting at least one whenever a compatible footprint exists. Each prefab reserves its center, west, east, and open vertical cell and is skipped when any is occupied by an objective, solid authored obstacle, spawn, hub, portal platform, or another selected prefab; floor-only trap cells may overlap it.
+15. Deterministically decorate 8% of the remaining open north-south cell boundaries, always selecting at least one when a compatible pair exists. Each exact style-editor (22) prefab reserves both adjacent 6x6 cells and cannot overlap any other generated cell occupant, trap, or decorated T-junction footprint.
 
 ### Spawns and Objective Placement
 

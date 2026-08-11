@@ -40,6 +40,7 @@ import { CHARACTER_ATLAS_MANIFEST, CHARACTER_ATLAS_PATH } from './characterAtlas
 import { getFiorwoodsRuntimeAssetPath } from './runtimeAssetPaths';
 import { CAGE_GROUND_ASSET_PATHS } from '../systems/CageGroundLayout';
 import { T_INTERSECTION_DECORATION_ASSET_PATHS } from '../systems/TIntersectionDecorationLayout';
+import { DECORATED_VERTICAL_PASSAGE_ASSET_PATHS } from '../systems/DecoratedVerticalPassageLayout';
 
 export interface FrontGateTextures {
   topLeft: Texture;
@@ -199,6 +200,8 @@ export interface GameAssets {
   chestDeadEndTextures: ReadonlyMap<string, Texture>;
   /** Authored ruins, signpost, bushes, rock, and flowers used at decorated T-junctions. */
   tIntersectionDecorationTextures: ReadonlyMap<string, Texture>;
+  /** Authored terrain and foliage used by decorated vertical passages. */
+  decoratedVerticalPassageTextures: ReadonlyMap<string, Texture>;
   /** Number of activation frames (the rest are active idle frames). */
   portalActivationCount: number;
   /** Wisdom orb HUD texture. */
@@ -275,6 +278,7 @@ export async function loadAssets(
   let swordFieldTextures = new Map<string, Texture>();
   let chestDeadEndTextures = new Map<string, Texture>();
   let tIntersectionDecorationTextures = new Map<string, Texture>();
+  let decoratedVerticalPassageTextures = new Map<string, Texture>();
   let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
   let expandMapButtonTexture: Texture | null = null;
@@ -1046,6 +1050,25 @@ export async function loadAssets(
     console.warn('[Assets] T-intersection decoration modules unavailable', error);
   }
 
+  // ── Authored decorated vertical-passage modules ───────────────────────
+  try {
+    decoratedVerticalPassageTextures = new Map(
+      await Promise.all(
+        DECORATED_VERTICAL_PASSAGE_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded decorated vertical passages (${decoratedVerticalPassageTextures.size} source modules)`,
+    );
+  } catch (error) {
+    decoratedVerticalPassageTextures.clear();
+    console.warn('[Assets] Decorated vertical-passage modules unavailable', error);
+  }
+
   // ── Authored magical cage prefab ────────────────────────────────────────
   try {
     const [back, closed, open, ...ground] = await Promise.all([
@@ -1190,6 +1213,7 @@ export async function loadAssets(
     swordFieldTextures,
     chestDeadEndTextures,
     tIntersectionDecorationTextures,
+    decoratedVerticalPassageTextures,
     portalActivationCount,
     wisdomOrbTexture,
     expandMapButtonTexture,

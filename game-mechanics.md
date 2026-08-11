@@ -29,6 +29,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - The squads approach the hub through three different entrances, leaving one entrance initially unexplored.
 - The routes and entrances should be visually distinguishable enough for players to describe and discuss them.
 - Compatible north- and south-closed 6x6 T-junctions are decorated at an 85% density, with at least one selected whenever any valid candidate exists. Each expanded stone-ruin, flower, bush, rock, and signpost composition spans the center, west, east, and open vertical cell; all four must be free of solid authored placements, while floor-only trap cells may share the footprint. Props use orientation-specific matching client/server collision.
+- Open north-south boundaries sometimes receive the authored 6x12 decorated vertical-passage composition. Its two adjacent 6x6 cells must both be free of every generated cell occupant, including traps and decorated T-junction footprints. The passage has no objective or interaction; its four foliage rectangles use matching client/server collision.
 
 ## Wardstones
 

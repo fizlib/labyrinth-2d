@@ -1817,6 +1817,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout.trapCells,
         currentLayout.chestDeadEnds,
         currentLayout.tIntersectionDecorations,
+        currentLayout.decoratedVerticalPassages,
         currentLayout.dirtMask,
         assets,
         app.renderer,
@@ -1992,6 +1993,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         layout.trapCells,
         layout.chestDeadEnds,
         layout.tIntersectionDecorations,
+        layout.decoratedVerticalPassages,
         layout.dirtMask,
         assets,
         app.renderer,
@@ -2196,6 +2198,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
               gameState.cageStates,
               localPlayerId ?? undefined,
               currentLayout?.tIntersectionDecorations,
+              currentLayout?.decoratedVerticalPassages,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -2645,9 +2648,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         contractButtonTexture: assets.contractMapButtonTexture,
         onExpandedChange: (expanded) => {
           mobileControls.setExpandedMinimapVisible(expanded);
-          chatHud?.setSuppressed(
-            expanded || (introDialogueHud?.isVisible() ?? false),
-          );
+          chatHud?.setSuppressed(expanded || (introDialogueHud?.isVisible() ?? false));
         },
       },
     );
@@ -2745,6 +2746,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         latestServerState?.cageStates,
         net.playerId,
         currentLayout?.tIntersectionDecorations,
+        currentLayout?.decoratedVerticalPassages,
       );
       localX = result.x;
       localY = result.y;
