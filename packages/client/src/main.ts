@@ -97,6 +97,12 @@ function brandMarkup(): string {
 function shellMarkup(content: string, modifier = ''): string {
   return `
     <main class="app-screen ${modifier}">
+      <div class="app-parallax" aria-hidden="true">
+        <img class="app-parallax__layer app-parallax__layer--sky" src="/assets/home/sky.png" alt="" />
+        <img class="app-parallax__layer app-parallax__layer--clouds" src="/assets/home/clouds.png" alt="" />
+        <img class="app-parallax__layer app-parallax__layer--hills" src="/assets/home/hills.png" alt="" />
+        <img class="app-parallax__layer app-parallax__layer--field" src="/assets/home/field.png" alt="" />
+      </div>
       <div class="app-screen__mist" aria-hidden="true"></div>
       ${content}
     </main>`;
@@ -344,19 +350,28 @@ class AppController {
     root.innerHTML = shellMarkup(`
       <section class="app-panel app-panel--auth" aria-labelledby="auth-title">
         <div class="app-brand">
-          <div class="app-brand__gate" aria-hidden="true"><span class="app-brand__rune">◆</span></div>
-          <h1 id="auth-title" class="app-brand__title">Labyrinth</h1>
+          <img class="app-brand__logo" src="/assets/home/false-arrow-logo.png" alt="False Arrow" />
+          <h1 id="auth-title" class="sr-only">False Arrow</h1>
         </div>
-        <p class="app-panel__copy">Sign in to keep your explorer profile, or enter the maze as a guest.</p>
         ${this.authError ? `<div class="app-alert app-alert--error" role="alert">${escapeHtml(this.authError)}</div>` : ''}
         <button id="google-sign-in" class="pixel-button pixel-button--primary" type="button" ${configured ? '' : 'disabled'}>
-          <span class="google-mark" aria-hidden="true">G</span>
+          <svg class="google-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#4285f4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.92h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.41Z" />
+            <path fill="#34a853" d="M12 22c2.7 0 4.98-.9 6.63-2.43l-3.24-2.54a6.01 6.01 0 0 1-8.96-3.16H3.08v2.62A10 10 0 0 0 12 22Z" />
+            <path fill="#fbbc05" d="M6.43 13.87A6 6 0 0 1 6.12 12c0-.65.11-1.28.31-1.87V7.51H3.08A10 10 0 0 0 2 12c0 1.61.39 3.14 1.08 4.49l3.35-2.62Z" />
+            <path fill="#ea4335" d="M12 6.02c1.47 0 2.8.5 3.84 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.92 5.51l3.35 2.62A5.96 5.96 0 0 1 12 6.02Z" />
+          </svg>
           <span>Continue with Google</span>
         </button>
         <div class="auth-separator" aria-hidden="true"><span>or</span></div>
-        <button id="guest-sign-in" class="pixel-button" type="button">Continue as Guest</button>
+        <button id="guest-sign-in" class="pixel-button" type="button">
+          <svg class="guest-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0H5Z" />
+          </svg>
+          <span>Continue as guest</span>
+        </button>
         <p id="auth-status" class="app-status" aria-live="polite"></p>
-        <p class="app-panel__fineprint">Guest profiles stay in this browser tab and are not saved to Supabase.</p>
+        <p class="app-panel__fineprint">Guest progress won’t be saved.</p>
       </section>`, 'app-screen--auth');
 
     document.querySelector<HTMLButtonElement>('#google-sign-in')?.addEventListener('click', () => {

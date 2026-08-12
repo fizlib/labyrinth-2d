@@ -68,47 +68,14 @@ body {
     max(22px, env(safe-area-inset-right))
     max(32px, env(safe-area-inset-bottom))
     max(22px, env(safe-area-inset-left));
-  background:
-    linear-gradient(rgba(5, 10, 10, 0.6), rgba(7, 9, 14, 0.94)),
-    repeating-linear-gradient(
-      90deg,
-      #102319 0,
-      #102319 32px,
-      #13291c 32px,
-      #13291c 64px
-    );
+  background: #64b8df;
   isolation: isolate;
   font-family: 'PixelOperator8', 'Courier New', Courier, monospace;
 }
 
 .app-screen::before,
 .app-screen::after {
-  content: '';
-  position: fixed;
-  z-index: -1;
-  top: 0;
-  bottom: 0;
-  width: clamp(22px, 12vw, 150px);
-  background:
-    repeating-linear-gradient(
-      0deg,
-      rgba(25, 71, 42, 0.86) 0,
-      rgba(25, 71, 42, 0.86) 12px,
-      rgba(17, 50, 31, 0.86) 12px,
-      rgba(17, 50, 31, 0.86) 24px
-    );
-  box-shadow: 0 0 42px #050909 inset;
-  opacity: 0.6;
-}
-
-.app-screen::before {
-  left: 0;
-  border-right: 3px solid rgba(49, 93, 61, 0.75);
-}
-
-.app-screen::after {
-  right: 0;
-  border-left: 3px solid rgba(49, 93, 61, 0.75);
+  display: none;
 }
 
 .app-screen__mist {
@@ -117,9 +84,54 @@ body {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 50% 42%, rgba(93, 167, 93, 0.13), transparent 32%),
-    radial-gradient(circle at 50% 100%, rgba(9, 29, 20, 0.92), transparent 60%);
-  animation: loading-mist 5s steps(10, end) infinite alternate;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 48%),
+    radial-gradient(circle at 50% 105%, rgba(17, 91, 51, 0.12), transparent 48%);
+}
+
+.app-parallax {
+  position: fixed;
+  z-index: -2;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.app-parallax__layer {
+  position: absolute;
+  inset: -4%;
+  width: 108%;
+  height: 108%;
+  object-fit: cover;
+  object-position: 50% bottom;
+  image-rendering: pixelated;
+  will-change: transform;
+}
+
+.app-parallax__layer--clouds {
+  animation: home-cloud-drift 16s linear infinite alternate;
+}
+
+.app-parallax__layer--hills {
+  animation: home-hill-drift 12s linear infinite alternate;
+}
+
+.app-parallax__layer--field {
+  animation: home-field-drift 9s linear infinite alternate;
+}
+
+@keyframes home-cloud-drift {
+  from { transform: translate3d(-2.4%, -0.35%, 0) scale(1.045); }
+  to { transform: translate3d(2.4%, 0.35%, 0) scale(1.045); }
+}
+
+@keyframes home-hill-drift {
+  from { transform: translate3d(-1.1%, 0.2%, 0) scale(1.03); }
+  to { transform: translate3d(1.1%, -0.2%, 0) scale(1.03); }
+}
+
+@keyframes home-field-drift {
+  from { transform: translate3d(1.4%, 0.35%, 0) scale(1.035); }
+  to { transform: translate3d(-1.4%, -0.35%, 0) scale(1.035); }
 }
 
 .app-panel {
@@ -177,10 +189,45 @@ body {
   container-type: inline-size;
 }
 
-.app-panel--auth .app-brand__title {
-  font-size: min(3.2rem, 12cqw);
-  letter-spacing: 0.05em;
-  white-space: nowrap;
+.app-screen--auth {
+  padding:
+    max(18px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
+}
+
+.app-panel--auth {
+  width: min(38rem, calc(100vw - 36px));
+  padding: 0 clamp(26px, 4.5vw, 62px) clamp(32px, 4.2vh, 42px);
+  border: 3px solid rgba(250, 255, 252, 0.78);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(243, 250, 250, 0.4), rgba(218, 243, 209, 0.32));
+  box-shadow:
+    0 14px 28px rgba(24, 81, 72, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  color: #29463f;
+  text-shadow: none;
+  backdrop-filter: blur(8px) saturate(1.08);
+}
+
+.app-panel--auth::before,
+.app-panel--auth::after {
+  display: none;
+}
+
+.app-brand__logo {
+  display: block;
+  width: min(92%, 580px);
+  height: auto;
+  margin: -6px auto -6px;
+  filter: drop-shadow(0 7px 5px rgba(34, 44, 27, 0.35));
+}
+
+.app-panel--auth .app-alert {
+  margin: -2px 0 16px;
+  border-radius: 10px;
+  text-shadow: none;
 }
 
 .app-brand__gate {
@@ -336,16 +383,61 @@ body {
 
 .app-panel--auth .pixel-button {
   width: 100%;
+  min-height: clamp(54px, 6.8vh, 66px);
+  padding: 10px clamp(14px, 3vw, 28px);
+  border-radius: 10px;
+  box-shadow: 0 5px 8px rgba(35, 66, 61, 0.35);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(0.95rem, 1.6vw, 1.4rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  text-shadow: none;
+}
+
+.app-panel--auth .pixel-button--primary {
+  border: 1px solid rgba(206, 210, 209, 0.9);
+  background: rgba(255, 255, 255, 0.95);
+  color: #202d2c;
+}
+
+.app-panel--auth .pixel-button--primary:hover:not(:disabled) {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #152524;
+}
+
+.app-panel--auth .pixel-button:not(.pixel-button--primary) {
+  border: 2px solid rgba(84, 115, 101, 0.72);
+  background: rgba(244, 246, 220, 0.82);
+  color: #315247;
+}
+
+.app-panel--auth .pixel-button:not(.pixel-button--primary):hover:not(:disabled) {
+  border-color: #476c5b;
+  background: rgba(255, 255, 237, 0.96);
+  color: #203e34;
+}
+
+.app-panel--auth .pixel-button:active:not(:disabled) {
+  box-shadow: 0 2px 4px rgba(35, 66, 61, 0.32);
+  transform: translateY(2px);
+}
+
+.app-panel--auth .pixel-button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.25);
+  opacity: 0.72;
 }
 
 .auth-separator {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 16px 0;
-  color: #738273;
-  font-size: 0.68rem;
-  text-transform: uppercase;
+  margin: clamp(9px, 1.5vh, 14px) 10px;
+  color: #3f5a52;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(0.9rem, 1.35vw, 1.15rem);
+  text-transform: none;
 }
 
 .auth-separator::before,
@@ -353,21 +445,33 @@ body {
   content: '';
   height: 1px;
   flex: 1;
-  background: #465442;
+  background: rgba(56, 84, 75, 0.48);
 }
 
 .google-mark {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border: 2px solid #d5c98d;
-  background: #f4ecd1;
-  color: #20402d;
-  font-family: Arial, sans-serif;
-  font-size: 0.82rem;
-  font-weight: 800;
-  text-shadow: none;
+  width: clamp(25px, 2.5vw, 34px);
+  height: clamp(25px, 2.5vw, 34px);
+  flex: none;
+}
+
+.guest-mark {
+  width: clamp(24px, 2.3vw, 32px);
+  height: clamp(24px, 2.3vw, 32px);
+  flex: none;
+  fill: currentColor;
+}
+
+.app-panel--auth .app-status:empty {
+  display: none;
+}
+
+.app-panel--auth .app-panel__fineprint {
+  max-width: 30rem;
+  margin: clamp(11px, 1.7vh, 16px) auto 0;
+  color: #294f43;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(0.72rem, 1.1vw, 0.95rem);
+  line-height: 1.35;
 }
 
 .app-alert {
@@ -657,13 +761,88 @@ body {
   .profile-actions .pixel-button--primary {
     order: -1;
   }
+
+  .app-screen--auth {
+    padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
+  }
+
+  .app-panel--auth {
+    width: min(100%, 320px);
+    padding: 0 16px 32px;
+    border-width: 3px;
+    border-radius: 16px;
+    box-shadow: 0 10px 20px rgba(24, 81, 72, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  }
+
+  .app-brand__logo {
+    width: min(100%, 290px);
+    margin: -6px auto 4px;
+  }
+
+  .app-panel--auth .pixel-button {
+    min-height: 52px;
+    border-radius: 8px;
+  }
+
+  .app-panel--auth .app-panel__fineprint {
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-height: 620px) {
+  .app-screen--auth {
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(14px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(14px, env(safe-area-inset-left));
+  }
+
+  .app-panel--auth {
+    width: min(34rem, calc(100vw - 28px));
+    padding: 0 clamp(24px, 5vw, 50px) 28px;
+    border-radius: 16px;
+  }
+
+  .app-brand__logo {
+    width: min(82%, 380px);
+    margin: -6px auto -6px;
+  }
+
+  .app-panel--auth .pixel-button {
+    min-height: 44px;
+    padding-block: 7px;
+    font-size: clamp(0.88rem, 1.4vw, 1.05rem);
+  }
+
+  .auth-separator {
+    margin-block: 5px;
+    font-size: 0.88rem;
+  }
+
+  .google-mark,
+  .guest-mark {
+    width: 24px;
+    height: 24px;
+  }
+
+  .app-panel--auth .app-panel__fineprint {
+    max-width: 26rem;
+    margin-top: 8px;
+    font-size: 0.68rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .app-screen__mist,
   .app-brand__rune,
-  .pixel-spinner span {
+  .pixel-spinner span,
+  .app-parallax__layer {
     animation: none;
+  }
+
+  .app-parallax__layer {
+    transform: none;
   }
 }
 
