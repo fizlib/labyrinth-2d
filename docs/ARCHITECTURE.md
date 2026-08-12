@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-08-11 - Authoritative lobby, matchmaking, and start voting
+Last updated: 2026-08-12 - Reconnectable seats and 45-second reservations
 
 ## Project Overview
 
@@ -53,8 +53,9 @@ One room owns one maze instance. The server is authoritative for player state, h
 3. Waiting rooms are event-driven and broadcast `LobbyState` only when their roster, votes, or countdown changes. They do not run the 20 Hz simulation loop.
 4. Nine connected players start an eight-second countdown automatically. With 6-8 players, start voting unlocks after 60 seconds and requires `ceil(connected players × 2 / 3)` votes.
 5. When the countdown completes, the server balances the locked roster across all three squads, assigns hidden roles for the actual population, starts the ten-minute deadline, privately sends `ROOM_JOINED`, and starts the fixed tick loop.
-6. A roster change cancels an active countdown. New joins are rejected while a countdown or match is active.
-7. The room stops and is destroyed when the last player leaves.
+6. An unexpected socket close marks the occupied seat disconnected for 45 seconds. Any countdown is cancelled and starting remains blocked until every reserved seat reconnects or expires.
+7. A valid private reconnect token restores the same player id and authoritative lobby or match state even while the room is full, counting down, running, or ended. Explicit leave releases the seat immediately.
+8. Grace expiry performs permanent player removal and recalculates match thresholds. The room stops and is destroyed only after its final occupied or reserved seat is released.
 
 ### Simulation and Reconciliation
 
@@ -74,6 +75,8 @@ One room owns one maze instance. The server is authoritative for player state, h
 | Message | Purpose |
 | --- | --- |
 | `JOIN_ROOM` | Join or create a room with a display name |
+| `RECONNECT_ROOM` | Reclaim a reserved seat with its private per-tab bearer token |
+| `LEAVE_ROOM` | Explicitly release the current seat without a reconnect grace period |
 | `VOTE_TO_START` | Cast or withdraw the local player's underfilled-start vote |
 | `SEND_LOBBY_CHAT` | Submit one server-validated room-wide waiting-room message |
 | `PLAYER_INPUT` | Send one frame of movement intent plus `sequenceNumber` |
@@ -92,12 +95,12 @@ One room owns one maze instance. The server is authoritative for player state, h
 
 | Message | Purpose |
 | --- | --- |
-| `ROOM_JOINED` | Initial join payload with `playerId`, `mapSeed`, full `gameState`, and the recipient's private role/orb inventory |
+| `ROOM_JOINED` | Initial or resumed match payload with `playerId`, `mapSeed`, full `gameState`, verified admin status, and the recipient's private role/orb inventory |
 | `LOBBY_JOINED` | Private lobby admission with the server player ID and current `LobbyState` |
 | `LOBBY_UPDATED` | Event-driven public roster, vote, or countdown replacement state |
 | `LOBBY_CHAT_MESSAGE` | Transient room-wide waiting-room chat event |
 | `TICK_UPDATE` | Authoritative room snapshot broadcast every server tick |
-| `PLAYER_LEFT` | Notify clients that one player disconnected |
+| `PLAYER_LEFT` | Notify clients that a seat was permanently released after leave or grace expiry |
 | `RUNESTONE_ACTIVATED` | Broadcast that one runestone is now active |
 | `ALL_RUNESTONES_ACTIVATED` | Broadcast the existing portal coordinates once all runestones are active |
 | `CHEST_OPENED` | Broadcast a chest's shared opened state and opener |
@@ -119,7 +122,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | --- | --- | --- |
 | `roomId` | `string` | Six-character public/private room code |
 | `phase` | `'waiting' \| 'countdown'` | Current pre-game room phase |
-| `players` | `LobbyPlayerInfo[]` | Connected nicknames plus public start-vote state |
+| `players` | `LobbyPlayerInfo[]` | Occupied nicknames plus public vote and connected/reconnecting presence |
 | `minPlayers`, `maxPlayers` | `number` | Early-start minimum (`6`) and room capacity (`9`) |
 | `votesRequired` | `number` | Current two-thirds threshold |
 | `voteAvailableAt` | `number` | Server wall-clock timestamp for enabling early-start voting |
@@ -137,6 +140,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `x`, `y` | `number` | Bottom-center feet position in world pixels |
 | `facing` | `'up' \| 'down' \| 'left' \| 'right'` | Authoritative sprite facing |
 | `isMoving` | `boolean` | Current movement animation state |
+| `connected` | `boolean` | Seat currently has an attached WebSocket rather than being inside reconnect grace |
 | `escaped` | `boolean` | Survivor has entered the portal and is now an inactive spectator |
 | `lastProcessedInput` | `number` | Highest acknowledged local input sequence |
 
@@ -156,7 +160,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | --- | --- | --- |
 | `tick` | `number` | Authoritative simulation tick counter |
 | `match` | `MatchState` | Running/ended status, remaining time, escape progress, threshold, winner, and the role-revealing final roster after completion |
-| `players` | `PlayerInfo[]` | All connected players in the room |
+| `players` | `PlayerInfo[]` | All occupied players, including temporarily disconnected reserved seats |
 | `runestones` | `RunestoneInfo[]` | Three runestones with activation state |
 | `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
 | `bridgeStates` | `BridgeState[]` | Authoritative missing-stone mask for every generated bridge |
@@ -208,8 +212,8 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 ### Match Timer and Victory
 
 - Completing the lobby countdown starts a server wall-clock deadline of `600000ms`; snapshots expose authoritative remaining time and the client interpolates the top-center `MM:SS` display between ticks.
-- A full room requires five survivor escapes. Underfilled rooms use `max(1, ceil(connected survivors × 5 / 7))`; connected escaped spectators remain in that population, and joins, leaves, and debug role changes recalculate it.
-- Reaching the threshold, or having every currently connected survivor escaped, ends the match immediately for survivors. Reaching the deadline below the threshold ends it for wardens, including action requests that race the next server tick.
+- A full room requires five survivor escapes. Underfilled rooms use `max(1, ceil(occupied survivors × 5 / 7))`; temporary disconnects preserve that population during grace, while final leaves, expiry, and debug role changes recalculate it.
+- Reaching the threshold, or having every occupied survivor escaped, ends the match immediately for survivors. Reaching the deadline below the threshold ends it for wardens, including action requests that race the next server tick.
 - Ending is immutable: queued input is cleared, the server loop stops, gameplay/chat requests are rejected, a final snapshot is broadcast, and clients freeze under a persistent result panel. The panel reveals Survivor and Warden rosters only after completion.
 
 ### Hidden Roles and Wisdom Orbs
@@ -350,8 +354,11 @@ same local display-name and HTTPS avatar validation as authenticated profiles.
 Auth, Main Menu, Profile, and Join by Code do not initialize Pixi, load runtime
 game assets, construct `NetworkManager`, or open a WebSocket. The selected
 Quick Play/private-room connection begins inside `startGame()` and uses the
-profile display name. A reload restores to Main Menu, except that a valid
-`?room=CODE` share link opens the prefilled join form after identity restoration.
+profile display name. Each occupied seat has a private 256-bit bearer token in
+the current tab's `sessionStorage`, scoped to the current profile ID. After
+identity restoration, a reload automatically resumes that seat; a different
+explicit `?room=CODE` invitation clears the stored seat and opens its prefilled
+join form instead.
 
 See `docs/SUPABASE_SETUP.md` for the migration, Google provider, redirect URL,
 and environment configuration.
@@ -495,7 +502,9 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `packages/client/src/game.ts`
   - lazy Pixi app bootstrap, network entry, input, prediction, reconciliation, interpolation, camera, HUD orchestration
 - `packages/client/src/net/NetworkManager.ts`
-  - client WebSocket wrapper and message dispatch
+  - client WebSocket wrapper, reconnect backoff, and message dispatch
+- `packages/client/src/net/ReconnectSession.ts`
+  - profile-scoped tab storage for private seat tokens and reconnect deadlines
 - `packages/client/src/net/SnapshotBuffer.ts`
   - buffered snapshots for remote interpolation
 - `packages/client/src/assets/AssetLoader.ts`
@@ -518,6 +527,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - canvas-aligned DOM proximity-chat log, input, timer, and character counter
 - `packages/client/src/systems/LobbyOverlay.ts`
   - responsive waiting-room roster, room code/share link, countdown, vote controls, and room-wide chat
+- `packages/client/src/systems/ReconnectOverlay.ts`
+  - blocking reconnect progress, estimated grace countdown, and Return to Menu action
 - `packages/client/src/systems/WisdomArrow.ts`
   - temporary world-space guidance arrow
 

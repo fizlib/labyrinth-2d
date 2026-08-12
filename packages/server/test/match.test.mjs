@@ -32,7 +32,7 @@ function createRoom(playerCount = 9) {
   for (let index = 0; index < playerCount; index++) {
     const socket = new FakeSocket(`player-${index}`);
     sockets.push(socket);
-    room.addPlayer(socket);
+    room.addPlayer(socket, `token-${index}`);
   }
   room.startMatch();
   return { room, sockets };
@@ -107,7 +107,7 @@ test('only nearby survivors can escape an active portal and the fifth ends a ful
   assert.equal(room.state.match.escapedCount, 5, 'ended matches reject later escapes');
 });
 
-test('connected-survivor disconnects recalculate the target and can end the match', (t) => {
+test('permanently removed survivors recalculate the target and can end the match', (t) => {
   const { room } = createRoom();
   t.after(() => room.destroy());
   activatePortal(room);
@@ -124,7 +124,7 @@ test('connected-survivor disconnects recalculate the target and can end the matc
   assert.equal(room.state.match.winner, 'survivors');
 });
 
-test('all currently connected survivors escaping ends an underfilled match', (t) => {
+test('all occupied survivors escaping ends an underfilled match', (t) => {
   const { room } = createRoom();
   t.after(() => room.destroy());
   activatePortal(room);
@@ -161,7 +161,7 @@ test('an action racing an expired deadline resolves as a warden win', (t) => {
   assert.equal(room.state.match.remainingMs, 0);
 
   const lateSocket = new FakeSocket('late-player');
-  room.addPlayer(lateSocket);
+  room.addPlayer(lateSocket, 'late-token');
   assert.equal(lateSocket.sent.length, 0, 'ended matches reject new room members');
   assert.equal(room.playerCount, 1);
 });
@@ -178,6 +178,7 @@ test('debug timer changes the authoritative deadline and zero triggers timeout',
   assert.equal(room.matchEndsAtMs, originalDeadline, 'regular players cannot use debug tools');
 
   sockets[0].data.isAdmin = true;
+  room.seats.get('player-0').isAdmin = true;
 
   room.handleDebugSetMatchTime('player-0', {
     type: 'DEBUG_SET_MATCH_TIME',

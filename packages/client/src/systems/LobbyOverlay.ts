@@ -156,12 +156,18 @@ export class LobbyOverlay {
   }
 
   private renderState(): void {
-    this.count.textContent = `${this.state.players.length} / ${this.state.maxPlayers}`;
+    const connectedCount = this.state.players.filter((player) => player.connected).length;
+    const disconnectedCount = this.state.players.length - connectedCount;
+    this.count.textContent = disconnectedCount > 0
+      ? `${connectedCount} online · ${this.state.players.length} / ${this.state.maxPlayers}`
+      : `${this.state.players.length} / ${this.state.maxPlayers}`;
     this.roster.replaceChildren();
     for (let index = 0; index < this.state.maxPlayers; index++) {
       const player = this.state.players[index];
       const item = document.createElement('li');
-      item.className = player ? 'lobby-player' : 'lobby-player lobby-player--empty';
+      item.className = player
+        ? `lobby-player${player.connected ? '' : ' lobby-player--disconnected'}`
+        : 'lobby-player lobby-player--empty';
       const ordinal = document.createElement('span');
       ordinal.className = 'lobby-player__ordinal';
       ordinal.textContent = String(index + 1).padStart(2, '0');
@@ -172,7 +178,11 @@ export class LobbyOverlay {
         : 'Open place';
       const vote = document.createElement('span');
       vote.className = 'lobby-player__vote';
-      vote.textContent = player?.votedToStart ? 'Ready' : '';
+      vote.textContent = player
+        ? player.connected
+          ? player.votedToStart ? 'Ready' : ''
+          : 'Reconnecting'
+        : '';
       item.append(ordinal, name, vote);
       this.roster.appendChild(item);
     }
@@ -182,6 +192,8 @@ export class LobbyOverlay {
   private renderStatus(): void {
     const now = Date.now();
     const playerCount = this.state.players.length;
+    const connectedCount = this.state.players.filter((player) => player.connected).length;
+    const disconnectedCount = playerCount - connectedCount;
     const votes = this.state.players.filter((player) => player.votedToStart).length;
     const me = this.state.players.find((player) => player.id === this.localPlayerId);
 
@@ -196,10 +208,14 @@ export class LobbyOverlay {
     }
 
     this.root.classList.remove('lobby-overlay--countdown');
-    this.adminStartButton.disabled = false;
+    this.adminStartButton.disabled = disconnectedCount > 0;
     const waitMs = Math.max(0, this.state.voteAvailableAt - now);
-    if (playerCount < this.state.minPlayers) {
-      const needed = this.state.minPlayers - playerCount;
+    if (disconnectedCount > 0) {
+      this.status.textContent = disconnectedCount === 1
+        ? 'Waiting for 1 player to reconnect before starting.'
+        : `Waiting for ${disconnectedCount} players to reconnect before starting.`;
+    } else if (connectedCount < this.state.minPlayers) {
+      const needed = this.state.minPlayers - connectedCount;
       this.status.textContent = this.isAdmin
         ? `You can start now, or wait for ${needed} more ${needed === 1 ? 'player' : 'players'} to unlock voting.`
         : `Waiting for ${needed} more ${needed === 1 ? 'player' : 'players'} to unlock early start.`;
@@ -212,7 +228,8 @@ export class LobbyOverlay {
     this.voteButton.textContent = me?.votedToStart
       ? 'Withdraw vote'
       : `Vote to start (${votes}/${this.state.votesRequired})`;
-    this.voteButton.disabled = playerCount < this.state.minPlayers || waitMs > 0;
+    this.voteButton.disabled =
+      disconnectedCount > 0 || connectedCount < this.state.minPlayers || waitMs > 0;
   }
 
   private async copyRoomLink(button: HTMLButtonElement): Promise<void> {

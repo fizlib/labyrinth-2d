@@ -54,9 +54,13 @@ import type {
   PlayerRole,
   SwampTerrain,
   CageState,
-  LobbyJoinMode,
 } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
+import {
+  clearReconnectSession,
+  RELEASE_ROOM_EVENT,
+  type ReconnectSession,
+} from './net/ReconnectSession';
 import {
   SnapshotBuffer,
   INTERPOLATION_DELAY,
@@ -77,6 +81,7 @@ import { CageVisual } from './systems/Cage';
 import { ProximityChatHud } from './systems/ProximityChatHud';
 import { MatchHud } from './systems/MatchHud';
 import { LobbyOverlay } from './systems/LobbyOverlay';
+import { ReconnectOverlay } from './systems/ReconnectOverlay';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
@@ -195,6 +200,7 @@ let debugTeleportActive = false;
 let debugTeleportResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 let currentMap: TileMapData | null = null;
+let currentMapSeed: number | null = null;
 const snapshotBuffer = new SnapshotBuffer();
 
 let minimap: Minimap | null = null;
@@ -1500,6 +1506,7 @@ function showLoadingError(message: string): void {
     returnButton.type = 'button';
     returnButton.textContent = 'Return to Menu';
     returnButton.addEventListener('click', () => {
+      clearReconnectSession();
       const url = new URL(window.location.href);
       url.searchParams.delete('room');
       window.location.href = url.toString();
@@ -1510,8 +1517,7 @@ function showLoadingError(message: string): void {
 
 export interface GameLaunchOptions {
   displayName: string;
-  joinMode: LobbyJoinMode;
-  roomId?: string;
+  reconnectSession: ReconnectSession;
   accessToken?: string;
 }
 
@@ -1571,10 +1577,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   const matchHud = new MatchHud(INTERNAL_WIDTH, INTERNAL_HEIGHT, {
     onPlayAgain: () => {
+      net.leaveRoom();
       window.sessionStorage.setItem(PLAY_AGAIN_STORAGE_KEY, '1');
       window.location.reload();
     },
-    onExit: () => window.location.reload(),
+    onExit: () => {
+      net.leaveRoom();
+      window.location.reload();
+    },
   });
   matchHud.addToStage(app.stage);
 
@@ -2116,11 +2126,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let triggerInteract: () => void = () => {};
   let chatHud: ProximityChatHud | null = null;
   let lobbyOverlay: LobbyOverlay | null = null;
+  let reconnectOverlay: ReconnectOverlay | null = null;
   let chatInputActive = false;
   let setMobileInputEnabled: (enabled: boolean) => void = () => {};
 
   const net = new NetworkManager({
-    onLobbyJoined: (playerId, lobby, isAdmin) => {
+    onLobbyJoined: (playerId, lobby, isAdmin, resumed) => {
       DebugSettings.setAdminAccess(isAdmin);
       if (isAdmin && !debugUi) {
         debugUi = createDebugUI();
@@ -2139,20 +2150,24 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
       const fullscreenToggle = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
       if (fullscreenToggle) fullscreenToggle.hidden = true;
-      lobbyOverlay?.destroy();
-      lobbyOverlay = new LobbyOverlay({
-        parent: container,
-        localPlayerId: playerId,
-        initialState: lobby,
-        isAdmin,
-        onVote: (vote) => net.sendLobbyVote(vote),
-        onStartNow: () => net.sendAdminStartGame(),
-        onSendChat: (text) => net.sendLobbyChatMessage(text),
-        onLeave: () => {
-          net.disconnect();
-          window.location.reload();
-        },
-      });
+      if (resumed && lobbyOverlay) {
+        lobbyOverlay.update(lobby);
+      } else {
+        lobbyOverlay?.destroy();
+        lobbyOverlay = new LobbyOverlay({
+          parent: container,
+          localPlayerId: playerId,
+          initialState: lobby,
+          isAdmin,
+          onVote: (vote) => net.sendLobbyVote(vote),
+          onStartNow: () => net.sendAdminStartGame(),
+          onSendChat: (text) => net.sendLobbyChatMessage(text),
+          onLeave: () => {
+            net.leaveRoom();
+            window.location.reload();
+          },
+        });
+      }
       window.requestAnimationFrame(dismissLoadingScreen);
       console.info(`[Main] Joined lobby "${lobby.roomId}" as ${playerId}`);
     },
@@ -2165,74 +2180,111 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       lobbyOverlay?.addMessage({ playerId, displayName, text, sentAt });
     },
 
-    onRoomJoined: (roomId, playerId, mapSeed, role, wisdomOrbs, gameState) => {
+    onRoomJoined: (
+      roomId,
+      playerId,
+      mapSeed,
+      role,
+      wisdomOrbs,
+      gameState,
+      isAdmin,
+      resumed,
+    ) => {
+      DebugSettings.setAdminAccess(isAdmin);
+      if (isAdmin && !debugUi) {
+        debugUi = createDebugUI();
+        statusEl = debugUi.status;
+        setupDebugToggles(debugUi);
+        setupDebugPlayerActions(
+          debugUi,
+          net,
+          () => latestServerState,
+          () => net.playerId,
+        );
+      }
       const fullscreenToggle = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
       if (fullscreenToggle) fullscreenToggle.hidden = false;
       lobbyOverlay?.destroy();
       lobbyOverlay = null;
       updateLoadingProgress(0.99, 'Carving your path through the maze…');
       console.info(
-        `[Main] Joined room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
+        `[Main] ${resumed ? 'Resumed' : 'Joined'} room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
       );
       debugPlayerRoles.clear();
       debugPlayerRoles.set(playerId, role);
-      chatHud?.clear();
+      if (!resumed) chatHud?.clear();
       chatHud?.setEnabled(true);
       matchHud.sync(gameState.match);
+      snapshotBuffer.clear();
+      pendingInputs = [];
 
-      // Clear previous slide states on new room join
-      gateSlideStates.clear();
-      portal?.destroy();
-      portal = null;
-      portalPlatform?.destroy();
-      portalPlatform = null;
+      const reuseExistingWorld = Boolean(
+        resumed &&
+        currentMapSeed === mapSeed &&
+        currentMap &&
+        currentLayout &&
+        tilemapRenderer,
+      );
+
       pendingPortalPos = null;
       shakeTimeRemaining = 0;
       cinematicPhase = 'idle';
       bridgeCameraBlend = 0;
       bridgeCameraFocus = null;
-      clearCageVisuals();
       emptyTrapPromptShakeRemaining = 0;
       emptyTrapPromptShakeElapsed = 0;
       portalEscapeAnimations.clear();
 
-      const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
-      currentMap = layout.map;
-      currentLayout = layout;
-      mapPixelW = currentMap.width * currentMap.tileSize;
-      mapPixelH = currentMap.height * currentMap.tileSize;
+      if (!reuseExistingWorld) {
+        gateSlideStates.clear();
+        portal?.destroy();
+        portal = null;
+        portalPlatform?.destroy();
+        portalPlatform = null;
+        clearCageVisuals();
 
-      // ── Build chunk-based tilemap ──────────────────────────────────────
-      tilemapRenderer?.destroy();
-      tilemapRenderer = new TilemapRenderer(
-        currentMap,
-        layout.gates,
-        layout.pressurePlates,
-        layout.bridges,
-        layout.swamps,
-        layout.swordFields,
-        layout.trapCells,
-        layout.chestDeadEnds,
-        layout.tIntersectionDecorations,
-        layout.decoratedVerticalPassages,
-        layout.dirtMask,
-        assets,
-        app.renderer,
-      );
-      tilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
-      tilemapRenderer.syncSwordFieldStates(
+        const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
+        currentMapSeed = mapSeed;
+        currentMap = layout.map;
+        currentLayout = layout;
+        mapPixelW = currentMap.width * currentMap.tileSize;
+        mapPixelH = currentMap.height * currentMap.tileSize;
+
+        // ── Build chunk-based tilemap ────────────────────────────────────
+        tilemapRenderer?.destroy();
+        tilemapRenderer = new TilemapRenderer(
+          currentMap,
+          layout.gates,
+          layout.pressurePlates,
+          layout.bridges,
+          layout.swamps,
+          layout.swordFields,
+          layout.trapCells,
+          layout.chestDeadEnds,
+          layout.tIntersectionDecorations,
+          layout.decoratedVerticalPassages,
+          layout.dirtMask,
+          assets,
+          app.renderer,
+        );
+        if (cellBoundaryOverlay?.parent === worldContainer) {
+          worldContainer.removeChild(cellBoundaryOverlay);
+        }
+        cellBoundaryOverlay?.destroy();
+        cellBoundaryOverlay = createCellBoundaryOverlay();
+        attachTilemapLayers(tilemapRenderer);
+      }
+
+      const activeTilemapRenderer = tilemapRenderer;
+      if (!activeTilemapRenderer) throw new Error('Missing tilemap after room admission');
+      activeTilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
+      activeTilemapRenderer.syncSwordFieldStates(
         gameState.swordFieldStates,
         gameState.tick,
         false,
       );
-      tilemapRenderer.syncChestStates(gameState.chestStates, false);
+      activeTilemapRenderer.syncChestStates(gameState.chestStates, false);
       syncCageVisuals(gameState.cageStates, false);
-      if (cellBoundaryOverlay?.parent === worldContainer) {
-        worldContainer.removeChild(cellBoundaryOverlay);
-      }
-      cellBoundaryOverlay?.destroy();
-      cellBoundaryOverlay = createCellBoundaryOverlay();
-      attachTilemapLayers(tilemapRenderer);
 
       if (statusEl) {
         statusEl.textContent = '🟢 Connected';
@@ -2244,6 +2296,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         localX = me.x;
         localY = me.y;
         localFacing = me.facing;
+        inputSequenceNumber = me.lastProcessedInput;
         localPlayerInitialized = true;
       }
 
@@ -2251,7 +2304,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         gameState.match.status === 'running' && !(me?.escaped ?? false);
       chatHud?.setCanSend(canLocalPlayerAct);
       setMobileInputEnabled(canLocalPlayerAct);
-      applyLocalRoleUi(role, wisdomOrbs, gameState.match.status === 'running');
+      applyLocalRoleUi(
+        role,
+        wisdomOrbs,
+        gameState.match.status === 'running' && !resumed,
+      );
 
       // ── Sync runestone activation state from initial GameState ─────
       for (const rsInfo of gameState.runestones) {
@@ -2267,22 +2324,26 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       // ── Initial portal sync ────────────────────────────────────────
       if (gameState.portal) {
         const portalAlreadyActive = gameState.runestones.every((rs) => rs.activated);
-        portalPlatform = new PortalPlatform(
-          gameState.portal.x,
-          gameState.portal.y,
-          assets.portalPlatformTextures,
-          tilemapRenderer.portalTerrainLayer,
-          tilemapRenderer.groundDetailLayer,
-          entityLayer,
-        );
-        portal = new Portal(
-          gameState.portal.x,
-          gameState.portal.y,
-          assets.portalFrames,
-          assets.portalActivationCount,
-          entityLayer,
-          portalAlreadyActive,
-        );
+        if (!portalPlatform || !portal) {
+          portalPlatform = new PortalPlatform(
+            gameState.portal.x,
+            gameState.portal.y,
+            assets.portalPlatformTextures,
+            activeTilemapRenderer.portalTerrainLayer,
+            activeTilemapRenderer.groundDetailLayer,
+            entityLayer,
+          );
+          portal = new Portal(
+            gameState.portal.x,
+            gameState.portal.y,
+            assets.portalFrames,
+            assets.portalActivationCount,
+            entityLayer,
+            portalAlreadyActive,
+          );
+        } else if (portalAlreadyActive) {
+          portal.activate();
+        }
         minimap?.setPortalPosition(gameState.portal.x, gameState.portal.y);
         console.info(
           `[Main] Portal ${portalAlreadyActive ? 'active' : 'inactive'} at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`,
@@ -2292,16 +2353,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       // ── Late-join gate state sync ────────────────────────────────────
       if (gameState.gateStates && currentLayout) {
         for (const gs of gameState.gateStates) {
-          if (gs.open) {
-            applyGateState(
-              gs.gateIndex,
-              true,
-              currentLayout.gates,
-              currentMap!,
-              tilemapRenderer!,
-              assets,
-            );
-          }
+          applyGateState(
+            gs.gateIndex,
+            gs.open,
+            currentLayout.gates,
+            currentMap!,
+            tilemapRenderer!,
+            assets,
+          );
         }
       }
 
@@ -2353,7 +2412,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           player.id,
           player.spriteIndex,
           player.teamId,
-          player.displayName,
+          player.connected ? player.displayName : `${player.displayName} · reconnecting`,
           !isLocal && !player.escaped,
         );
         setPlayerAnimation(
@@ -2361,6 +2420,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           getAnimationKey(player.facing, player.isMoving, player.isDead),
         );
         setPlayerPosition(data, player.x, player.y, gameState.portal);
+        data.container.alpha = player.connected ? 1 : 0.45;
         data.container.visible = !player.escaped;
         if (!isLocal && !player.escaped) knownRemotePlayers.add(player.id);
       }
@@ -2463,9 +2523,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
             player.id,
             player.spriteIndex,
             player.teamId,
-            player.displayName,
+            player.connected ? player.displayName : `${player.displayName} · reconnecting`,
             !player.escaped,
           );
+          data.container.alpha = player.connected ? 1 : 0.45;
           if (player.escaped) {
             if (!portalEscapeAnimations.has(player.id)) data.container.visible = false;
           } else {
@@ -2586,7 +2647,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onError: (code, message) => {
       console.error(`[Main] Server error [${code}]: ${message}`);
-      showLoadingError(message);
+      if (!code.startsWith('RECONNECT_')) showLoadingError(message);
       if (statusEl) {
         statusEl.textContent = `🔴 Error: ${message}`;
         statusEl.classList.add('error');
@@ -2672,24 +2733,40 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       );
     },
 
-    onDisconnect: () => {
-      console.info('[Main] Disconnected from server');
-      updateLoadingProgress(0.98, 'The gate is resisting. Retrying…');
+    onConnectionState: (state) => {
+      reconnectOverlay?.update(state);
+      if (state.status === 'connected') {
+        if (statusEl) {
+          statusEl.textContent = '🟢 Connected';
+          statusEl.classList.add('connected');
+        }
+        return;
+      }
+
+      resetAllInput();
+      pendingInputs = [];
+      snapshotBuffer.clear();
       minimap?.closeExpanded();
-      localPlayerRole = null;
-      localWisdomOrbs = 0;
-      emptyTrapPromptShakeRemaining = 0;
-      debugPlayerRoles.clear();
-      chatHud?.clear();
-      chatHud?.setEnabled(false);
       chatHud?.setCanSend(false);
-      mobileControls.setWisdomAvailable(false);
-      DebugSettings.setAdminAccess(false);
-      debugUi?.root.remove();
-      debugUi = null;
-      statusEl = null;
+      setMobileInputEnabled(false);
+      if (interactPrompt) interactPrompt.visible = false;
+      if (statusEl) {
+        statusEl.textContent = state.status === 'failed' ? '🔴 Disconnected' : '🟠 Reconnecting';
+        statusEl.classList.remove('connected');
+      }
     },
   });
+
+  reconnectOverlay = new ReconnectOverlay({
+    parent: container,
+    onLeave: () => {
+      net.leaveRoom();
+      const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      window.location.href = url.toString();
+    },
+  });
+  window.addEventListener(RELEASE_ROOM_EVENT, () => net.leaveRoom());
 
   chatHud = new ProximityChatHud({
     parent: container,
@@ -3609,8 +3686,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   net.connect(
     wsUrl,
-    options.joinMode,
-    options.roomId ?? '',
+    options.reconnectSession,
     displayName,
     options.accessToken,
   );

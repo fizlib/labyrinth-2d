@@ -845,6 +845,58 @@ body {
   text-transform: uppercase;
 }
 
+.lobby-player--disconnected {
+  border-color: rgba(255, 194, 102, 0.52);
+  opacity: 0.66;
+}
+
+.lobby-player--disconnected .lobby-player__vote {
+  color: #ffc266;
+  font-size: 0.56rem;
+}
+
+.reconnect-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(5, 7, 13, 0.68);
+  backdrop-filter: blur(2px);
+}
+
+.reconnect-overlay[hidden] {
+  display: none;
+}
+
+.reconnect-overlay__panel {
+  width: min(28rem, 100%);
+  padding: clamp(1.25rem, 4vw, 2rem);
+  border: 2px solid rgba(239, 201, 123, 0.75);
+  background: linear-gradient(180deg, rgba(30, 27, 34, 0.98), rgba(12, 15, 23, 0.98));
+  box-shadow: 0 1rem 4rem rgba(0, 0, 0, 0.55), inset 0 0 0 2px rgba(255, 255, 255, 0.04);
+  color: #f8edcf;
+  text-align: center;
+}
+
+.reconnect-overlay__panel h2 {
+  margin: 0.75rem 0 0.55rem;
+  color: #ffe5a3;
+  font-size: clamp(1.35rem, 5vw, 2rem);
+}
+
+.reconnect-overlay__status {
+  min-height: 2.6em;
+  margin: 0 0 1.1rem;
+  color: #d6cfbd;
+  line-height: 1.45;
+}
+
+.reconnect-overlay__spinner {
+  margin-inline: auto;
+}
+
 .lobby-chat {
   min-width: 0;
 }

@@ -10,6 +10,13 @@ export const LOBBY_VOTE_DELAY_MS = 60_000;
 /** Short server-authoritative pause before a locked roster enters the match. */
 export const LOBBY_COUNTDOWN_MS = 8_000;
 
+/** Time an unexpectedly disconnected player keeps their occupied room seat. */
+export const RECONNECT_GRACE_MS = 45_000;
+
+/** 256-bit base64url bearer token used to reclaim one occupied seat. */
+export const RECONNECT_TOKEN_BYTES = 32;
+export const RECONNECT_TOKEN_LENGTH = 43;
+
 /** Room codes omit visually ambiguous characters such as 0/O and 1/I. */
 export const ROOM_CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 export const ROOM_CODE_LENGTH = 6;
@@ -22,6 +29,7 @@ export interface LobbyPlayerInfo {
   id: string;
   displayName: string;
   votedToStart: boolean;
+  connected: boolean;
 }
 
 /** Public, event-driven state used only before gameplay begins. */
@@ -58,4 +66,12 @@ export function isValidRoomCode(value: unknown): boolean {
   const normalized = normalizeRoomCode(value);
   if (normalized.length !== ROOM_CODE_LENGTH) return false;
   return Array.from(normalized).every((character) => ROOM_CODE_ALPHABET.includes(character));
+}
+
+export function isValidReconnectToken(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length === RECONNECT_TOKEN_LENGTH &&
+    /^[A-Za-z0-9_-]+$/.test(value)
+  );
 }

@@ -20,6 +20,13 @@ import {
   loadGuestProfile,
   updateGuestProfile,
 } from './auth/guest';
+import {
+  clearReconnectSession,
+  createReconnectSession,
+  loadReconnectSession,
+  RELEASE_ROOM_EVENT,
+  type ReconnectSession,
+} from './net/ReconnectSession';
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 
@@ -252,6 +259,8 @@ class AppController {
       && this.identityMode === 'authenticated'
       && (this.view === 'launching-game' || this.view === 'game')
     ) {
+      window.dispatchEvent(new Event(RELEASE_ROOM_EVENT));
+      clearReconnectSession();
       window.location.reload();
       return;
     }
@@ -381,6 +390,40 @@ class AppController {
 
   private renderMenu(): void {
     if (!this.profile || !this.identityMode) return;
+
+    const playAgain = window.sessionStorage.getItem(PLAY_AGAIN_STORAGE_KEY) === '1';
+    if (playAgain) {
+      window.sessionStorage.removeItem(PLAY_AGAIN_STORAGE_KEY);
+      clearReconnectSession();
+      this.pendingRoomCode = null;
+    } else {
+      const reconnectSession = loadReconnectSession(this.profile.id);
+      const reconnectRoomCode = reconnectSession?.roomId
+        ?? (reconnectSession?.joinMode === 'join'
+          ? reconnectSession.requestedRoomId
+          : null);
+      if (
+        reconnectSession &&
+        (!this.pendingRoomCode || reconnectRoomCode === this.pendingRoomCode)
+      ) {
+        this.pendingRoomCode = null;
+        this.view = 'launching-game';
+        this.renderRestoring('Reclaiming your place in the maze…');
+        window.setTimeout(
+          () => void this.launchGame(
+            reconnectSession.joinMode,
+            reconnectSession.requestedRoomId,
+            reconnectSession,
+          ),
+          0,
+        );
+        return;
+      }
+      if (reconnectSession) {
+        clearReconnectSession();
+      }
+    }
+
     if (this.pendingRoomCode) {
       const roomCode = this.pendingRoomCode;
       this.pendingRoomCode = null;
@@ -435,8 +478,7 @@ class AppController {
       void this.signOut();
     });
 
-    if (window.sessionStorage.getItem(PLAY_AGAIN_STORAGE_KEY) === '1') {
-      window.sessionStorage.removeItem(PLAY_AGAIN_STORAGE_KEY);
+    if (playAgain) {
       window.setTimeout(() => void this.launchGame('quick'), 0);
     }
   }
@@ -598,6 +640,8 @@ class AppController {
   }
 
   private async signOut(statusSelector = '#menu-status'): Promise<void> {
+    window.dispatchEvent(new Event(RELEASE_ROOM_EVENT));
+    clearReconnectSession();
     if (this.identityMode === 'guest') {
       clearGuestProfile();
       ++this.sessionRevision;
@@ -625,7 +669,11 @@ class AppController {
     }
   }
 
-  private async launchGame(joinMode: LobbyJoinMode, roomId = ''): Promise<void> {
+  private async launchGame(
+    joinMode: LobbyJoinMode,
+    roomId = '',
+    existingReconnectSession?: ReconnectSession,
+  ): Promise<void> {
     if (this.gameLaunchStarted || !this.profile || !this.identityMode) return;
     this.gameLaunchStarted = true;
     this.view = 'launching-game';
@@ -633,10 +681,12 @@ class AppController {
 
     try {
       const { startGame } = await import('./game');
+      const reconnectSession =
+        existingReconnectSession ??
+        createReconnectSession(this.profile.id, joinMode, roomId);
       await startGame({
         displayName: this.profile.display_name,
-        joinMode,
-        roomId,
+        reconnectSession,
         accessToken: this.session?.access_token,
       });
       this.view = 'game';

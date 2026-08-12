@@ -31,6 +31,7 @@ import {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   isValidRoomCode,
+  isValidReconnectToken,
   normalizeRoomCode,
   SERVER_TICK_RATE,
   type ClientToServerMessage,
@@ -48,6 +49,7 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 9001;
 // ── Room Registry ───────────────────────────────────────────────────────────
 
 const rooms: Map<string, Room> = new Map();
+const roomsByReconnectToken: Map<string, Room> = new Map();
 
 function generateRoomCode(): string {
   for (;;) {
@@ -61,7 +63,20 @@ function generateRoomCode(): string {
 
 function createRoom(isPublic: boolean): Room {
   const roomId = generateRoomCode();
-  const room = new Room(roomId, isPublic);
+  let room: Room;
+  room = new Room(roomId, isPublic, {
+    onSeatReleased: (reconnectToken) => {
+      if (roomsByReconnectToken.get(reconnectToken) === room) {
+        roomsByReconnectToken.delete(reconnectToken);
+      }
+    },
+    onEmpty: () => {
+      if (rooms.get(roomId) !== room) return;
+      room.destroy();
+      rooms.delete(roomId);
+      console.info(`[Server] Destroyed empty room: ${roomId}`);
+    },
+  });
   rooms.set(roomId, room);
   console.info(`[Server] Created ${isPublic ? 'public' : 'private'} room: ${roomId}`);
   return room;
@@ -98,6 +113,22 @@ async function handleJoinRoom(
     return;
   }
 
+  if (!isValidReconnectToken(msg.reconnectToken)) {
+    sendError(ws, 'INVALID_RECONNECT_TOKEN', 'A valid private seat token is required.');
+    return;
+  }
+
+  const existingRoom = roomsByReconnectToken.get(msg.reconnectToken);
+  if (existingRoom) {
+    const result = existingRoom.reconnectPlayer(ws, msg.reconnectToken);
+    if (result === 'in-use') {
+      sendError(ws, 'RECONNECT_IN_USE', 'That seat is already connected.');
+    } else if (result !== 'resumed') {
+      sendError(ws, 'RECONNECT_FAILED', 'That reserved seat is no longer available.');
+    }
+    return;
+  }
+
   const displayName = normalizeDisplayName(msg.displayName);
   if (!displayName) {
     sendError(ws, 'INVALID_DISPLAY_NAME', 'Display names must use 1–32 characters.');
@@ -109,6 +140,17 @@ async function handleJoinRoom(
   try {
     data.isAdmin = await verifyAdminAccessToken(msg.accessToken);
     if (!data.connected) return;
+
+    const roomClaimedWhileVerifying = roomsByReconnectToken.get(msg.reconnectToken);
+    if (roomClaimedWhileVerifying) {
+      const result = roomClaimedWhileVerifying.reconnectPlayer(ws, msg.reconnectToken);
+      if (result === 'in-use') {
+        sendError(ws, 'RECONNECT_IN_USE', 'That seat is already connected.');
+      } else if (result !== 'resumed') {
+        sendError(ws, 'RECONNECT_FAILED', 'That reserved seat is no longer available.');
+      }
+      return;
+    }
 
     let room: Room | undefined;
     if (msg.mode === 'quick') {
@@ -148,7 +190,11 @@ async function handleJoinRoom(
       return;
     }
 
-    room.addPlayer(ws);
+    if (!room.addPlayer(ws, msg.reconnectToken)) {
+      sendError(ws, 'JOIN_FAILED', 'The lobby could not reserve a seat. Please try again.');
+      return;
+    }
+    roomsByReconnectToken.set(msg.reconnectToken, room);
   } catch (error) {
     console.error(
       `[WS] Failed to join lobby for ${data.id}:`,
@@ -159,6 +205,37 @@ async function handleJoinRoom(
     }
   } finally {
     data.joinPending = false;
+  }
+}
+
+function handleReconnectRoom(
+  ws: uWS.WebSocket<SocketData>,
+  roomIdValue: unknown,
+  reconnectToken: unknown,
+): void {
+  const data = ws.getUserData();
+  if (data.roomId || data.joinPending) {
+    sendError(ws, 'ALREADY_IN_ROOM', 'You have already joined or are joining a room.');
+    return;
+  }
+
+  const roomId = normalizeRoomCode(roomIdValue);
+  if (!isValidRoomCode(roomId) || !isValidReconnectToken(reconnectToken)) {
+    sendError(ws, 'RECONNECT_FAILED', 'That reserved seat is no longer available.');
+    return;
+  }
+
+  const room = rooms.get(roomId);
+  if (!room || roomsByReconnectToken.get(reconnectToken) !== room) {
+    sendError(ws, 'RECONNECT_FAILED', 'That reserved seat is no longer available.');
+    return;
+  }
+
+  const result = room.reconnectPlayer(ws, reconnectToken);
+  if (result === 'in-use') {
+    sendError(ws, 'RECONNECT_IN_USE', 'That seat is already connected.');
+  } else if (result !== 'resumed') {
+    sendError(ws, 'RECONNECT_FAILED', 'That reserved seat is no longer available.');
   }
 }
 
@@ -214,6 +291,16 @@ uWS
         switch (msg.type) {
           case MessageType.JoinRoom: {
             void handleJoinRoom(ws, msg);
+            break;
+          }
+
+          case MessageType.ReconnectRoom: {
+            handleReconnectRoom(ws, msg.roomId, msg.reconnectToken);
+            break;
+          }
+
+          case MessageType.LeaveRoom: {
+            if (data.roomId) rooms.get(data.roomId)?.removePlayer(data.id);
             break;
           }
 
@@ -358,15 +445,7 @@ uWS
 
       if (data.roomId) {
         const room = rooms.get(data.roomId);
-        if (room) {
-          room.removePlayer(data.id);
-
-          if (room.playerCount === 0) {
-            room.destroy();
-            rooms.delete(data.roomId);
-            console.info(`[Server] Destroyed empty room: ${data.roomId}`);
-          }
-        }
+        room?.disconnectPlayer(data.id, ws);
       }
     },
   })

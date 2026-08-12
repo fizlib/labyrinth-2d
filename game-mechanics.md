@@ -25,12 +25,21 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 ## Lobby and match start
 
 - Players can enter Quick Play, create a private six-character room, or join a private room by code or share link.
-- Waiting rooms show all connected nicknames and provide room-wide text chat.
+- Waiting rooms show every occupied nickname, mark temporarily offline seats as reconnecting, and provide room-wide text chat.
 - A full nine-player room starts an eight-second countdown automatically.
 - An underfilled room can start with at least six players. After one minute, any player may vote to start; two thirds of the connected roster must approve.
 - A Supabase-verified administrator may start any non-empty lobby immediately, bypassing population, delay, and vote requirements.
-- A player leaving during the countdown cancels it and returns the room to waiting.
+- An unexpected disconnect reserves the player's seat for 45 seconds. The countdown is cancelled, votes are cleared, and no start path is available while a reserved seat remains offline.
+- Reconnecting within the grace period restores the same player ID and lobby slot. If the seat expires it is removed; an underfilled lobby must collect a new vote before starting.
+- Explicit Leave, Play Again, and sign-out release the seat immediately.
 - Squads and hidden roles are assigned only when the countdown completes. Six-player matches use one Warden; matches with seven to nine players use two Wardens in different squads.
+
+## Reconnecting during a match
+
+- A reload or brief connection loss reserves the player's match seat for 45 seconds and keeps their role, inventory, position, reveal state, and other private progress intact.
+- While offline, that player is inert: they cannot move, repair, trigger pressure plates, be targeted by traps, or participate in other occupancy-based interactions. Other players see a dimmed, frozen avatar.
+- A successful reconnect receives the current authoritative world and private player state and resumes from the same identity. The match clock does not pause during the grace period.
+- If the reservation expires, the player leaves permanently and the survivor escape threshold is recalculated. A room is destroyed when its final occupied seat is released.
 
 ## Labyrinth and central hub
 
@@ -69,8 +78,8 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - The match lasts **10 minutes**, starting when the lobby countdown completes, with a live top-center timer.
 - **Survivors win immediately when 5 of the 7 survivors have escaped.** The match ends as soon as the fifth survivor escapes.
 - **Wardens win when the timer expires and 4 or fewer survivors have escaped.**
-- With fewer than seven connected survivors, the target is `ceil(connected survivors × 5 / 7)` and is recalculated as survivors join or leave.
-- Survivors also win immediately when every survivor currently connected to the match has escaped.
+- With fewer than seven occupied survivors, the target is `max(1, ceil(occupied survivors × 5 / 7))` and is recalculated after a permanent leave or expired reservation, not during the 45-second grace period.
+- Survivors also win immediately when every survivor still occupying a match seat has escaped.
 - Wardens do not count toward the escape total because they cannot escape.
 - This threshold allows up to two survivors to remain trapped without causing the entire survivor side to lose.
 - Escaped survivors cannot move, act, or use proximity chat, but continue to receive global system announcements.

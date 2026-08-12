@@ -17,12 +17,16 @@ export {
   LOBBY_MIN_PLAYERS,
   LOBBY_VOTE_DELAY_MS,
   LOBBY_COUNTDOWN_MS,
+  RECONNECT_GRACE_MS,
+  RECONNECT_TOKEN_BYTES,
+  RECONNECT_TOKEN_LENGTH,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   getLobbyVotesRequired,
   getWardenCountForPlayers,
   normalizeRoomCode,
   isValidRoomCode,
+  isValidReconnectToken,
   type LobbyPhase,
   type LobbyStartReason,
   type LobbyJoinMode,
@@ -352,6 +356,8 @@ export enum MessageType {
   VoteToStart = 'VOTE_TO_START',
   SendLobbyChat = 'SEND_LOBBY_CHAT',
   AdminStartGame = 'ADMIN_START_GAME',
+  ReconnectRoom = 'RECONNECT_ROOM',
+  LeaveRoom = 'LEAVE_ROOM',
 
   // ── Server → Client ──
   RoomJoined = 'ROOM_JOINED',
@@ -382,8 +388,20 @@ export interface JoinRoomMessage {
   roomId: string;
   displayName: string;
   mode: LobbyJoinMode;
+  /** Private per-tab bearer token registered to this occupied seat. */
+  reconnectToken: string;
   /** Supabase access token used by the game server to verify admin status. */
   accessToken?: string;
+}
+
+export interface ReconnectRoomMessage {
+  type: MessageType.ReconnectRoom;
+  roomId: string;
+  reconnectToken: string;
+}
+
+export interface LeaveRoomMessage {
+  type: MessageType.LeaveRoom;
 }
 
 export interface VoteToStartMessage {
@@ -528,6 +546,8 @@ export interface PlayerInfo {
   y: number;
   facing: FacingDirection;
   isMoving: boolean;
+  /** False while this occupied seat is inside its reconnect grace window. */
+  connected: boolean;
   /** Debug death state; currently rendered as the character's lying pose. */
   isDead: boolean;
   /** Whether this survivor has escaped and become an inactive spectator. */
@@ -539,6 +559,8 @@ export interface RoomJoinedMessage {
   type: MessageType.RoomJoined;
   roomId: string;
   playerId: string;
+  /** Private, server-verified permission for the recipient. */
+  isAdmin: boolean;
   mapSeed: number;
   /** Private role for the recipient of this message. */
   role: PlayerRole;
@@ -784,6 +806,8 @@ export interface GameState {
 
 export type ClientToServerMessage =
   | JoinRoomMessage
+  | ReconnectRoomMessage
+  | LeaveRoomMessage
   | VoteToStartMessage
   | SendLobbyChatMessage
   | AdminStartGameMessage

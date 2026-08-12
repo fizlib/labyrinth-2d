@@ -1,6 +1,6 @@
 // packages/server/src/Room.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Room — Manages one maze instance and its connected players.
+// Room — Manages one maze instance and its occupied, reconnectable seats.
 //
 // Spawn system:
 //   - Teams spawn at dynamically computed equidistant points (BFS from hub).
@@ -63,6 +63,7 @@ import {
   LOBBY_MAX_PLAYERS,
   LOBBY_MIN_PLAYERS,
   LOBBY_VOTE_DELAY_MS,
+  RECONNECT_GRACE_MS,
   getLobbyVotesRequired,
   getWardenCountForPlayers,
   MATCH_DURATION_MS,
@@ -186,6 +187,22 @@ interface RoomPlayerInfo extends PlayerInfo {
   wisdomOrbs: number;
 }
 
+interface RoomSeat {
+  id: string;
+  displayName: string;
+  isAdmin: boolean;
+  reconnectToken: string;
+  reservationHandle: ReturnType<typeof setTimeout> | null;
+}
+
+export interface RoomOptions {
+  reconnectGraceMs?: number;
+  onSeatReleased?: (reconnectToken: string) => void;
+  onEmpty?: () => void;
+}
+
+export type ReconnectResult = 'resumed' | 'in-use' | 'not-found';
+
 type RoomState = Omit<GameState, 'players'> & { players: RoomPlayerInfo[] };
 
 function createEmptyRoleSeats(): PlayerRole[][] {
@@ -213,6 +230,7 @@ function toPublicPlayerInfo(player: RoomPlayerInfo): PlayerInfo {
     y: player.y,
     facing: player.facing,
     isMoving: player.isMoving,
+    connected: player.connected,
     isDead: player.isDead,
     escaped: player.escaped,
     lastProcessedInput: player.lastProcessedInput,
@@ -276,6 +294,7 @@ export class Room {
   readonly id: string;
   readonly isPublic: boolean;
   private state: RoomState;
+  private readonly seats = new Map<string, RoomSeat>();
   private sockets: Map<string, PlayerSocket> = new Map();
   private inputQueues: Map<string, QueuedInput[]> = new Map();
   private readonly lastChatSentAt = new Map<string, number>();
@@ -285,6 +304,9 @@ export class Room {
   private lobbyStartReason: LobbyStartReason = null;
   private lobbyVoteAvailableAtMs = 0;
   private readonly lobbyVotes = new Set<string>();
+  private readonly reconnectGraceMs: number;
+  private readonly onSeatReleased: (reconnectToken: string) => void;
+  private readonly onEmpty: () => void;
 
   /** Server wall-clock deadline, initialized when the lobby countdown completes. */
   private matchEndsAtMs: number | null = null;
@@ -390,9 +412,12 @@ export class Room {
   /** Precomputed tile distances from every walkable tile to the portal approach zone. */
   private portalDistanceField: NavigationDistanceField | null = null;
 
-  constructor(id: string, isPublic = false) {
+  constructor(id: string, isPublic = false, options: RoomOptions = {}) {
     this.id = id;
     this.isPublic = isPublic;
+    this.reconnectGraceMs = options.reconnectGraceMs ?? RECONNECT_GRACE_MS;
+    this.onSeatReleased = options.onSeatReleased ?? (() => {});
+    this.onEmpty = options.onEmpty ?? (() => {});
     this.roleSeats = createEmptyRoleSeats();
     this.mapSeed = Math.floor(Math.random() * 2147483647);
     const layout = generateMazeLayout(this.mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
@@ -500,25 +525,37 @@ export class Room {
 
   // ── Player Management ─────────────────────────────────────────────────
 
+  /** Occupied seats include players inside their reconnect grace window. */
   get playerCount(): number {
+    return this.seats.size;
+  }
+
+  get connectedPlayerCount(): number {
     return this.sockets.size;
   }
 
   get isFull(): boolean {
-    return this.sockets.size >= LOBBY_MAX_PLAYERS;
+    return this.playerCount >= LOBBY_MAX_PLAYERS;
   }
 
   get isJoinable(): boolean {
     return this.state.match.status === 'waiting' && this.countdownHandle === null && !this.isFull;
   }
 
-  addPlayer(ws: PlayerSocket): void {
+  addPlayer(ws: PlayerSocket, reconnectToken: string): boolean {
     const data = ws.getUserData();
     const playerId = data.id;
     const displayName = data.displayName;
 
-    if (!this.isJoinable) return;
+    if (!this.isJoinable || this.getSeatByReconnectToken(reconnectToken)) return false;
 
+    this.seats.set(playerId, {
+      id: playerId,
+      displayName,
+      isAdmin: data.isAdmin,
+      reconnectToken,
+      reservationHandle: null,
+    });
     this.sockets.set(playerId, ws);
     this.inputQueues.set(playerId, []);
     this.revealedWisdomBridges.set(playerId, new Set());
@@ -527,13 +564,7 @@ export class Room {
     if (this.playerCount === 1) this.lobbyVoteAvailableAtMs = Date.now() + LOBBY_VOTE_DELAY_MS;
     data.roomId = this.id;
 
-    const joinedMessage: LobbyJoinedMessage = {
-      type: MessageType.LobbyJoined,
-      playerId,
-      isAdmin: data.isAdmin,
-      lobby: this.getLobbyState(),
-    };
-    this.send(ws, joinedMessage);
+    this.sendLobbyJoined(ws, playerId);
     this.broadcastLobbyState();
 
     console.info(
@@ -541,10 +572,84 @@ export class Room {
     );
 
     if (this.playerCount === LOBBY_MAX_PLAYERS) this.beginLobbyCountdown('full');
+    return true;
   }
 
-  removePlayer(playerId: string): void {
+  reconnectPlayer(ws: PlayerSocket, reconnectToken: string): ReconnectResult {
+    const seat = this.getSeatByReconnectToken(reconnectToken);
+    if (!seat) return 'not-found';
+    if (this.sockets.has(seat.id)) return 'in-use';
+
+    if (seat.reservationHandle !== null) clearTimeout(seat.reservationHandle);
+    seat.reservationHandle = null;
+    this.sockets.set(seat.id, ws);
+    this.inputQueues.set(seat.id, []);
+
+    const data = ws.getUserData();
+    data.id = seat.id;
+    data.displayName = seat.displayName;
+    data.isAdmin = seat.isAdmin;
+    data.roomId = this.id;
+
+    const player = this.state.players.find((candidate) => candidate.id === seat.id);
+    if (player) player.connected = true;
+
+    if (this.state.match.status === 'waiting') {
+      this.sendLobbyJoined(ws, seat.id);
+      this.broadcastLobbyState();
+      if (this.playerCount === LOBBY_MAX_PLAYERS && this.allSeatsConnected) {
+        this.beginLobbyCountdown('full');
+      }
+    } else {
+      this.sendRoomJoined(ws, seat.id);
+      this.broadcastSnapshot();
+    }
+
+    console.info(`[Room:${this.id}] Player reconnected: ${seat.id}`);
+    return 'resumed';
+  }
+
+  disconnectPlayer(playerId: string, ws: PlayerSocket): boolean {
+    if (this.sockets.get(playerId) !== ws) return false;
+    const seat = this.seats.get(playerId);
+    if (!seat) return false;
+
     this.sockets.delete(playerId);
+    this.lobbyVotes.delete(playerId);
+    this.clearPlayerTransientActivity(playerId);
+
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    if (player) player.connected = false;
+
+    if (this.state.match.status === 'waiting') {
+      this.cancelLobbyCountdown();
+      this.broadcastLobbyState();
+    } else {
+      this.broadcastSnapshot();
+    }
+
+    if (seat.reservationHandle !== null) clearTimeout(seat.reservationHandle);
+    seat.reservationHandle = setTimeout(() => {
+      seat.reservationHandle = null;
+      this.removePlayer(playerId);
+    }, this.reconnectGraceMs);
+
+    console.info(
+      `[Room:${this.id}] Player disconnected: ${playerId}; seat reserved for ${this.reconnectGraceMs}ms`,
+    );
+    return true;
+  }
+
+  /** Permanently release one occupied seat after leave or grace expiry. */
+  removePlayer(playerId: string): boolean {
+    const seat = this.seats.get(playerId);
+    if (!seat) return false;
+    if (seat.reservationHandle !== null) clearTimeout(seat.reservationHandle);
+
+    const socket = this.sockets.get(playerId);
+    if (socket) socket.getUserData().roomId = null;
+    this.sockets.delete(playerId);
+    this.seats.delete(playerId);
     this.inputQueues.delete(playerId);
     this.lastChatSentAt.delete(playerId);
     this.bridgeTraversals.delete(playerId);
@@ -552,6 +657,7 @@ export class Room {
     this.revealedWisdomBridges.delete(playerId);
     this.revealedWisdomSwamps.delete(playerId);
     this.lobbyVotes.delete(playerId);
+    this.onSeatReleased(seat.reconnectToken);
     for (const cage of this.cageStates) {
       if (cage.prisonerPlayerId !== playerId || cage.vacated) continue;
       cage.opened = true;
@@ -588,6 +694,36 @@ export class Room {
     if (this.playerCount === 0) {
       this.stopLoop();
       this.lobbyVoteAvailableAtMs = 0;
+      this.onEmpty();
+    }
+    return true;
+  }
+
+  private get allSeatsConnected(): boolean {
+    return this.playerCount > 0 && this.connectedPlayerCount === this.playerCount;
+  }
+
+  private getSeatByReconnectToken(reconnectToken: string): RoomSeat | undefined {
+    for (const seat of this.seats.values()) {
+      if (seat.reconnectToken === reconnectToken) return seat;
+    }
+    return undefined;
+  }
+
+  private clearPlayerTransientActivity(playerId: string): void {
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    if (player) this.clearQueuedInputs(player);
+    else this.inputQueues.get(playerId)?.splice(0);
+    this.bridgeTraversals.delete(playerId);
+    this.bridgeRepairOccupancy.delete(playerId);
+    for (const [bridgeIndex, repair] of this.bridgeRepairs) {
+      if (repair.repairingPlayerId !== playerId) continue;
+      repair.repairingPlayerId = null;
+      const bridgeState = this.bridgeStates[bridgeIndex];
+      if (bridgeState) {
+        bridgeState.repairActive = false;
+        bridgeState.repairingPlayerId = null;
+      }
     }
   }
 
@@ -595,7 +731,8 @@ export class Room {
     if (
       this.state.match.status !== 'waiting' ||
       this.countdownHandle !== null ||
-      this.playerCount < LOBBY_MIN_PLAYERS ||
+      this.connectedPlayerCount < LOBBY_MIN_PLAYERS ||
+      !this.allSeatsConnected ||
       Date.now() < this.lobbyVoteAvailableAtMs ||
       !this.sockets.has(playerId)
     ) {
@@ -606,7 +743,7 @@ export class Room {
     else this.lobbyVotes.delete(playerId);
     this.broadcastLobbyState();
 
-    if (this.lobbyVotes.size >= getLobbyVotesRequired(this.playerCount)) {
+    if (this.lobbyVotes.size >= getLobbyVotesRequired(this.connectedPlayerCount)) {
       this.beginLobbyCountdown('vote');
     }
   }
@@ -616,6 +753,7 @@ export class Room {
     if (
       this.state.match.status !== 'waiting'
       || this.playerCount === 0
+      || !this.allSeatsConnected
       || !this.isAdmin(playerId)
     ) {
       return;
@@ -899,25 +1037,55 @@ export class Room {
   }
 
   private isAdmin(playerId: string): boolean {
-    return this.sockets.get(playerId)?.getUserData().isAdmin === true;
+    return this.seats.get(playerId)?.isAdmin === true && this.sockets.has(playerId);
   }
 
   private getLobbyState(): LobbyState {
     return {
       roomId: this.id,
       phase: this.countdownHandle === null ? 'waiting' : 'countdown',
-      players: Array.from(this.sockets.entries()).map(([id, socket]) => ({
-        id,
-        displayName: socket.getUserData().displayName,
-        votedToStart: this.lobbyVotes.has(id),
+      players: Array.from(this.seats.values()).map((seat) => ({
+        id: seat.id,
+        displayName: seat.displayName,
+        votedToStart: this.lobbyVotes.has(seat.id),
+        connected: this.sockets.has(seat.id),
       })),
       minPlayers: LOBBY_MIN_PLAYERS,
       maxPlayers: LOBBY_MAX_PLAYERS,
-      votesRequired: getLobbyVotesRequired(this.playerCount),
+      votesRequired: getLobbyVotesRequired(this.connectedPlayerCount),
       voteAvailableAt: this.lobbyVoteAvailableAtMs,
       countdownEndsAt: this.lobbyCountdownEndsAtMs,
       startReason: this.lobbyStartReason,
     };
+  }
+
+  private sendLobbyJoined(ws: PlayerSocket, playerId: string): void {
+    const seat = this.seats.get(playerId);
+    if (!seat) return;
+    const joinedMessage: LobbyJoinedMessage = {
+      type: MessageType.LobbyJoined,
+      playerId,
+      isAdmin: seat.isAdmin,
+      lobby: this.getLobbyState(),
+    };
+    this.send(ws, joinedMessage);
+  }
+
+  private sendRoomJoined(ws: PlayerSocket, playerId: string): void {
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    const seat = this.seats.get(playerId);
+    if (!player || !seat) return;
+    const joinMessage: RoomJoinedMessage = {
+      type: MessageType.RoomJoined,
+      roomId: this.id,
+      playerId,
+      isAdmin: seat.isAdmin,
+      mapSeed: this.mapSeed,
+      role: player.role,
+      wisdomOrbs: player.wisdomOrbs,
+      gameState: this.cloneState(),
+    };
+    this.send(ws, joinMessage);
   }
 
   private broadcastLobbyState(): void {
@@ -931,11 +1099,12 @@ export class Room {
 
   private beginLobbyCountdown(reason: Exclude<LobbyStartReason, null>): void {
     if (this.state.match.status !== 'waiting' || this.countdownHandle !== null) return;
+    if (!this.allSeatsConnected) return;
     if (reason === 'full' && this.playerCount !== LOBBY_MAX_PLAYERS) return;
     if (
       reason === 'vote' &&
-      (this.playerCount < LOBBY_MIN_PLAYERS ||
-        this.lobbyVotes.size < getLobbyVotesRequired(this.playerCount))
+      (this.connectedPlayerCount < LOBBY_MIN_PLAYERS ||
+        this.lobbyVotes.size < getLobbyVotesRequired(this.connectedPlayerCount))
     ) {
       return;
     }
@@ -960,9 +1129,9 @@ export class Room {
 
   private createMatchPlayers(): void {
     const participants = shuffle(
-      Array.from(this.sockets.entries()).map(([id, socket]) => ({
-        id,
-        displayName: socket.getUserData().displayName,
+      Array.from(this.seats.values()).map((seat) => ({
+        id: seat.id,
+        displayName: seat.displayName,
       })),
     );
 
@@ -996,6 +1165,7 @@ export class Room {
         y: (spawnTile.y + 0.5) * TILE_SIZE,
         facing: 'down',
         isMoving: false,
+        connected: true,
         isDead: false,
         escaped: false,
         lastProcessedInput: 0,
@@ -1005,7 +1175,13 @@ export class Room {
   }
 
   private startMatch(): void {
-    if (this.state.match.status !== 'waiting' || this.playerCount === 0) return;
+    if (
+      this.state.match.status !== 'waiting' ||
+      this.playerCount === 0 ||
+      !this.allSeatsConnected
+    ) {
+      return;
+    }
     this.cancelLobbyCountdown();
     this.createMatchPlayers();
     const now = Date.now();
@@ -1019,16 +1195,7 @@ export class Room {
     for (const player of this.state.players) {
       const socket = this.sockets.get(player.id);
       if (!socket) continue;
-      const joinMessage: RoomJoinedMessage = {
-        type: MessageType.RoomJoined,
-        roomId: this.id,
-        playerId: player.id,
-        mapSeed: this.mapSeed,
-        role: player.role,
-        wisdomOrbs: player.wisdomOrbs,
-        gameState: this.cloneState(),
-      };
-      this.send(socket, joinMessage);
+      this.sendRoomJoined(socket, player.id);
     }
 
     this.startLoop();
@@ -1037,7 +1204,7 @@ export class Room {
     );
   }
 
-  /** Keep public progress derived from the currently connected private roles. */
+  /** Keep public progress derived from every occupied private role. */
   private syncMatchCounts(): void {
     if (this.state.match.status === 'ended') return;
     const survivors = this.state.players.filter((player) => player.role === 'survivor');
@@ -1064,22 +1231,22 @@ export class Room {
   private canPlayerAct(playerId: string): boolean {
     if (!this.isMatchRunning()) return false;
     const player = this.state.players.find((candidate) => candidate.id === playerId);
-    return Boolean(player && !player.escaped);
+    return Boolean(player && player.connected && !player.escaped && this.sockets.has(playerId));
   }
 
   private checkSurvivorVictory(): void {
     if (this.state.match.status !== 'running') return;
-    const connectedSurvivorPlayers = this.state.players.filter(
+    const occupiedSurvivorPlayers = this.state.players.filter(
       (player) => player.role === 'survivor',
     );
-    const connectedSurvivors = connectedSurvivorPlayers.length;
+    const occupiedSurvivors = occupiedSurvivorPlayers.length;
     this.syncMatchCounts();
-    const allConnectedSurvivorsEscaped =
-      connectedSurvivors > 0 &&
-      connectedSurvivorPlayers.every((player) => player.escaped);
+    const allOccupiedSurvivorsEscaped =
+      occupiedSurvivors > 0 &&
+      occupiedSurvivorPlayers.every((player) => player.escaped);
     if (
-      allConnectedSurvivorsEscaped ||
-      (connectedSurvivors > 0 &&
+      allOccupiedSurvivorsEscaped ||
+      (occupiedSurvivors > 0 &&
         this.state.match.escapedCount >= this.state.match.escapeThreshold)
     ) {
       this.endMatch('survivors');
@@ -1338,7 +1505,7 @@ export class Room {
     let capturedCount = 0;
     const spawnedCages: CageState[] = [];
     for (const survivor of this.state.players) {
-      if (survivor.role !== 'survivor') continue;
+      if (survivor.role !== 'survivor' || !survivor.connected) continue;
       if (findActivePlayerCage(this.cageStates, survivor.id)) continue;
       const occupiedTrapCell = this.trapCells.find((trapCell) =>
         isPlayerInTrapCell(trapCell, survivor.x, survivor.y, this.map.tileSize),
@@ -1678,6 +1845,10 @@ export class Room {
 
     for (const player of this.state.players) {
       const queue = this.inputQueues.get(player.id);
+      if (!player.connected) {
+        this.clearQueuedInputs(player);
+        continue;
+      }
       if (player.escaped) {
         this.clearQueuedInputs(player);
         continue;
@@ -2110,6 +2281,7 @@ export class Room {
       if (
         bridgeState.repairActive &&
         (!repairingPlayer ||
+          !repairingPlayer.connected ||
           !this.isPlayerOnBridgeRepairCircle(
             repairingPlayer,
             bridgeIndex,
@@ -2274,6 +2446,7 @@ export class Room {
       let playerOnHubPlate = false;
       for (const plate of gatePlates) {
         for (const player of this.state.players) {
+          if (!player.connected) continue;
           if (
             isPlayerOnPlate(
               player.x,
@@ -2412,6 +2585,15 @@ export class Room {
     }
   }
 
+  private broadcastSnapshot(): void {
+    if (this.state.match.status === 'waiting') return;
+    const message: TickUpdateMessage = {
+      type: MessageType.TickUpdate,
+      gameState: this.cloneState(),
+    };
+    this.broadcast(message);
+  }
+
   private cloneState(): GameState {
     this.refreshMatchTime();
     return {
@@ -2437,6 +2619,10 @@ export class Room {
   destroy(): void {
     this.cancelLobbyCountdown();
     this.stopLoop();
+    for (const seat of this.seats.values()) {
+      if (seat.reservationHandle !== null) clearTimeout(seat.reservationHandle);
+    }
+    this.seats.clear();
     this.sockets.clear();
     this.inputQueues.clear();
     this.lastChatSentAt.clear();
@@ -2445,6 +2631,7 @@ export class Room {
     this.revealedWisdomSwamps.clear();
     this.bridgeFailureFeedbackExpirations.clear();
     this.bridgeRepairOccupancy.clear();
+    this.bridgeRepairs.clear();
     this.state.players = [];
   }
 }

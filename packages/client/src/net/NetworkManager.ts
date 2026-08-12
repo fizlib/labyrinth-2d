@@ -10,12 +10,13 @@
 import {
   MessageType,
   type GameState,
-  type LobbyJoinMode,
   type LobbyState,
   type MatchResultPlayer,
   type PlayerRole,
   type WisdomOrbHint,
   type JoinRoomMessage,
+  type ReconnectRoomMessage,
+  type LeaveRoomMessage,
   type VoteToStartMessage,
   type SendLobbyChatMessage,
   type AdminStartGameMessage,
@@ -34,10 +35,26 @@ import {
   type DebugPlayerActionMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
+import {
+  clearReconnectSession,
+  confirmReconnectRoom,
+  markReconnectDisconnected,
+  type ReconnectSession,
+} from './ReconnectSession';
+
+export type NetworkConnectionState =
+  | { status: 'connected' }
+  | { status: 'reconnecting'; attempt: number; deadline: number }
+  | { status: 'failed'; message: string };
 
 /** Callback signatures for network events. */
 export interface NetworkCallbacks {
-  onLobbyJoined: (playerId: string, lobby: LobbyState, isAdmin: boolean) => void;
+  onLobbyJoined: (
+    playerId: string,
+    lobby: LobbyState,
+    isAdmin: boolean,
+    resumed: boolean,
+  ) => void;
   onLobbyUpdated: (lobby: LobbyState) => void;
   onLobbyChatMessage: (
     playerId: string,
@@ -52,6 +69,8 @@ export interface NetworkCallbacks {
     role: PlayerRole,
     wisdomOrbs: number,
     gameState: GameState,
+    isAdmin: boolean,
+    resumed: boolean,
   ) => void;
   onTickUpdate: (gameState: GameState) => void;
   onPlayerLeft: (playerId: string) => void;
@@ -87,7 +106,7 @@ export interface NetworkCallbacks {
     finalRoster: MatchResultPlayer[],
   ) => void;
   onError: (code: string, message: string) => void;
-  onDisconnect: () => void;
+  onConnectionState: (state: NetworkConnectionState) => void;
 }
 
 export class NetworkManager {
@@ -97,13 +116,13 @@ export class NetworkManager {
   private ws: WebSocket | null = null;
   private callbacks: NetworkCallbacks;
   private connectionUrl: string | null = null;
-  private roomId = '';
-  private joinMode: LobbyJoinMode = 'quick';
+  private reconnectSession: ReconnectSession | null = null;
   private displayName: string = 'Player';
   private accessToken: string | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private shouldReconnect = false;
+  private recovering = false;
 
   /** The latest game state received from the server. */
   private _gameState: GameState | null = null;
@@ -113,6 +132,10 @@ export class NetworkManager {
 
   constructor(callbacks: NetworkCallbacks) {
     this.callbacks = callbacks;
+    window.addEventListener('pagehide', () => {
+      if (!this.shouldReconnect || !this.reconnectSession?.roomId) return;
+      this.reconnectSession = markReconnectDisconnected(this.reconnectSession);
+    });
   }
 
   /** Latest game state from the last TickUpdate. */
@@ -134,8 +157,7 @@ export class NetworkManager {
 
   connect(
     url: string,
-    joinMode: LobbyJoinMode,
-    roomId = '',
+    reconnectSession: ReconnectSession,
     displayName: string = 'Player',
     accessToken?: string,
   ): void {
@@ -145,8 +167,8 @@ export class NetworkManager {
     }
 
     this.connectionUrl = url;
-    this.roomId = roomId;
-    this.joinMode = joinMode;
+    this.reconnectSession = reconnectSession;
+    this.recovering = reconnectSession.roomId !== null || reconnectSession.disconnectDeadline !== null;
     this.displayName = displayName;
     this.accessToken = accessToken;
     this.shouldReconnect = true;
@@ -164,17 +186,29 @@ export class NetworkManager {
     this.ws = ws;
 
     ws.onopen = () => {
-      console.info('[Net] Connected — sending JoinRoom');
-      this.reconnectAttempt = 0;
+      const session = this.reconnectSession;
+      if (!session) return;
 
-      const joinMsg: JoinRoomMessage = {
-        type: MessageType.JoinRoom,
-        roomId: this.roomId,
-        displayName: this.displayName,
-        mode: this.joinMode,
-        accessToken: this.accessToken,
-      };
-      this.send(joinMsg);
+      if (session.roomId) {
+        console.info('[Net] Connected — reclaiming reserved seat');
+        const reconnectMsg: ReconnectRoomMessage = {
+          type: MessageType.ReconnectRoom,
+          roomId: session.roomId,
+          reconnectToken: session.reconnectToken,
+        };
+        this.send(reconnectMsg);
+      } else {
+        console.info('[Net] Connected — sending JoinRoom');
+        const joinMsg: JoinRoomMessage = {
+          type: MessageType.JoinRoom,
+          roomId: session.requestedRoomId,
+          displayName: this.displayName,
+          mode: session.joinMode,
+          reconnectToken: session.reconnectToken,
+          accessToken: this.accessToken,
+        };
+        this.send(joinMsg);
+      }
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -192,8 +226,15 @@ export class NetworkManager {
 
       console.info('[Net] Disconnected');
       this.ws = null;
-      this._playerId = null;
-      this.callbacks.onDisconnect();
+      this.recovering = true;
+      if (this.reconnectSession) {
+        this.reconnectSession = markReconnectDisconnected(this.reconnectSession);
+        this.callbacks.onConnectionState({
+          status: 'reconnecting',
+          attempt: this.reconnectAttempt + 1,
+          deadline: this.reconnectSession.disconnectDeadline!,
+        });
+      }
       this.scheduleReconnect();
     };
 
@@ -204,22 +245,39 @@ export class NetworkManager {
 
   /** Gracefully close the connection. */
   disconnect(): void {
+    this.leaveRoom();
+  }
+
+  /** Explicitly release the occupied seat and stop automatic reconnects. */
+  leaveRoom(): void {
     this.shouldReconnect = false;
     this.clearReconnectTimer();
+    clearReconnectSession();
+    this.reconnectSession = null;
 
     const ws = this.ws;
     if (!ws) return;
+
+    if (ws.readyState === WebSocket.OPEN) {
+      const leaveMessage: LeaveRoomMessage = { type: MessageType.LeaveRoom };
+      this.send(leaveMessage);
+    }
 
     // Clear our reference before closing so a new connect() can start right
     // away; the stale socket's close handler is deliberately ignored.
     this.ws = null;
     this._playerId = null;
     ws.close();
-    this.callbacks.onDisconnect();
   }
 
   private scheduleReconnect(): void {
-    if (!this.shouldReconnect || this.reconnectTimer !== null) return;
+    if (!this.shouldReconnect || this.reconnectTimer !== null || !this.reconnectSession) return;
+
+    const deadline = this.reconnectSession.disconnectDeadline;
+    if (deadline !== null && Date.now() >= deadline) {
+      this.failReconnect('Your reserved seat expired before the connection recovered.');
+      return;
+    }
 
     const delayMs = Math.min(
       NetworkManager.INITIAL_RECONNECT_DELAY_MS * 2 ** this.reconnectAttempt,
@@ -227,6 +285,13 @@ export class NetworkManager {
     );
     this.reconnectAttempt += 1;
     console.info(`[Net] Reconnecting in ${delayMs}ms...`);
+    if (deadline !== null) {
+      this.callbacks.onConnectionState({
+        status: 'reconnecting',
+        attempt: this.reconnectAttempt,
+        deadline,
+      });
+    }
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -241,15 +306,40 @@ export class NetworkManager {
     }
   }
 
+  private finishAdmission(roomId: string): boolean {
+    const resumed = this.recovering;
+    if (this.reconnectSession) {
+      this.reconnectSession = confirmReconnectRoom(this.reconnectSession, roomId);
+    }
+    this.recovering = false;
+    this.reconnectAttempt = 0;
+    this.callbacks.onConnectionState({ status: 'connected' });
+    return resumed;
+  }
+
+  private failReconnect(message: string): void {
+    this.shouldReconnect = false;
+    this.clearReconnectTimer();
+    clearReconnectSession();
+    this.reconnectSession = null;
+    this.callbacks.onConnectionState({ status: 'failed', message });
+    const ws = this.ws;
+    this.ws = null;
+    if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
+  }
+
   // ── Message Handling ────────────────────────────────────────────────────
 
   private handleMessage(msg: ServerToClientMessage): void {
     switch (msg.type) {
       case MessageType.LobbyJoined:
         this._playerId = msg.playerId;
-        this.roomId = msg.lobby.roomId;
-        this.joinMode = 'join';
-        this.callbacks.onLobbyJoined(msg.playerId, msg.lobby, msg.isAdmin);
+        this.callbacks.onLobbyJoined(
+          msg.playerId,
+          msg.lobby,
+          msg.isAdmin,
+          this.finishAdmission(msg.lobby.roomId),
+        );
         break;
 
       case MessageType.LobbyUpdated:
@@ -268,14 +358,19 @@ export class NetworkManager {
       case MessageType.RoomJoined:
         this._playerId = msg.playerId;
         this._gameState = msg.gameState;
-        this.callbacks.onRoomJoined(
-          msg.roomId,
-          msg.playerId,
-          msg.mapSeed,
-          msg.role,
-          msg.wisdomOrbs,
-          msg.gameState,
-        );
+        {
+          const resumed = this.finishAdmission(msg.roomId);
+          this.callbacks.onRoomJoined(
+            msg.roomId,
+            msg.playerId,
+            msg.mapSeed,
+            msg.role,
+            msg.wisdomOrbs,
+            msg.gameState,
+            msg.isAdmin,
+            resumed,
+          );
+        }
         break;
 
       case MessageType.TickUpdate:
@@ -316,6 +411,17 @@ export class NetworkManager {
         break;
 
       case MessageType.Error:
+        if (
+          msg.code === 'RECONNECT_FAILED' ||
+          msg.code === 'RECONNECT_IN_USE' ||
+          msg.code === 'INVALID_RECONNECT_TOKEN'
+        ) {
+          this.failReconnect(msg.message);
+        } else if (!this._playerId) {
+          this.shouldReconnect = false;
+          clearReconnectSession();
+          this.reconnectSession = null;
+        }
         this.callbacks.onError(msg.code, msg.message);
         break;
 
