@@ -20,6 +20,7 @@ import {
   type VoteToStartMessage,
   type SendLobbyChatMessage,
   type AdminStartGameMessage,
+  type AdminKickPlayerMessage,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
   type OpenChestMessage,
@@ -62,6 +63,7 @@ export interface NetworkCallbacks {
     text: string,
     sentAt: number,
   ) => void;
+  onLobbyKicked: (message: string) => void;
   onRoomJoined: (
     roomId: string,
     playerId: string,
@@ -355,6 +357,19 @@ export class NetworkManager {
         );
         break;
 
+      case MessageType.LobbyKicked: {
+        this.shouldReconnect = false;
+        this.clearReconnectTimer();
+        clearReconnectSession();
+        this.reconnectSession = null;
+        this._playerId = null;
+        const ws = this.ws;
+        this.ws = null;
+        if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
+        this.callbacks.onLobbyKicked(msg.message);
+        break;
+      }
+
       case MessageType.RoomJoined:
         this._playerId = msg.playerId;
         this._gameState = msg.gameState;
@@ -485,6 +500,14 @@ export class NetworkManager {
   sendAdminStartGame(): void {
     const msg: AdminStartGameMessage = {
       type: MessageType.AdminStartGame,
+    };
+    this.send(msg);
+  }
+
+  sendAdminKickPlayer(playerId: string): void {
+    const msg: AdminKickPlayerMessage = {
+      type: MessageType.AdminKickPlayer,
+      playerId,
     };
     this.send(msg);
   }

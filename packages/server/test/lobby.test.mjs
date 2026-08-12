@@ -76,6 +76,37 @@ test('only admins can bypass lobby population and voting requirements', (t) => {
   assert.ok(adminSocket.sent.some((message) => message.type === 'ROOM_JOINED'));
 });
 
+test('only admins can kick another player from a waiting lobby', (t) => {
+  const room = new Room(`kick-${Math.random()}`);
+  const adminSocket = new FakeSocket('admin-player', true);
+  const regularSocket = new FakeSocket('regular-player');
+  room.addPlayer(adminSocket, 'admin-token');
+  room.addPlayer(regularSocket, 'regular-token');
+  t.after(() => room.destroy());
+
+  room.handleAdminKickPlayer('regular-player', {
+    type: 'ADMIN_KICK_PLAYER',
+    playerId: 'admin-player',
+  });
+  room.handleAdminKickPlayer('admin-player', {
+    type: 'ADMIN_KICK_PLAYER',
+    playerId: 'admin-player',
+  });
+  assert.equal(room.playerCount, 2, 'non-admin and self-kick requests are ignored');
+
+  room.handleAdminKickPlayer('admin-player', {
+    type: 'ADMIN_KICK_PLAYER',
+    playerId: 'regular-player',
+  });
+
+  assert.equal(room.playerCount, 1);
+  assert.equal(regularSocket.data.roomId, null);
+  assert.ok(regularSocket.sent.some((message) => message.type === 'LOBBY_KICKED'));
+  assert.equal(room.reconnectPlayer(new FakeSocket('replacement'), 'regular-token'), 'not-found');
+  const latest = adminSocket.sent.findLast((message) => message.type === 'LOBBY_UPDATED');
+  assert.deepEqual(latest.lobby.players.map((player) => player.id), ['admin-player']);
+});
+
 test('six players can vote into a countdown and receive balanced private match seats', (t) => {
   const { room, sockets } = createLobby(6);
   t.after(() => room.destroy());

@@ -7,6 +7,7 @@ interface LobbyOverlayOptions {
   isAdmin: boolean;
   onVote: (vote: boolean) => void;
   onStartNow: () => void;
+  onKick: (playerId: string) => void;
   onSendChat: (text: string) => void;
   onLeave: () => void;
 }
@@ -31,6 +32,7 @@ export class LobbyOverlay {
   private readonly localPlayerId: string;
   private readonly isAdmin: boolean;
   private readonly onVote: (vote: boolean) => void;
+  private readonly onKick: (playerId: string) => void;
   private readonly onSendChat: (text: string) => void;
   private state: LobbyState;
   private readonly messages: LobbyChatEntry[] = [];
@@ -40,6 +42,7 @@ export class LobbyOverlay {
     this.localPlayerId = options.localPlayerId;
     this.isAdmin = options.isAdmin;
     this.onVote = options.onVote;
+    this.onKick = options.onKick;
     this.onSendChat = options.onSendChat;
     this.state = options.initialState;
     this.root.className = 'lobby-overlay';
@@ -187,6 +190,19 @@ export class LobbyOverlay {
       name.textContent = player
         ? `${player.displayName}${player.id === this.localPlayerId ? ' (you)' : ''}`
         : 'Open place';
+      const identity = document.createElement('span');
+      identity.className = 'lobby-player__identity';
+      identity.appendChild(name);
+      if (this.isAdmin && player && player.id !== this.localPlayerId) {
+        const kickButton = document.createElement('button');
+        kickButton.className = 'lobby-player__kick';
+        kickButton.type = 'button';
+        kickButton.textContent = '×';
+        kickButton.title = `Remove ${player.displayName} from lobby`;
+        kickButton.setAttribute('aria-label', kickButton.title);
+        kickButton.addEventListener('click', () => this.onKick(player.id));
+        identity.appendChild(kickButton);
+      }
       const vote = document.createElement('span');
       vote.className = 'lobby-player__vote';
       vote.textContent = player
@@ -194,7 +210,7 @@ export class LobbyOverlay {
           ? player.votedToStart ? 'Ready' : ''
           : 'Reconnecting'
         : '';
-      item.append(ordinal, name, vote);
+      item.append(ordinal, identity, vote);
       this.roster.appendChild(item);
     }
     this.renderStatus();

@@ -109,6 +109,7 @@ import {
   type SendChatMessage,
   type SendLobbyChatMessage,
   type VoteToStartMessage,
+  type AdminKickPlayerMessage,
   type EscapePortalMessage,
   type DebugTeleportMessage,
   type DebugSetMatchTimeMessage,
@@ -117,6 +118,7 @@ import {
   type LobbyJoinedMessage,
   type LobbyUpdatedMessage,
   type LobbyChatMessage,
+  type LobbyKickedMessage,
   type LobbyState,
   type LobbyStartReason,
   type TickUpdateMessage,
@@ -760,6 +762,33 @@ export class Room {
     }
     console.info(`[Room:${this.id}] Admin ${playerId} started the match immediately`);
     this.startMatch();
+  }
+
+  /** Allow a verified administrator to permanently remove another lobby seat. */
+  handleAdminKickPlayer(requesterId: string, msg: AdminKickPlayerMessage): void {
+    if (
+      this.state.match.status !== 'waiting'
+      || !this.isAdmin(requesterId)
+      || msg.playerId === requesterId
+      || !this.seats.has(msg.playerId)
+    ) {
+      return;
+    }
+
+    const targetSeat = this.seats.get(msg.playerId)!;
+    const targetSocket = this.sockets.get(msg.playerId);
+    if (targetSocket) {
+      const kickedMessage: LobbyKickedMessage = {
+        type: MessageType.LobbyKicked,
+        message: 'An administrator removed you from the lobby.',
+      };
+      this.send(targetSocket, kickedMessage);
+    }
+
+    this.removePlayer(msg.playerId);
+    console.info(
+      `[Room:${this.id}] Admin ${requesterId} removed ${targetSeat.displayName} (${msg.playerId}) from the lobby`,
+    );
   }
 
   handleSendLobbyChatMessage(playerId: string, msg: SendLobbyChatMessage): void {

@@ -1866,7 +1866,16 @@ body {
   color: #53686e;
 }
 
+.lobby-player__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
 .lobby-player__name {
+  min-width: 0;
   min-height: 1.35em;
   overflow: hidden;
   color: #243b40;
@@ -1882,6 +1891,30 @@ body {
 
 .lobby-player--local .lobby-player__name {
   font-weight: 700;
+}
+
+.lobby-player__kick {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #a54b45;
+  cursor: pointer;
+  font: 700 1rem/1 Arial, Helvetica, sans-serif;
+}
+
+.lobby-player__kick:hover {
+  background: rgba(177, 61, 51, 0.13);
+  color: #8c211c;
+}
+
+.lobby-player__kick:focus-visible {
+  outline: 2px solid #b23b34;
+  outline-offset: 1px;
 }
 
 .lobby-player__vote {

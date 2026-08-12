@@ -309,6 +309,11 @@ uWS
             break;
           }
 
+          case MessageType.AdminKickPlayer: {
+            if (data.roomId) rooms.get(data.roomId)?.handleAdminKickPlayer(data.id, msg);
+            break;
+          }
+
           case MessageType.VoteToStart: {
             if (data.roomId) rooms.get(data.roomId)?.handleVoteToStart(data.id, msg);
             break;

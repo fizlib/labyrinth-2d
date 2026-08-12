@@ -2167,6 +2167,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           isAdmin,
           onVote: (vote) => net.sendLobbyVote(vote),
           onStartNow: () => net.sendAdminStartGame(),
+          onKick: (playerId) => net.sendAdminKickPlayer(playerId),
           onSendChat: (text) => net.sendLobbyChatMessage(text),
           onLeave: () => {
             net.leaveRoom();
@@ -2184,6 +2185,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onLobbyChatMessage: (playerId, displayName, text, sentAt) => {
       lobbyOverlay?.addMessage({ playerId, displayName, text, sentAt });
+    },
+
+    onLobbyKicked: (message) => {
+      lobbyOverlay?.destroy();
+      lobbyOverlay = null;
+      clearReconnectSession();
+      window.alert(message);
+      window.location.reload();
     },
 
     onRoomJoined: (

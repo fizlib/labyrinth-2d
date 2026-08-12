@@ -356,6 +356,7 @@ export enum MessageType {
   VoteToStart = 'VOTE_TO_START',
   SendLobbyChat = 'SEND_LOBBY_CHAT',
   AdminStartGame = 'ADMIN_START_GAME',
+  AdminKickPlayer = 'ADMIN_KICK_PLAYER',
   ReconnectRoom = 'RECONNECT_ROOM',
   LeaveRoom = 'LEAVE_ROOM',
 
@@ -378,6 +379,7 @@ export enum MessageType {
   LobbyJoined = 'LOBBY_JOINED',
   LobbyUpdated = 'LOBBY_UPDATED',
   LobbyChatMessage = 'LOBBY_CHAT_MESSAGE',
+  LobbyKicked = 'LOBBY_KICKED',
   Error = 'ERROR',
 }
 
@@ -416,6 +418,11 @@ export interface SendLobbyChatMessage {
 
 export interface AdminStartGameMessage {
   type: MessageType.AdminStartGame;
+}
+
+export interface AdminKickPlayerMessage {
+  type: MessageType.AdminKickPlayer;
+  playerId: string;
 }
 
 export interface PlayerInputMessage {
@@ -588,6 +595,11 @@ export interface LobbyChatMessage {
   displayName: string;
   text: string;
   sentAt: number;
+}
+
+export interface LobbyKickedMessage {
+  type: MessageType.LobbyKicked;
+  message: string;
 }
 
 export interface TickUpdateMessage {
@@ -811,6 +823,7 @@ export type ClientToServerMessage =
   | VoteToStartMessage
   | SendLobbyChatMessage
   | AdminStartGameMessage
+  | AdminKickPlayerMessage
   | PlayerInputMessage
   | ActivateRunestoneMessage
   | OpenChestMessage
@@ -828,6 +841,7 @@ export type ServerToClientMessage =
   | LobbyJoinedMessage
   | LobbyUpdatedMessage
   | LobbyChatMessage
+  | LobbyKickedMessage
   | RoomJoinedMessage
   | TickUpdateMessage
   | PlayerLeftMessage
