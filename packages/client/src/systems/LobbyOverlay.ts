@@ -45,15 +45,19 @@ export class LobbyOverlay {
     this.root.className = 'lobby-overlay';
     this.root.setAttribute('aria-labelledby', 'lobby-title');
     this.root.innerHTML = `
-      <div class="lobby-overlay__mist" aria-hidden="true"></div>
+      <div class="lobby-overlay__landscape" aria-hidden="true">
+        <img class="app-parallax__layer app-parallax__layer--sky" src="/assets/home/sky.png" alt="" />
+        <img class="app-parallax__layer app-parallax__layer--clouds" src="/assets/home/clouds.png" alt="" />
+        <img class="app-parallax__layer app-parallax__layer--hills" src="/assets/home/hills.png" alt="" />
+        <img class="app-parallax__layer app-parallax__layer--field" src="/assets/home/field.png" alt="" />
+      </div>
       <div class="lobby-panel">
         <header class="lobby-header">
-          <div>
-            <p class="app-brand__eyebrow">Gather your party</p>
+          <div class="lobby-header__title">
             <h1 id="lobby-title">Waiting Room</h1>
           </div>
           <button class="lobby-code" type="button" title="Copy room link">
-            <span>Room</span><strong></strong><small>Copy link</small>
+            <span>Room Code</span><strong></strong><small>Copy link</small>
           </button>
         </header>
         <div class="lobby-layout">
@@ -123,6 +127,12 @@ export class LobbyOverlay {
       this.onSendChat(text);
       this.chatInput.value = '';
     });
+    this.chatInput.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+    });
+    this.chatInput.addEventListener('keyup', (event) => {
+      event.stopPropagation();
+    });
 
     options.parent.appendChild(this.root);
     this.renderState();
@@ -168,6 +178,7 @@ export class LobbyOverlay {
       item.className = player
         ? `lobby-player${player.connected ? '' : ' lobby-player--disconnected'}`
         : 'lobby-player lobby-player--empty';
+      if (player?.id === this.localPlayerId) item.classList.add('lobby-player--local');
       const ordinal = document.createElement('span');
       ordinal.className = 'lobby-player__ordinal';
       ordinal.textContent = String(index + 1).padStart(2, '0');
