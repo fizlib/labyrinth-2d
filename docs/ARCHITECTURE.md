@@ -436,6 +436,9 @@ The client currently has multiple UI subsystems, not just the minimap:
   - DOM overlay aligned to the bottom-left of the scaled Pixi canvas
   - opens with `Enter`, `T`, or its clickable prompt and uses a native single-line input on mobile
   - pauses gameplay input while typing, shows a live remaining-character counter, and colors sender names by their public squad assignment
+- `GameMenuHud`
+  - Pixi overlay matching the end-of-match panel, with Resume, Controls, and a confirmed Exit Match flow
+  - freezes only the local client's input; the authoritative multiplayer match clock and other players continue
 - `WisdomArrow`
   - local-only world-space hint arrow above the local player
   - appears after a successful orb use
@@ -456,6 +459,8 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Movement: arrow keys or `WASD`, plus the mobile D-pad on supported touch devices
 - Proximity chat: `Enter`, `T`, or click `[Enter] To Chat`; `Enter` sends, while empty `Enter`, `Escape`, or clicking outside closes the input
 - All movement, interaction, wisdom, and mobile controls are suppressed while chat owns keyboard focus
+- Game menu: `Escape` or the screen-space menu button opens it; `Escape` backs out of Controls/Exit confirmation, then resumes. Movement, chat, interactions, wisdom, mobile input, and debug canvas actions are suppressed while it is open.
+- Confirming Exit Match sends `LEAVE_ROOM`, releases the reconnect seat immediately, clears its tab credential, and returns to the main menu.
 - Intro dialogue advance: `E`, the clickable arrow button, or the mobile `E` button while the intro dialogue is visible
 - Intro dialogue skip: `E`, the clickable arrow button, or the mobile `E` button while the current page is still typing
 - Runestone interaction: `E` or the mobile `E` button after the intro dialogue is dismissed
@@ -523,6 +528,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - bottom-screen paged spawn dialogue HUD
 - `packages/client/src/systems/MobileControls.ts`
   - DOM overlay for mobile touch movement and `E`-equivalent interaction
+- `packages/client/src/systems/GameMenuHud.ts`
+  - local in-match menu, controls reference, and confirmed explicit-leave action
 - `packages/client/src/systems/ProximityChatHud.ts`
   - canvas-aligned DOM proximity-chat log, input, timer, and character counter
 - `packages/client/src/systems/LobbyOverlay.ts`

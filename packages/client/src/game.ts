@@ -80,6 +80,7 @@ import { MobileControls, type MobileControlDirection } from './systems/MobileCon
 import { CageVisual } from './systems/Cage';
 import { ProximityChatHud } from './systems/ProximityChatHud';
 import { MatchHud } from './systems/MatchHud';
+import { GameMenuHud } from './systems/GameMenuHud';
 import { LobbyOverlay } from './systems/LobbyOverlay';
 import { ReconnectOverlay } from './systems/ReconnectOverlay';
 
@@ -2127,8 +2128,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let chatHud: ProximityChatHud | null = null;
   let lobbyOverlay: LobbyOverlay | null = null;
   let reconnectOverlay: ReconnectOverlay | null = null;
+  let gameMenuHud: GameMenuHud | null = null;
   let chatInputActive = false;
+  let gameMenuOpen = false;
   let setMobileInputEnabled: (enabled: boolean) => void = () => {};
+  let setGameMenuAvailable: (available: boolean) => void = () => {};
+  let syncLocalInputAvailability: () => void = () => {};
 
   const net = new NetworkManager({
     onLobbyJoined: (playerId, lobby, isAdmin, resumed) => {
@@ -2150,6 +2155,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
       const fullscreenToggle = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
       if (fullscreenToggle) fullscreenToggle.hidden = true;
+      setGameMenuAvailable(false);
       if (resumed && lobbyOverlay) {
         lobbyOverlay.update(lobby);
       } else {
@@ -2215,6 +2221,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       if (!resumed) chatHud?.clear();
       chatHud?.setEnabled(true);
       matchHud.sync(gameState.match);
+      setGameMenuAvailable(gameState.match.status === 'running');
       snapshotBuffer.clear();
       pendingInputs = [];
 
@@ -2303,7 +2310,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       const canLocalPlayerAct =
         gameState.match.status === 'running' && !(me?.escaped ?? false);
       chatHud?.setCanSend(canLocalPlayerAct);
-      setMobileInputEnabled(canLocalPlayerAct);
+      syncLocalInputAvailability();
       applyLocalRoleUi(
         role,
         wisdomOrbs,
@@ -2547,12 +2554,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       latestServerState = gameState;
       const canLocalPlayerAct =
         gameState.match.status === 'running' && !(localPlayerData?.escaped ?? false);
+      setGameMenuAvailable(gameState.match.status === 'running');
       if (!canLocalPlayerAct) {
         resetAllInput();
         pendingInputs = [];
       }
       chatHud?.setCanSend(canLocalPlayerAct);
-      setMobileInputEnabled(canLocalPlayerAct && !chatInputActive);
+      syncLocalInputAvailability();
       if (debugUi) updateDebugUI(debugUi, gameState, localPlayerId);
     },
 
@@ -2697,7 +2705,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         resetAllInput();
         pendingInputs = [];
         chatHud?.setCanSend(false);
-        setMobileInputEnabled(false);
+        syncLocalInputAvailability();
       }
       console.info(
         `[Main] ${displayName} escaped via portal (${escapedCount}/${escapeThreshold})`,
@@ -2718,7 +2726,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       introDialogueHud = null;
       chatHud?.setSuppressed(false);
       chatHud?.setCanSend(false);
-      setMobileInputEnabled(false);
+      setGameMenuAvailable(false);
+      syncLocalInputAvailability();
       if (interactPrompt) interactPrompt.visible = false;
       matchHud.sync({
         status: 'ended',
@@ -2748,7 +2757,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       snapshotBuffer.clear();
       minimap?.closeExpanded();
       chatHud?.setCanSend(false);
-      setMobileInputEnabled(false);
+      setGameMenuAvailable(false);
+      syncLocalInputAvailability();
       if (interactPrompt) interactPrompt.visible = false;
       if (statusEl) {
         statusEl.textContent = state.status === 'failed' ? '🔴 Disconnected' : '🟠 Reconnecting';
@@ -2778,7 +2788,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         resetAllInput();
         minimap?.closeExpanded();
       }
-      setMobileInputEnabled(!active);
+      syncLocalInputAvailability();
     },
   });
 
@@ -2795,7 +2805,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     console.info(
       `[WisdomOrb][${source}] Triggered. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`,
     );
-    if (chatInputActive) return;
+    if (chatInputActive || gameMenuOpen) return;
     if (!localPlayerInitialized) {
       console.warn(`[WisdomOrb][${source}] BLOCKED: local player not initialized`);
       return;
@@ -2842,7 +2852,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       (localPlayerRole === 'survivor' && localWisdomOrbs < MAX_WISDOM_ORBS));
 
   triggerInteract = (): void => {
-    if (chatInputActive) return;
+    if (chatInputActive || gameMenuOpen) return;
     if (minimap?.isExpanded()) {
       minimap.closeExpanded();
       return;
@@ -3000,6 +3010,49 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   setMobileInputEnabled = (enabled) => mobileControls.setInputEnabled(enabled);
   mobileControls.setWisdomAvailable(false);
 
+  const gameMenuToggle = document.querySelector<HTMLButtonElement>('#game-menu-toggle');
+  const returnToMainMenu = (): void => {
+    net.leaveRoom();
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    window.location.href = url.toString();
+  };
+  const handleGameMenuToggle = (): void => gameMenuHud?.toggle();
+  gameMenuToggle?.addEventListener('click', handleGameMenuToggle);
+
+  gameMenuHud = new GameMenuHud(INTERNAL_WIDTH, INTERNAL_HEIGHT, {
+    onVisibilityChange: (visible) => {
+      gameMenuOpen = visible;
+      gameMenuToggle?.setAttribute('aria-expanded', String(visible));
+      resetAllInput();
+      if (visible) {
+        chatHud?.close();
+        minimap?.closeExpanded();
+      }
+      syncLocalInputAvailability();
+    },
+    onExitMatch: returnToMainMenu,
+  });
+  gameMenuHud.addToStage(app.stage);
+
+  setGameMenuAvailable = (available) => {
+    gameMenuHud?.setAvailable(available);
+    if (gameMenuToggle) {
+      gameMenuToggle.hidden = !available;
+      gameMenuToggle.disabled = !available;
+      gameMenuToggle.setAttribute('aria-expanded', String(gameMenuHud?.isOpen() ?? false));
+    }
+  };
+  syncLocalInputAvailability = () => {
+    const canAct = net.isConnected && isLocalPlayerActionable();
+    setMobileInputEnabled(canAct && !chatInputActive && !gameMenuOpen);
+    chatHud?.setSuppressed(
+      gameMenuOpen ||
+        (introDialogueHud?.isVisible() ?? false) ||
+        (minimap?.isExpanded() ?? false),
+    );
+  };
+
   const showDialoguePages = (pages: readonly string[]): void => {
     introDialogueHud?.destroy();
     introDialogueHud = new IntroDialogueHud(
@@ -3078,6 +3131,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     () => {
       chatHud?.destroy();
       matchHud.destroy();
+      gameMenuHud?.destroy();
+      gameMenuToggle?.removeEventListener('click', handleGameMenuToggle);
       mobileControls.destroy();
     },
     { once: true },
@@ -3104,16 +3159,16 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       ? findActivePlayerCage(latestServerState.cageStates, net.playerId)
       : null;
     const movementInput = {
-      up: chatInputActive || !localCanAct ? false : activeKeys.up,
-      down: chatInputActive || !localCanAct ? false : activeKeys.down,
+      up: chatInputActive || gameMenuOpen || !localCanAct ? false : activeKeys.up,
+      down: chatInputActive || gameMenuOpen || !localCanAct ? false : activeKeys.down,
       // Once opened, the cage permits only its north/south escape route. A
       // closed prisoner still animates against all four sides without moving.
       left:
-        chatInputActive || !localCanAct || activeLocalCage?.opened
+        chatInputActive || gameMenuOpen || !localCanAct || activeLocalCage?.opened
           ? false
           : activeKeys.left,
       right:
-        chatInputActive || !localCanAct || activeLocalCage?.opened
+        chatInputActive || gameMenuOpen || !localCanAct || activeLocalCage?.opened
           ? false
           : activeKeys.right,
     };
@@ -3257,7 +3312,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
     introDialogueHud?.update(dtSeconds);
     chatHud?.setSuppressed(
-      (introDialogueHud?.isVisible() ?? false) || (minimap?.isExpanded() ?? false),
+      gameMenuOpen ||
+        (introDialogueHud?.isVisible() ?? false) ||
+        (minimap?.isExpanded() ?? false),
     );
     wisdomArrow?.update(dtSeconds, localX, localY);
 
@@ -3529,6 +3586,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     'wheel',
     (e: WheelEvent) => {
       e.preventDefault();
+      if (gameMenuOpen) return;
       if (!DebugSettings.isEnabled('scrollZoom')) return;
       if (e.deltaY < 0) zoomLevel = Math.min(MAX_ZOOM, zoomLevel + ZOOM_STEP);
       else zoomLevel = Math.max(MIN_ZOOM, zoomLevel - ZOOM_STEP);
@@ -3541,6 +3599,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   // Cycles:  default → fully zoomed-out → fully zoomed-in → default
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.code !== 'Minus' && e.code !== 'NumpadSubtract') return;
+    if (gameMenuOpen) return;
     if (!DebugSettings.isEnabled('zoomToggle')) return;
 
     switch (zoomToggleState) {
@@ -3561,6 +3620,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── Click-to-Teleport (debug) ─────────────────────────────────────────
   app.canvas.addEventListener('click', (e: MouseEvent) => {
+    if (gameMenuOpen) return;
     if (minimap?.shouldBlockCanvasClick()) return;
     if (!DebugSettings.isEnabled('clickTeleport')) return;
     if (!localPlayerInitialized || !currentMap) return;
@@ -3608,18 +3668,30 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     if (chatInputActive) return;
 
+    if (e.code === 'Escape' && minimap?.isExpanded()) {
+      e.preventDefault();
+      minimap.closeExpanded();
+      return;
+    }
+
+    if (
+      e.code === 'Escape' &&
+      net.isConnected &&
+      latestServerState?.match.status === 'running'
+    ) {
+      e.preventDefault();
+      if (!e.repeat) gameMenuHud?.handleEscape();
+      return;
+    }
+
+    if (gameMenuOpen) return;
+
     if (
       !e.repeat &&
       (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'KeyT')
     ) {
       e.preventDefault();
       chatHud?.open();
-      return;
-    }
-
-    if (e.code === 'Escape' && minimap?.isExpanded()) {
-      e.preventDefault();
-      minimap.closeExpanded();
       return;
     }
 
@@ -3648,7 +3720,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   });
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {
-    if (chatInputActive) return;
+    if (chatInputActive || gameMenuOpen) return;
     const dir = KEY_MAP[e.code];
     if (dir) setKeyboardDirection(dir, false);
   });

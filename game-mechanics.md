@@ -41,6 +41,12 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - A successful reconnect receives the current authoritative world and private player state and resumes from the same identity. The match clock does not pause during the grace period.
 - If the reservation expires, the player leaves permanently and the survivor escape threshold is recalculated. A room is destroyed when its final occupied seat is released.
 
+## In-match menu
+
+- `Escape`, or the on-screen menu button on touch devices, opens a local menu with Resume Game, Controls, and Exit Match.
+- The menu suppresses that player's movement and actions, but it does not pause the multiplayer match or its clock.
+- Exit Match requires confirmation. Confirming releases the seat immediately and prevents reconnecting to it.
+
 ## Labyrinth and central hub
 
 - The three squads spawn in different locations in the labyrinth.

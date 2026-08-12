@@ -160,6 +160,19 @@ function gameMarkup(): string {
         <path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" />
       </svg>
     </button>
+    <button
+      id="game-menu-toggle"
+      class="game-menu-toggle"
+      type="button"
+      aria-label="Open game menu"
+      aria-expanded="false"
+      title="Game menu (Esc)"
+      hidden
+    >
+      <svg class="game-menu-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 7h14M5 12h14M5 17h14" />
+      </svg>
+    </button>
     <div
       id="ios-fullscreen-help"
       class="fullscreen-help"

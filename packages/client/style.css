@@ -1072,10 +1072,10 @@ body {
   }
 }
 
-.fullscreen-toggle {
+.fullscreen-toggle,
+.game-menu-toggle {
   position: fixed;
   top: var(--fullscreen-toggle-top);
-  right: var(--fullscreen-toggle-right);
   z-index: 3000;
   display: grid;
   width: var(--fullscreen-toggle-size);
@@ -1096,27 +1096,55 @@ body {
     transform 80ms ease;
 }
 
-.fullscreen-toggle:hover {
+.game-menu-toggle[hidden] {
+  display: none;
+}
+
+.fullscreen-toggle {
+  right: var(--fullscreen-toggle-right);
+}
+
+.game-menu-toggle {
+  right: calc(
+    var(--fullscreen-toggle-right) + var(--fullscreen-toggle-size) + 8px
+  );
+}
+
+.fullscreen-toggle:hover,
+.game-menu-toggle:hover {
   border-color: #d5c98d;
   background: rgba(24, 48, 32, 0.94);
   color: #ffffff;
 }
 
-.fullscreen-toggle:active {
+.fullscreen-toggle:active,
+.game-menu-toggle:active {
   transform: translate(2px, 2px);
 }
 
-.fullscreen-toggle:focus-visible {
+.fullscreen-toggle:focus-visible,
+.game-menu-toggle:focus-visible {
   outline: 3px solid #79c86f;
   outline-offset: 3px;
 }
 
-.fullscreen-toggle:disabled {
+.fullscreen-toggle:disabled,
+.game-menu-toggle:disabled {
   cursor: wait;
   opacity: 0.65;
 }
 
 .fullscreen-toggle__icon {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+
+.game-menu-toggle__icon {
   width: 24px;
   height: 24px;
   fill: none;
@@ -1135,11 +1163,17 @@ body {
   display: block;
 }
 
-/* Keep the debug panel's expand/collapse control immediately left of fullscreen. */
+/* Keep the debug panel's expand/collapse control left of the game HUD buttons. */
 body:has(#fullscreen-toggle:not([hidden])) #debug-ui {
   top: var(--fullscreen-toggle-top);
   right: calc(
     var(--fullscreen-toggle-right) + var(--fullscreen-toggle-size) + 8px
+  );
+}
+
+body:has(#game-menu-toggle:not([hidden])) #debug-ui {
+  right: calc(
+    var(--fullscreen-toggle-right) + var(--fullscreen-toggle-size) * 2 + 16px
   );
 }
 
