@@ -156,12 +156,13 @@ export class GameMenuHud {
 
   private buildExitConfirmationPage(): void {
     const message = this.createText(
-      'Leave this match?\n\nYour seat will be released immediately\nand cannot be reconnected.',
+      'You will not be able to reconnect.',
       8,
       '#d6cfbd',
       TEXT_RENDER_SCALE,
       11,
       'center',
+      PANEL_WIDTH - 48,
     );
     message.anchor.set(0.5, 0);
     message.x = PANEL_WIDTH / 2;
@@ -268,6 +269,7 @@ export class GameMenuHud {
     renderScale = TEXT_RENDER_SCALE,
     lineHeight?: number,
     align: 'left' | 'center' | 'right' = 'left',
+    maxWidth?: number,
   ): Text {
     const label = new Text({
       text,
@@ -277,6 +279,9 @@ export class GameMenuHud {
         fill,
         align,
         lineHeight: lineHeight ? lineHeight * renderScale : undefined,
+        wordWrap: maxWidth !== undefined,
+        wordWrapWidth: maxWidth ? maxWidth * renderScale : undefined,
+        breakWords: maxWidth !== undefined,
         dropShadow: {
           alpha: 1,
           blur: 0,
