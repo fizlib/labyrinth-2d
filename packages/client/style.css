@@ -542,6 +542,136 @@ body {
   text-align: left;
 }
 
+.app-screen--menu {
+  padding:
+    max(18px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
+}
+
+.app-menu-shell {
+  display: grid;
+  width: min(38rem, calc(100vw - 36px));
+  justify-items: center;
+}
+
+.app-menu-logo {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: min(27rem, 72vw);
+  height: auto;
+  margin-bottom: 10px;
+  filter: drop-shadow(0 8px 6px rgba(34, 44, 27, 0.38));
+}
+
+.app-panel--menu {
+  width: 100%;
+  padding: 18px clamp(36px, 5vw, 52px) 18px;
+  border: 3px solid rgba(250, 255, 252, 0.82);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(244, 251, 251, 0.48), rgba(221, 243, 207, 0.4));
+  box-shadow:
+    0 14px 28px rgba(24, 81, 72, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  color: #203d3a;
+  text-shadow: none;
+  backdrop-filter: blur(8px) saturate(1.08);
+}
+
+.app-panel--menu::before,
+.app-panel--menu::after {
+  display: none;
+}
+
+.app-panel--menu .menu-profile {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  margin: 0 auto;
+  gap: 18px;
+}
+
+.menu-rating {
+  align-self: center;
+  margin-top: 0;
+  color: #4d5e5d;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.menu-profile__avatar {
+  display: block;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.menu-profile__avatar:focus-visible {
+  outline: 3px solid #2b8fc0;
+  outline-offset: 4px;
+}
+
+.app-panel--menu .profile-avatar--small {
+  width: 60px;
+  height: 60px;
+  border: 3px solid rgba(255, 255, 255, 0.92);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #25a2db, #087cb9);
+  color: #ffffff;
+  box-shadow:
+    0 4px 8px rgba(30, 91, 111, 0.28),
+    inset 0 0 0 1px rgba(20, 117, 167, 0.35);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.65rem;
+  text-shadow: none;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.menu-profile__avatar:hover .profile-avatar--small {
+  box-shadow:
+    0 6px 12px rgba(30, 91, 111, 0.38),
+    inset 0 0 0 1px rgba(20, 117, 167, 0.35);
+  transform: translateY(-2px);
+}
+
+.app-panel--menu .menu-profile__text {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.app-panel--menu .menu-profile__text h1 {
+  min-width: 0;
+  overflow: hidden;
+  color: #1d3334;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(1.35rem, 2.1vw, 1.75rem);
+  font-weight: 700;
+  line-height: 1.12;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-panel--menu .menu-profile__text span {
+  display: inline;
+  flex: none;
+  margin-top: 0;
+  color: #51605f;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(0.88rem, 1.35vw, 1.05rem);
+}
+
 .menu-profile__text,
 .profile-header > div {
   min-width: 0;
@@ -601,6 +731,7 @@ body {
 
 .profile-avatar img {
   position: absolute;
+  z-index: 2;
   inset: 0;
   width: 100%;
   height: 100%;
@@ -615,6 +746,23 @@ body {
   margin: 28px 0 22px;
   color: #6f8668;
   font-size: 0.65rem;
+}
+
+.app-panel--menu .menu-divider {
+  margin: 14px 0 12px;
+  color: rgba(72, 106, 103, 0.34);
+  font-family: Arial, sans-serif;
+  font-size: 0.95rem;
+  text-shadow: none;
+}
+
+.app-panel--menu .menu-divider::before,
+.app-panel--menu .menu-divider::after {
+  background: linear-gradient(90deg, transparent, rgba(60, 91, 88, 0.25));
+}
+
+.app-panel--menu .menu-divider::after {
+  background: linear-gradient(90deg, rgba(60, 91, 88, 0.25), transparent);
 }
 
 .menu-divider::before,
@@ -636,6 +784,89 @@ body {
 
 .menu-actions .pixel-button {
   width: 100%;
+}
+
+.app-panel--menu .menu-actions {
+  gap: 8px;
+}
+
+.app-panel--menu .menu-actions .pixel-button {
+  min-height: 50px;
+  padding: 8px 18px;
+  border: 1px solid rgba(121, 116, 91, 0.72);
+  border-radius: 10px;
+  background: rgba(255, 250, 230, 0.9);
+  color: #193538;
+  box-shadow:
+    0 4px 7px rgba(50, 72, 65, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(1rem, 1.55vw, 1.25rem);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-shadow: none;
+}
+
+.app-panel--menu .menu-actions .pixel-button:hover:not(:disabled) {
+  border-color: rgba(97, 89, 60, 0.9);
+  background: #fffbed;
+  color: #102d31;
+}
+
+.app-panel--menu .menu-actions .pixel-button:active:not(:disabled) {
+  box-shadow: 0 2px 4px rgba(50, 72, 65, 0.3);
+  transform: translateY(2px);
+}
+
+.app-panel--menu .menu-actions .pixel-button--primary {
+  min-height: 68px;
+  border: 2px solid #b87920;
+  background: linear-gradient(180deg, #ffe78c, #f7c94e);
+  color: #2d230d;
+  box-shadow:
+    0 5px 8px rgba(83, 68, 27, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  font-size: clamp(1.4rem, 2.35vw, 1.95rem);
+  font-weight: 700;
+}
+
+.app-panel--menu .menu-actions .pixel-button--primary:hover:not(:disabled) {
+  border-color: #9c6417;
+  background: linear-gradient(180deg, #ffeca2, #ffd25c);
+  color: #251b08;
+}
+
+.app-panel--menu .menu-button--coming-soon:disabled {
+  cursor: not-allowed;
+  filter: none;
+  opacity: 0.64;
+}
+
+.menu-sign-out {
+  justify-self: center;
+  margin-top: 2px;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: #536866;
+  cursor: pointer;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(0.84rem, 1.3vw, 1rem);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.menu-sign-out:hover {
+  color: #244542;
+}
+
+.menu-sign-out:focus-visible {
+  outline: 3px solid #2b8fc0;
+  outline-offset: 2px;
+}
+
+.app-panel--menu .app-status:empty {
+  display: none;
 }
 
 .profile-header {
@@ -670,6 +901,191 @@ body {
   color: #647166;
 }
 
+.app-screen--profile {
+  padding:
+    max(18px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
+}
+
+.app-panel--profile {
+  width: min(32rem, calc(100vw - 36px));
+  padding: 28px clamp(30px, 5vw, 42px);
+  border: 3px solid rgba(250, 255, 252, 0.82);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(244, 251, 251, 0.5), rgba(221, 243, 207, 0.42));
+  box-shadow:
+    0 14px 28px rgba(24, 81, 72, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  color: #203d3a;
+  text-shadow: none;
+  backdrop-filter: blur(8px) saturate(1.08);
+}
+
+.app-panel--profile::before,
+.app-panel--profile::after {
+  display: none;
+}
+
+.app-panel--profile .profile-header {
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.app-panel--profile .profile-avatar--large {
+  width: 72px;
+  height: 72px;
+  border: 3px solid rgba(255, 255, 255, 0.92);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #25a2db, #087cb9);
+  color: #ffffff;
+  box-shadow:
+    0 4px 8px rgba(30, 91, 111, 0.28),
+    inset 0 0 0 1px rgba(20, 117, 167, 0.35);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.95rem;
+  text-shadow: none;
+}
+
+.app-panel--profile .profile-avatar__fallback {
+  position: relative;
+  z-index: 1;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  text-shadow: none;
+}
+
+.app-panel--profile .profile-header h1 {
+  color: #1d3334;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.app-panel--profile .profile-header > div > span {
+  margin-top: 5px;
+  color: #51605f;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.92rem;
+}
+
+.app-panel--profile .profile-form label {
+  margin: 0 0 8px;
+  color: #203a3b;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.app-panel--profile .profile-form input {
+  min-height: 58px;
+  padding: 10px 14px;
+  border: 2px solid rgba(113, 107, 79, 0.72);
+  border-radius: 10px;
+  background: rgba(255, 252, 239, 0.94);
+  color: #1a3335;
+  box-shadow:
+    0 4px 7px rgba(50, 72, 65, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  text-shadow: none;
+}
+
+.app-panel--profile .profile-form input:focus-visible {
+  outline: 3px solid #2b8fc0;
+  outline-offset: 3px;
+}
+
+.app-panel--profile .field-hint {
+  margin-top: 7px;
+  color: #506361;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.78rem;
+}
+
+.app-panel--profile .profile-timestamps {
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.app-panel--profile .profile-timestamps div {
+  padding: 11px;
+  border: 1px solid rgba(113, 107, 79, 0.42);
+  border-radius: 8px;
+  background: rgba(255, 252, 239, 0.62);
+}
+
+.app-panel--profile .profile-timestamps dt {
+  color: #647370;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.66rem;
+}
+
+.app-panel--profile .profile-timestamps dd {
+  color: #263f40;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.72rem;
+  text-shadow: none;
+}
+
+.app-panel--profile .profile-actions {
+  margin-top: 18px;
+  gap: 10px;
+}
+
+.app-panel--profile .pixel-button {
+  min-height: 52px;
+  border: 1px solid rgba(121, 116, 91, 0.72);
+  border-radius: 10px;
+  background: rgba(255, 250, 230, 0.9);
+  color: #193538;
+  box-shadow:
+    0 4px 7px rgba(50, 72, 65, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  font-weight: 650;
+  text-shadow: none;
+}
+
+.app-panel--profile .pixel-button:hover:not(:disabled) {
+  border-color: rgba(97, 89, 60, 0.9);
+  background: #fffbed;
+  color: #102d31;
+}
+
+.app-panel--profile .pixel-button--primary {
+  border: 2px solid #b87920;
+  background: linear-gradient(180deg, #ffe78c, #f7c94e);
+  color: #2d230d;
+}
+
+.app-panel--profile .pixel-button--primary:hover:not(:disabled) {
+  border-color: #9c6417;
+  background: linear-gradient(180deg, #ffeca2, #ffd25c);
+  color: #251b08;
+}
+
+.app-panel--profile .pixel-button:active:not(:disabled) {
+  box-shadow: 0 2px 4px rgba(50, 72, 65, 0.3);
+  transform: translateY(2px);
+}
+
+.app-panel--profile .app-alert {
+  margin: 14px 0 0;
+  border-radius: 8px;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  text-shadow: none;
+}
+
+.app-panel--profile .app-status:empty {
+  display: none;
+}
+
 .join-room-form {
   display: grid;
   gap: 12px;
@@ -702,6 +1118,121 @@ body {
 .lobby-code:focus-visible {
   outline: 3px solid var(--shell-green);
   outline-offset: 3px;
+}
+
+.app-screen--join {
+  padding:
+    max(18px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
+}
+
+.app-panel--join {
+  width: min(32rem, calc(100vw - 36px));
+  padding: 30px clamp(30px, 5vw, 44px);
+  border: 3px solid rgba(250, 255, 252, 0.82);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(244, 251, 251, 0.5), rgba(221, 243, 207, 0.42));
+  box-shadow:
+    0 14px 28px rgba(24, 81, 72, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  color: #203d3a;
+  text-shadow: none;
+  backdrop-filter: blur(8px) saturate(1.08);
+}
+
+.app-panel--join::before,
+.app-panel--join::after {
+  display: none;
+}
+
+.app-panel--join .join-room-form {
+  gap: 14px;
+}
+
+.app-panel--join .join-room-form label {
+  color: #203a3b;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1.1rem;
+  font-weight: 650;
+  text-align: center;
+}
+
+.app-panel--join .join-room-form input {
+  min-height: 68px;
+  padding: 10px 16px;
+  border: 2px solid rgba(113, 107, 79, 0.72);
+  border-radius: 10px;
+  background: rgba(255, 252, 239, 0.94);
+  color: #1a3335;
+  box-shadow:
+    0 4px 7px rgba(50, 72, 65, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1.65rem;
+  font-weight: 650;
+  letter-spacing: 0.22em;
+  text-shadow: none;
+}
+
+.app-panel--join .join-room-form input::placeholder {
+  color: rgba(55, 77, 76, 0.42);
+}
+
+.app-panel--join .join-room-form input:focus-visible {
+  outline: 3px solid #2b8fc0;
+  outline-offset: 3px;
+}
+
+.app-panel--join .profile-actions {
+  margin-top: 2px;
+  gap: 10px;
+}
+
+.app-panel--join .pixel-button {
+  min-height: 52px;
+  border: 1px solid rgba(121, 116, 91, 0.72);
+  border-radius: 10px;
+  background: rgba(255, 250, 230, 0.9);
+  color: #193538;
+  box-shadow:
+    0 4px 7px rgba(50, 72, 65, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  font-weight: 650;
+  text-shadow: none;
+}
+
+.app-panel--join .pixel-button:hover:not(:disabled) {
+  border-color: rgba(97, 89, 60, 0.9);
+  background: #fffbed;
+  color: #102d31;
+}
+
+.app-panel--join .pixel-button--primary {
+  border: 2px solid #b87920;
+  background: linear-gradient(180deg, #ffe78c, #f7c94e);
+  color: #2d230d;
+}
+
+.app-panel--join .pixel-button--primary:hover:not(:disabled) {
+  border-color: #9c6417;
+  background: linear-gradient(180deg, #ffeca2, #ffd25c);
+  color: #251b08;
+}
+
+.app-panel--join .pixel-button:active:not(:disabled) {
+  box-shadow: 0 2px 4px rgba(50, 72, 65, 0.3);
+  transform: translateY(2px);
+}
+
+.app-panel--join .app-alert {
+  margin: 0;
+  border-radius: 8px;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  text-shadow: none;
 }
 
 .field-hint {
@@ -787,6 +1318,156 @@ body {
   .app-panel--auth .app-panel__fineprint {
     font-size: 0.72rem;
   }
+
+  .app-screen--menu {
+    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+  }
+
+  .app-menu-shell {
+    width: min(330px, 100%);
+  }
+
+  .app-menu-logo {
+    width: min(230px, 66vw);
+    margin-bottom: 8px;
+  }
+
+  .app-panel--menu {
+    padding: 15px 16px 16px;
+    border-radius: 18px;
+    box-shadow: 0 10px 20px rgba(24, 81, 72, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  }
+
+  .app-panel--menu .menu-profile {
+    width: 100%;
+    gap: 12px;
+  }
+
+  .app-panel--menu .profile-avatar--small {
+    width: 50px;
+    height: 50px;
+    font-size: 1.35rem;
+  }
+
+  .app-panel--menu .menu-profile__text h1 {
+    font-size: 1.15rem;
+  }
+
+  .app-panel--menu .menu-profile__text span {
+    font-size: 0.8rem;
+  }
+
+  .menu-rating {
+    margin-top: 0;
+    font-size: 0.78rem;
+  }
+
+  .app-panel--menu .menu-divider {
+    margin: 10px 0 9px;
+  }
+
+  .app-panel--menu .menu-actions {
+    gap: 7px;
+  }
+
+  .app-panel--menu .menu-actions .pixel-button {
+    min-height: 44px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+  }
+
+  .app-panel--menu .menu-actions .pixel-button--primary {
+    min-height: 56px;
+    font-size: 1.3rem;
+  }
+
+  .menu-sign-out {
+    margin-top: 1px;
+    font-size: 0.8rem;
+  }
+
+  .app-screen--join {
+    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+  }
+
+  .app-panel--join {
+    width: min(330px, 100%);
+    padding: 24px 18px;
+    border-radius: 18px;
+    box-shadow: 0 10px 20px rgba(24, 81, 72, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  }
+
+  .app-panel--join .join-room-form label {
+    font-size: 1rem;
+  }
+
+  .app-panel--join .join-room-form input {
+    min-height: 62px;
+    font-size: 1.4rem;
+  }
+
+  .app-panel--join .profile-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-panel--join .profile-actions .pixel-button--primary {
+    order: 0;
+  }
+
+  .app-panel--join .pixel-button {
+    min-height: 48px;
+    padding-inline: 12px;
+    font-size: 0.92rem;
+  }
+
+  .app-screen--profile {
+    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+  }
+
+  .app-panel--profile {
+    width: min(330px, 100%);
+    padding: 22px 18px;
+    border-radius: 18px;
+    box-shadow: 0 10px 20px rgba(24, 81, 72, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  }
+
+  .app-panel--profile .profile-header {
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .app-panel--profile .profile-avatar--large {
+    width: 62px;
+    height: 62px;
+    font-size: 1.65rem;
+  }
+
+  .app-panel--profile .profile-header h1 {
+    font-size: 1.35rem;
+  }
+
+  .app-panel--profile .profile-header > div > span {
+    font-size: 0.82rem;
+  }
+
+  .app-panel--profile .profile-form input {
+    min-height: 54px;
+  }
+
+  .app-panel--profile .profile-timestamps,
+  .app-panel--profile .profile-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-panel--profile .profile-actions .pixel-button--primary {
+    order: 0;
+  }
+
+  .app-panel--profile .pixel-button {
+    min-height: 48px;
+    padding-inline: 12px;
+    font-size: 0.9rem;
+  }
 }
 
 @media (max-height: 620px) {
@@ -830,6 +1511,122 @@ body {
     max-width: 26rem;
     margin-top: 8px;
     font-size: 0.68rem;
+  }
+
+  .app-screen--menu {
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(14px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(14px, env(safe-area-inset-left));
+  }
+
+  .app-menu-shell {
+    width: min(33rem, calc(100vw - 28px));
+  }
+
+  .app-menu-logo {
+    width: min(250px, 44vw);
+    margin-bottom: 6px;
+  }
+
+  .app-panel--menu {
+    padding: 12px clamp(26px, 4vw, 38px) 13px;
+    border-radius: 17px;
+  }
+
+  .app-panel--menu .menu-profile {
+    width: 100%;
+    gap: 12px;
+  }
+
+  .app-panel--menu .profile-avatar--small {
+    width: 48px;
+    height: 48px;
+    font-size: 1.3rem;
+  }
+
+  .app-panel--menu .menu-profile__text h1 {
+    font-size: 1.12rem;
+  }
+
+  .app-panel--menu .menu-profile__text span {
+    font-size: 0.76rem;
+  }
+
+  .menu-rating {
+    margin-top: 0;
+    font-size: 0.76rem;
+  }
+
+  .app-panel--menu .menu-divider {
+    margin: 8px 0 7px;
+  }
+
+  .app-panel--menu .menu-actions {
+    gap: 7px;
+  }
+
+  .app-panel--menu .menu-actions .pixel-button {
+    min-height: 38px;
+    padding-block: 5px;
+    font-size: 0.88rem;
+  }
+
+  .app-panel--menu .menu-actions .pixel-button--primary {
+    min-height: 48px;
+    font-size: 1.25rem;
+  }
+
+  .menu-sign-out {
+    margin-top: 0;
+    padding-block: 1px;
+    font-size: 0.76rem;
+  }
+
+  .app-panel--join {
+    width: min(29rem, calc(100vw - 28px));
+    padding: 22px clamp(24px, 4vw, 34px);
+  }
+
+  .app-panel--join .join-room-form input {
+    min-height: 56px;
+    font-size: 1.35rem;
+  }
+
+  .app-panel--join .pixel-button {
+    min-height: 44px;
+  }
+
+  .app-panel--profile {
+    width: min(29rem, calc(100vw - 28px));
+    padding: 20px clamp(24px, 4vw, 34px);
+  }
+
+  .app-panel--profile .profile-header {
+    margin-bottom: 15px;
+  }
+
+  .app-panel--profile .profile-avatar--large {
+    width: 56px;
+    height: 56px;
+    font-size: 1.5rem;
+  }
+
+  .app-panel--profile .profile-form input {
+    min-height: 50px;
+  }
+
+  .app-panel--profile .profile-timestamps {
+    margin-top: 14px;
+  }
+
+  .app-panel--profile .profile-actions {
+    margin-top: 14px;
+  }
+
+  .app-panel--profile .pixel-button {
+    min-height: 44px;
   }
 }
 
@@ -1480,50 +2277,13 @@ body:has(#game-menu-toggle:not([hidden])) #debug-ui {
   --loading-progress: 0.04;
   position: absolute;
   inset: 0;
-  z-index: 2000;
+  z-index: 3200;
   display: grid;
   place-items: center;
   overflow: hidden;
-  background:
-    linear-gradient(rgba(5, 10, 10, 0.74), rgba(7, 9, 14, 0.94)),
-    repeating-linear-gradient(
-      90deg,
-      #102319 0,
-      #102319 32px,
-      #13291c 32px,
-      #13291c 64px
-    );
+  background: #64b8df;
   opacity: 1;
-  transition: opacity 480ms steps(8, end), visibility 480ms;
-}
-
-.loading-screen::before,
-.loading-screen::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: clamp(30px, 18vw, 220px);
-  background:
-    repeating-linear-gradient(
-      0deg,
-      rgba(25, 71, 42, 0.92) 0,
-      rgba(25, 71, 42, 0.92) 12px,
-      rgba(17, 50, 31, 0.92) 12px,
-      rgba(17, 50, 31, 0.92) 24px
-    );
-  box-shadow: 0 0 48px #050909 inset;
-  opacity: 0.72;
-}
-
-.loading-screen::before {
-  left: 0;
-  border-right: 4px solid #315d3d;
-}
-
-.loading-screen::after {
-  right: 0;
-  border-left: 4px solid #315d3d;
+  transition: opacity 480ms ease, visibility 480ms;
 }
 
 .loading-screen--complete {
@@ -1532,164 +2292,102 @@ body:has(#game-menu-toggle:not([hidden])) #debug-ui {
   pointer-events: none;
 }
 
-.loading-screen__mist {
+.loading-screen__landscape {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at 50% 55%, rgba(68, 134, 82, 0.15), transparent 34%),
-    radial-gradient(circle at 50% 100%, rgba(9, 29, 20, 0.9), transparent 58%);
-  animation: loading-mist 5s steps(10, end) infinite alternate;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.loading-screen__landscape::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(16, 91, 54, 0.035));
 }
 
 .loading-screen__content {
   position: relative;
   z-index: 1;
-  width: min(480px, calc(100vw - 64px));
-  text-align: center;
-  font-family: 'PixelOperator8', 'Courier New', Courier, monospace;
-  text-shadow: 2px 2px 0 #05070a;
-}
-
-.loading-screen__gate {
-  position: relative;
-  width: 68px;
-  height: 76px;
-  margin: 0 auto 26px;
-  border: 8px solid #554d37;
-  border-bottom-color: #29271f;
-  background:
-    linear-gradient(90deg, transparent 46%, #18251d 46%, #18251d 54%, transparent 54%),
-    #0b110f;
-  box-shadow:
-    0 -8px 0 #776a47,
-    -8px 0 0 #332f25,
-    8px 0 0 #332f25,
-    0 8px 0 #171813,
-    0 0 28px rgba(88, 203, 112, 0.22);
-}
-
-.loading-screen__gate::before,
-.loading-screen__gate::after {
-  content: '';
-  position: absolute;
-  bottom: -16px;
-  width: 34px;
-  height: 8px;
-  background: #554d37;
-}
-
-.loading-screen__gate::before {
-  right: 50%;
-  transform: skewX(-35deg);
-}
-
-.loading-screen__gate::after {
-  left: 50%;
-  transform: skewX(35deg);
-}
-
-.loading-screen__gate-rune {
-  position: absolute;
-  top: 23px;
-  left: 50%;
-  color: #8edb87;
-  font-size: 13px;
-  text-shadow:
-    0 0 5px #6ee780,
-    0 0 14px #47b86d;
-  transform: translateX(-50%);
-  animation: loading-rune 1.5s steps(4, end) infinite;
-}
-
-.loading-screen__title {
-  color: #f4ecd1;
-  font-size: clamp(2.25rem, 9vw, 4rem);
-  font-weight: 400;
-  line-height: 0.9;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.loading-screen__subtitle {
-  margin-top: 14px;
-  color: #94a78f;
-  font-size: clamp(0.72rem, 2.5vw, 0.9rem);
-  letter-spacing: 0.12em;
+  width: min(420px, calc(100vw - 56px));
+  margin-top: 1vh;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 .loading-screen__progress-frame {
   position: relative;
-  height: 24px;
-  margin-top: 40px;
-  padding: 5px;
-  border: 2px solid #8b7d52;
-  background: #080d0d;
+  height: clamp(28px, 3.5vw, 38px);
+  padding: 3px;
+  overflow: hidden;
+  border: 3px solid #e7a73d;
+  border-radius: 999px;
+  background: #17282c;
   box-shadow:
-    4px 4px 0 #030606,
-    0 0 0 2px #2f3528;
-}
-
-.loading-screen__progress-frame::before,
-.loading-screen__progress-frame::after {
-  content: '';
-  position: absolute;
-  top: 7px;
-  width: 4px;
-  height: 6px;
-  background: #d5c98d;
-}
-
-.loading-screen__progress-frame::before {
-  left: -7px;
-}
-
-.loading-screen__progress-frame::after {
-  right: -7px;
+    0 0 0 1px #3f260f,
+    inset 0 2px 4px rgba(0, 0, 0, 0.82),
+    0 2px 5px rgba(30, 75, 79, 0.4);
 }
 
 .loading-screen__progress {
   width: 100%;
-  height: 10px;
+  height: 100%;
+  border-radius: inherit;
   background:
     repeating-linear-gradient(
-      90deg,
-      #5da75d 0,
-      #5da75d 15px,
-      #79c86f 15px,
-      #79c86f 22px,
-      #356f45 22px,
-      #356f45 25px
-    );
-  box-shadow: 0 0 12px rgba(95, 207, 107, 0.3);
+      125deg,
+      rgba(255, 255, 255, 0.05) 0,
+      rgba(255, 255, 255, 0.05) 14px,
+      rgba(255, 255, 255, 0.18) 14px,
+      rgba(255, 255, 255, 0.18) 28px
+    ),
+    linear-gradient(180deg, #43ddff 0%, #119cff 48%, #0866e4 100%);
+  box-shadow:
+    inset 0 3px 0 rgba(220, 249, 255, 0.54),
+    inset 0 -3px 0 rgba(1, 66, 183, 0.34),
+    0 0 10px rgba(27, 177, 255, 0.52);
   transform: scaleX(var(--loading-progress));
   transform-origin: left center;
-  transition: transform 300ms steps(10, end);
+  transition: transform 260ms ease-out;
 }
 
 .loading-screen__readout {
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  margin-top: 15px;
-  color: #b7c7b0;
-  font-size: clamp(0.72rem, 2.5vw, 0.9rem);
-  letter-spacing: 0.05em;
+  margin-top: 8px;
+  padding: 0 4px;
+  color: #142f3a;
+  font-size: clamp(0.82rem, 1.4vw, 1.05rem);
+  font-weight: 500;
+  line-height: 1.1;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.58);
 }
 
 #loading-percent {
   flex: none;
-  color: #d5c98d;
+  color: inherit;
   font-variant-numeric: tabular-nums;
 }
 
+.loading-screen__content--restoring .loading-screen__readout {
+  justify-content: center;
+  text-align: center;
+}
+
+.loading-screen__progress--indeterminate {
+  width: 42%;
+  transform: translateX(69%);
+  animation: loading-bar-travel 1.15s ease-in-out infinite alternate;
+}
+
 .loading-screen--error .loading-screen__progress {
-  background: #943e3e;
-  box-shadow: 0 0 12px rgba(197, 60, 60, 0.35);
+  background: linear-gradient(180deg, #ff9b83, #d8493d);
+  box-shadow: 0 0 12px rgba(197, 60, 60, 0.45);
 }
 
 .loading-screen--error #loading-status,
 .loading-screen--error #loading-percent {
-  color: #e6a29a;
+  color: #7d201b;
 }
 
 @keyframes loading-rune {
@@ -1707,20 +2405,28 @@ body:has(#game-menu-toggle:not([hidden])) #debug-ui {
 
 @keyframes loading-mist {
   from {
-    transform: translateX(-1.5%);
     opacity: 0.7;
+    transform: translateX(-1.5%);
   }
 
   to {
-    transform: translateX(1.5%);
     opacity: 1;
+    transform: translateX(1.5%);
+  }
+}
+
+@keyframes loading-bar-travel {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(138%);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .loading-screen,
-  .loading-screen__mist,
-  .loading-screen__gate-rune,
   .loading-screen__progress {
     animation: none;
     transition-duration: 0.01ms;

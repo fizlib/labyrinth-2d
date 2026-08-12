@@ -127,12 +127,13 @@ function gameMarkup(): string {
           loop
           aria-hidden="true"
         ></audio>
-        <div class="loading-screen__mist" aria-hidden="true"></div>
+        <div class="loading-screen__landscape" aria-hidden="true">
+          <img class="app-parallax__layer app-parallax__layer--sky" src="/assets/home/sky.png" alt="" />
+          <img class="app-parallax__layer app-parallax__layer--clouds" src="/assets/home/clouds.png" alt="" />
+          <img class="app-parallax__layer app-parallax__layer--hills" src="/assets/home/hills.png" alt="" />
+          <img class="app-parallax__layer app-parallax__layer--field" src="/assets/home/field.png" alt="" />
+        </div>
         <div class="loading-screen__content">
-          <div class="loading-screen__gate" aria-hidden="true">
-            <span class="loading-screen__gate-rune">◆</span>
-          </div>
-          <h1 class="loading-screen__title">Labyrinth</h1>
           <div class="loading-screen__progress-frame">
             <div
               id="loading-progress"
@@ -145,7 +146,7 @@ function gameMarkup(): string {
             ></div>
           </div>
           <div class="loading-screen__readout">
-            <span id="loading-status">Entering the labyrinth…</span>
+            <span id="loading-status">Loading textures</span>
             <span id="loading-percent" aria-hidden="true">04%</span>
           </div>
         </div>
@@ -338,10 +339,17 @@ class AppController {
 
   private renderRestoring(status: string): void {
     root.innerHTML = shellMarkup(`
-      <section class="app-panel app-panel--compact" role="status" aria-live="polite" aria-busy="true">
-        <div class="app-brand">${brandMarkup()}</div>
-        <div class="pixel-spinner" aria-hidden="true"><span></span><span></span><span></span></div>
-        <p class="app-status">${escapeHtml(status)}</p>
+      <section class="loading-screen__content loading-screen__content--restoring" role="status" aria-live="polite" aria-busy="true">
+        <div class="loading-screen__progress-frame">
+          <div
+            class="loading-screen__progress loading-screen__progress--indeterminate"
+            role="progressbar"
+            aria-label="Loading"
+          ></div>
+        </div>
+        <div class="loading-screen__readout">
+          <span>${escapeHtml(status)}</span>
+        </div>
       </section>`, 'app-screen--loading');
   }
 
@@ -460,30 +468,34 @@ class AppController {
       return;
     }
     const isGuest = this.identityMode === 'guest';
-    const identityLabel = isGuest
-      ? 'Guest session · this tab only'
-      : `${this.profile.is_admin ? 'Admin · ' : ''}${this.session?.user.email ?? 'Signed in with Google'}`;
+    const statusLabel = this.profile.is_admin ? 'Admin' : isGuest ? 'Guest' : 'Explorer';
     root.innerHTML = shellMarkup(`
-      <section class="app-panel app-panel--menu" aria-labelledby="menu-title">
-        <header class="menu-profile">
-          ${avatarMarkup(this.profile, 'small')}
-          <div class="menu-profile__text">
-            <p>${isGuest ? 'Guest explorer' : 'Welcome back'}</p>
-            <h1 id="menu-title">${escapeHtml(this.profile.display_name)}</h1>
-            <span>${escapeHtml(identityLabel)}</span>
-          </div>
-        </header>
-        <div class="menu-divider" aria-hidden="true"><span>◆</span></div>
-        <nav class="menu-actions" aria-label="Main menu">
-          <button id="quick-play" class="pixel-button pixel-button--primary" type="button">Quick Play</button>
-          <button id="create-game" class="pixel-button" type="button">Create Private Game</button>
-          <button id="join-game" class="pixel-button" type="button">Join with Code</button>
-          <button id="open-profile" class="pixel-button" type="button">Profile</button>
-          <button id="sign-out" class="pixel-button pixel-button--quiet" type="button">${isGuest ? 'Leave Guest Session' : 'Sign Out'}</button>
-        </nav>
-        <div id="menu-notice" class="app-alert app-alert--notice" role="status" aria-live="polite" hidden></div>
-        <p id="menu-status" class="app-status" aria-live="polite"></p>
-      </section>`, 'app-screen--menu');
+      <div class="app-menu-shell">
+        <img class="app-menu-logo" src="/assets/home/false-arrow-logo.png" alt="False Arrow" />
+        <section class="app-panel app-panel--menu" aria-labelledby="menu-title">
+          <header class="menu-profile">
+            <button id="open-profile-avatar" class="menu-profile__avatar" type="button" aria-label="Open profile" title="Open profile">
+              ${avatarMarkup(this.profile, 'small')}
+            </button>
+            <div class="menu-profile__text">
+              <h1 id="menu-title">${escapeHtml(this.profile.display_name)}</h1>
+              <span>${escapeHtml(statusLabel)}</span>
+            </div>
+            <span class="menu-rating" aria-label="Player rating">ELO 1200</span>
+          </header>
+          <div class="menu-divider" aria-hidden="true"><span>◇</span></div>
+          <nav class="menu-actions" aria-label="Main menu">
+            <button id="quick-play" class="pixel-button pixel-button--primary" type="button">Quick Play</button>
+            <button id="create-game" class="pixel-button" type="button">Create Private Game</button>
+            <button id="join-game" class="pixel-button" type="button">Join with Code</button>
+            <button class="pixel-button menu-button--coming-soon" type="button" disabled>Leaderboard</button>
+            <button class="pixel-button menu-button--coming-soon" type="button" disabled>Settings</button>
+            <button id="sign-out" class="menu-sign-out" type="button">${isGuest ? 'Leave Guest Session' : 'Sign Out'}</button>
+          </nav>
+          <div id="menu-notice" class="app-alert app-alert--notice" role="status" aria-live="polite" hidden></div>
+          <p id="menu-status" class="app-status" aria-live="polite"></p>
+        </section>
+      </div>`, 'app-screen--menu');
 
     this.activateAvatarFallbacks();
 
@@ -497,7 +509,7 @@ class AppController {
       this.view = 'join';
       this.renderJoinRoom();
     });
-    document.querySelector<HTMLButtonElement>('#open-profile')?.addEventListener('click', () => {
+    document.querySelector<HTMLButtonElement>('#open-profile-avatar')?.addEventListener('click', () => {
       this.profileNotice = null;
       this.view = 'profile';
       this.renderProfile();
@@ -514,12 +526,9 @@ class AppController {
   private renderJoinRoom(initialCode = ''): void {
     if (!this.profile) return;
     root.innerHTML = shellMarkup(`
-      <section class="app-panel app-panel--compact" aria-labelledby="join-title">
-        <div class="app-brand">${brandMarkup()}</div>
-        <h2 id="join-title" class="app-panel__heading">Join a private room</h2>
-        <p class="app-panel__copy">Enter the six-character code shared by another explorer.</p>
+      <section class="app-panel app-panel--join" aria-label="Join with code">
         <form id="join-room-form" class="join-room-form" novalidate>
-          <label for="room-code">Room code</label>
+          <label for="room-code">Enter room code</label>
           <input id="room-code" name="roomCode" type="text" maxlength="6" required autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text" placeholder="ABC234" value="${escapeHtml(initialCode)}" />
           <div id="join-room-error" class="app-alert app-alert--error" role="alert" hidden></div>
           <div class="profile-actions">
@@ -560,26 +569,20 @@ class AppController {
   private renderProfile(): void {
     if (!this.profile || !this.identityMode) return;
     const isGuest = this.identityMode === 'guest';
-    const identityLabel = isGuest
-      ? 'Guest profile · this tab only'
-      : `${this.profile.is_admin ? 'Admin · ' : ''}${this.session?.user.email ?? ''}`;
+    const statusLabel = this.profile.is_admin ? 'Admin' : isGuest ? 'Guest' : 'Explorer';
     root.innerHTML = shellMarkup(`
       <section class="app-panel app-panel--profile" aria-labelledby="profile-title">
         <header class="profile-header">
           ${avatarMarkup(this.profile, 'large')}
           <div>
-            <p class="app-brand__eyebrow">Explorer record</p>
             <h1 id="profile-title">Profile</h1>
-            <span>${escapeHtml(identityLabel)}</span>
+            <span>${escapeHtml(statusLabel)}</span>
           </div>
         </header>
         <form id="profile-form" class="profile-form" novalidate>
           <label for="display-name">Display name</label>
           <input id="display-name" name="displayName" type="text" maxlength="32" required autocomplete="nickname" value="${escapeHtml(this.profile.display_name)}" />
           <p class="field-hint">Shown to other explorers inside the game.</p>
-          <label for="avatar-url">Avatar URL</label>
-          <input id="avatar-url" name="avatarUrl" type="url" maxlength="2048" inputmode="url" placeholder="https://example.com/avatar.png" value="${escapeHtml(this.profile.avatar_url ?? '')}" />
-          <p class="field-hint">Optional. HTTPS images only.</p>
           <dl class="profile-timestamps">
             <div><dt>Created</dt><dd>${escapeHtml(formatDate(this.profile.created_at))}</dd></div>
             <div><dt>Updated</dt><dd>${escapeHtml(formatDate(this.profile.updated_at))}</dd></div>
@@ -625,7 +628,7 @@ class AppController {
     try {
       const input = {
         displayName: String(data.get('displayName') ?? ''),
-        avatarUrl: String(data.get('avatarUrl') ?? ''),
+        avatarUrl: this.profile.avatar_url ?? '',
       };
       if (this.identityMode === 'guest') {
         this.profile = updateGuestProfile(this.profile, input);
