@@ -10,6 +10,25 @@ import type { HubDirection } from './navigation.js';
 import type { BridgeEntrySide, BridgeState } from './bridge.js';
 import type { SwordFieldState } from './sword-field.js';
 import type { CageState } from './cage.js';
+import type { LobbyJoinMode, LobbyState } from './lobby.js';
+
+export {
+  LOBBY_MAX_PLAYERS,
+  LOBBY_MIN_PLAYERS,
+  LOBBY_VOTE_DELAY_MS,
+  LOBBY_COUNTDOWN_MS,
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH,
+  getLobbyVotesRequired,
+  getWardenCountForPlayers,
+  normalizeRoomCode,
+  isValidRoomCode,
+  type LobbyPhase,
+  type LobbyStartReason,
+  type LobbyJoinMode,
+  type LobbyPlayerInfo,
+  type LobbyState,
+} from './lobby.js';
 
 export {
   CHAT_MAX_LENGTH,
@@ -277,9 +296,6 @@ export const SERVER_TICK_MS = 1000 / SERVER_TICK_RATE;
 /** Duration of one server tick in seconds (for physics). */
 export const SERVER_TICK_S = 1 / SERVER_TICK_RATE;
 
-/** Default room ID used when no lobby system is in place yet. */
-export const DEFAULT_ROOM_ID = 'default';
-
 /** Number of wisdom orbs each survivor starts with. Wardens always start with 0. */
 export const INITIAL_WISDOM_ORBS = 1;
 
@@ -333,6 +349,9 @@ export enum MessageType {
   DebugSetMatchTime = 'DEBUG_SET_MATCH_TIME',
   SendChatMessage = 'SEND_CHAT_MESSAGE',
   EscapePortal = 'ESCAPE_PORTAL',
+  VoteToStart = 'VOTE_TO_START',
+  SendLobbyChat = 'SEND_LOBBY_CHAT',
+  AdminStartGame = 'ADMIN_START_GAME',
 
   // ── Server → Client ──
   RoomJoined = 'ROOM_JOINED',
@@ -350,6 +369,9 @@ export enum MessageType {
   ChatMessage = 'CHAT_MESSAGE',
   PlayerEscaped = 'PLAYER_ESCAPED',
   MatchEnded = 'MATCH_ENDED',
+  LobbyJoined = 'LOBBY_JOINED',
+  LobbyUpdated = 'LOBBY_UPDATED',
+  LobbyChatMessage = 'LOBBY_CHAT_MESSAGE',
   Error = 'ERROR',
 }
 
@@ -359,6 +381,23 @@ export interface JoinRoomMessage {
   type: MessageType.JoinRoom;
   roomId: string;
   displayName: string;
+  mode: LobbyJoinMode;
+  /** Supabase access token used by the game server to verify admin status. */
+  accessToken?: string;
+}
+
+export interface VoteToStartMessage {
+  type: MessageType.VoteToStart;
+  vote: boolean;
+}
+
+export interface SendLobbyChatMessage {
+  type: MessageType.SendLobbyChat;
+  text: string;
+}
+
+export interface AdminStartGameMessage {
+  type: MessageType.AdminStartGame;
 }
 
 export interface PlayerInputMessage {
@@ -506,6 +545,27 @@ export interface RoomJoinedMessage {
   /** Private starting orb count for the recipient of this message. */
   wisdomOrbs: number;
   gameState: GameState;
+}
+
+export interface LobbyJoinedMessage {
+  type: MessageType.LobbyJoined;
+  playerId: string;
+  /** Private, server-verified permission for the recipient. */
+  isAdmin: boolean;
+  lobby: LobbyState;
+}
+
+export interface LobbyUpdatedMessage {
+  type: MessageType.LobbyUpdated;
+  lobby: LobbyState;
+}
+
+export interface LobbyChatMessage {
+  type: MessageType.LobbyChatMessage;
+  playerId: string;
+  displayName: string;
+  text: string;
+  sentAt: number;
 }
 
 export interface TickUpdateMessage {
@@ -724,6 +784,9 @@ export interface GameState {
 
 export type ClientToServerMessage =
   | JoinRoomMessage
+  | VoteToStartMessage
+  | SendLobbyChatMessage
+  | AdminStartGameMessage
   | PlayerInputMessage
   | ActivateRunestoneMessage
   | OpenChestMessage
@@ -738,6 +801,9 @@ export type ClientToServerMessage =
   | DebugPlayerActionMessage;
 
 export type ServerToClientMessage =
+  | LobbyJoinedMessage
+  | LobbyUpdatedMessage
+  | LobbyChatMessage
   | RoomJoinedMessage
   | TickUpdateMessage
   | PlayerLeftMessage

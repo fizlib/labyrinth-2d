@@ -77,6 +77,7 @@ export function loadGuestProfile(): Profile | null {
       id: candidate.id,
       display_name: values.displayName,
       avatar_url: values.avatarUrl,
+      is_admin: false,
       created_at: candidate.created_at,
       updated_at: candidate.updated_at,
     };
@@ -92,6 +93,7 @@ export function createGuestProfile(): Profile {
     id: guestId(),
     display_name: `Guest ${randomGuestSuffix()}`,
     avatar_url: null,
+    is_admin: false,
     created_at: now,
     updated_at: now,
   };

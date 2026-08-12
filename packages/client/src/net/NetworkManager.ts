@@ -9,12 +9,16 @@
 
 import {
   MessageType,
-  DEFAULT_ROOM_ID,
   type GameState,
+  type LobbyJoinMode,
+  type LobbyState,
   type MatchResultPlayer,
   type PlayerRole,
   type WisdomOrbHint,
   type JoinRoomMessage,
+  type VoteToStartMessage,
+  type SendLobbyChatMessage,
+  type AdminStartGameMessage,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
   type OpenChestMessage,
@@ -33,6 +37,14 @@ import {
 
 /** Callback signatures for network events. */
 export interface NetworkCallbacks {
+  onLobbyJoined: (playerId: string, lobby: LobbyState, isAdmin: boolean) => void;
+  onLobbyUpdated: (lobby: LobbyState) => void;
+  onLobbyChatMessage: (
+    playerId: string,
+    displayName: string,
+    text: string,
+    sentAt: number,
+  ) => void;
   onRoomJoined: (
     roomId: string,
     playerId: string,
@@ -85,8 +97,10 @@ export class NetworkManager {
   private ws: WebSocket | null = null;
   private callbacks: NetworkCallbacks;
   private connectionUrl: string | null = null;
-  private roomId: string = DEFAULT_ROOM_ID;
+  private roomId = '';
+  private joinMode: LobbyJoinMode = 'quick';
   private displayName: string = 'Player';
+  private accessToken: string | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private shouldReconnect = false;
@@ -120,8 +134,10 @@ export class NetworkManager {
 
   connect(
     url: string,
-    roomId: string = DEFAULT_ROOM_ID,
+    joinMode: LobbyJoinMode,
+    roomId = '',
     displayName: string = 'Player',
+    accessToken?: string,
   ): void {
     if (this.ws) {
       console.warn('[Net] Already connected — disconnect first.');
@@ -130,7 +146,9 @@ export class NetworkManager {
 
     this.connectionUrl = url;
     this.roomId = roomId;
+    this.joinMode = joinMode;
     this.displayName = displayName;
+    this.accessToken = accessToken;
     this.shouldReconnect = true;
     this.reconnectAttempt = 0;
     this.clearReconnectTimer();
@@ -153,6 +171,8 @@ export class NetworkManager {
         type: MessageType.JoinRoom,
         roomId: this.roomId,
         displayName: this.displayName,
+        mode: this.joinMode,
+        accessToken: this.accessToken,
       };
       this.send(joinMsg);
     };
@@ -225,6 +245,26 @@ export class NetworkManager {
 
   private handleMessage(msg: ServerToClientMessage): void {
     switch (msg.type) {
+      case MessageType.LobbyJoined:
+        this._playerId = msg.playerId;
+        this.roomId = msg.lobby.roomId;
+        this.joinMode = 'join';
+        this.callbacks.onLobbyJoined(msg.playerId, msg.lobby, msg.isAdmin);
+        break;
+
+      case MessageType.LobbyUpdated:
+        this.callbacks.onLobbyUpdated(msg.lobby);
+        break;
+
+      case MessageType.LobbyChatMessage:
+        this.callbacks.onLobbyChatMessage(
+          msg.playerId,
+          msg.displayName,
+          msg.text,
+          msg.sentAt,
+        );
+        break;
+
       case MessageType.RoomJoined:
         this._playerId = msg.playerId;
         this._gameState = msg.gameState;
@@ -319,6 +359,29 @@ export class NetworkManager {
   }
 
   // ── Sending ─────────────────────────────────────────────────────────────
+
+  sendLobbyVote(vote: boolean): void {
+    const msg: VoteToStartMessage = {
+      type: MessageType.VoteToStart,
+      vote,
+    };
+    this.send(msg);
+  }
+
+  sendLobbyChatMessage(text: string): void {
+    const msg: SendLobbyChatMessage = {
+      type: MessageType.SendLobbyChat,
+      text,
+    };
+    this.send(msg);
+  }
+
+  sendAdminStartGame(): void {
+    const msg: AdminStartGameMessage = {
+      type: MessageType.AdminStartGame,
+    };
+    this.send(msg);
+  }
 
   /**
    * Send a player input to the server with a specific sequence number.

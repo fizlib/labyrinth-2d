@@ -1,4 +1,4 @@
-/** Duration of one match from the first player joining. */
+/** Duration of one match after the lobby countdown completes. */
 export const MATCH_DURATION_MS = 10 * 60 * 1_000;
 
 /** Maximum feet-to-portal distance for an escape interaction. */

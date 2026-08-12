@@ -13,7 +13,6 @@ import type uWS from 'uWebSockets.js';
 import {
   MessageType,
   SERVER_TICK_MS,
-  MAX_PLAYERS_PER_ROOM,
   PLAYERS_PER_TEAM,
   MAX_TEAMS,
   SQUAD_COLORS,
@@ -60,6 +59,12 @@ import {
   CHAT_SEND_COOLDOWN_MS,
   normalizeChatMessageText,
   isWithinChatProximity,
+  LOBBY_COUNTDOWN_MS,
+  LOBBY_MAX_PLAYERS,
+  LOBBY_MIN_PLAYERS,
+  LOBBY_VOTE_DELAY_MS,
+  getLobbyVotesRequired,
+  getWardenCountForPlayers,
   MATCH_DURATION_MS,
   getSurvivorEscapeThreshold,
   getRemainingSurvivorsToEscape,
@@ -101,11 +106,18 @@ import {
   type ActivateTrapCellMessage,
   type OpenCageMessage,
   type SendChatMessage,
+  type SendLobbyChatMessage,
+  type VoteToStartMessage,
   type EscapePortalMessage,
   type DebugTeleportMessage,
   type DebugSetMatchTimeMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
+  type LobbyJoinedMessage,
+  type LobbyUpdatedMessage,
+  type LobbyChatMessage,
+  type LobbyState,
+  type LobbyStartReason,
   type TickUpdateMessage,
   type PlayerLeftMessage,
   type RunestoneActivatedMessage,
@@ -129,6 +141,9 @@ export interface SocketData {
   id: string;
   displayName: string;
   roomId: string | null;
+  connected: boolean;
+  joinPending: boolean;
+  isAdmin: boolean;
 }
 
 type PlayerSocket = uWS.WebSocket<SocketData>;
@@ -173,24 +188,18 @@ interface RoomPlayerInfo extends PlayerInfo {
 
 type RoomState = Omit<GameState, 'players'> & { players: RoomPlayerInfo[] };
 
-/** Build a legal 7-survivor / 2-warden seat layout for a new room. */
-function createRoleSeats(): PlayerRole[][] {
-  const seats: PlayerRole[][] = Array.from({ length: MAX_TEAMS }, () =>
+function createEmptyRoleSeats(): PlayerRole[][] {
+  return Array.from({ length: MAX_TEAMS }, () =>
     Array<PlayerRole>(PLAYERS_PER_TEAM).fill('survivor'),
   );
-  const teams = Array.from({ length: MAX_TEAMS }, (_, index) => index);
+}
 
-  for (let i = teams.length - 1; i > 0; i--) {
-    const swapIndex = Math.floor(Math.random() * (i + 1));
-    [teams[i], teams[swapIndex]] = [teams[swapIndex], teams[i]];
+function shuffle<T>(values: T[]): T[] {
+  for (let index = values.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
   }
-
-  for (const teamId of teams.slice(0, 2)) {
-    const teamSlot = Math.floor(Math.random() * PLAYERS_PER_TEAM);
-    seats[teamId][teamSlot] = 'warden';
-  }
-
-  return seats;
+  return values;
 }
 
 /** Convert private room state into the player data that every client may see. */
@@ -265,13 +274,19 @@ function isPlayerOnPlate(
 
 export class Room {
   readonly id: string;
+  readonly isPublic: boolean;
   private state: RoomState;
   private sockets: Map<string, PlayerSocket> = new Map();
   private inputQueues: Map<string, QueuedInput[]> = new Map();
   private readonly lastChatSentAt = new Map<string, number>();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
+  private countdownHandle: ReturnType<typeof setTimeout> | null = null;
+  private lobbyCountdownEndsAtMs: number | null = null;
+  private lobbyStartReason: LobbyStartReason = null;
+  private lobbyVoteAvailableAtMs = 0;
+  private readonly lobbyVotes = new Set<string>();
 
-  /** Server wall-clock deadline, initialized when the first player joins. */
+  /** Server wall-clock deadline, initialized when the lobby countdown completes. */
   private matchEndsAtMs: number | null = null;
 
   /** Hidden role assigned to every seat in the room. */
@@ -375,9 +390,10 @@ export class Room {
   /** Precomputed tile distances from every walkable tile to the portal approach zone. */
   private portalDistanceField: NavigationDistanceField | null = null;
 
-  constructor(id: string) {
+  constructor(id: string, isPublic = false) {
     this.id = id;
-    this.roleSeats = createRoleSeats();
+    this.isPublic = isPublic;
+    this.roleSeats = createEmptyRoleSeats();
     this.mapSeed = Math.floor(Math.random() * 2147483647);
     const layout = generateMazeLayout(this.mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
     this.map = layout.map;
@@ -489,7 +505,11 @@ export class Room {
   }
 
   get isFull(): boolean {
-    return this.sockets.size >= MAX_PLAYERS_PER_ROOM;
+    return this.sockets.size >= LOBBY_MAX_PLAYERS;
+  }
+
+  get isJoinable(): boolean {
+    return this.state.match.status === 'waiting' && this.countdownHandle === null && !this.isFull;
   }
 
   addPlayer(ws: PlayerSocket): void {
@@ -497,107 +517,30 @@ export class Room {
     const playerId = data.id;
     const displayName = data.displayName;
 
-    // ── Squad Assignment ────────────────────────────────────────────
-    // Fill the first available stable seat so a reconnecting replacement receives
-    // the same role as the player who vacated it.
-    let assignedTeam = -1;
-    let assignedTeamSlot = -1;
-    for (let t = 0; t < MAX_TEAMS; t++) {
-      const occupiedSlots = new Set(
-        this.state.players.filter((p) => p.teamId === t).map((p) => p.teamSlot),
-      );
-      for (let slot = 0; slot < PLAYERS_PER_TEAM; slot++) {
-        if (!occupiedSlots.has(slot)) {
-          assignedTeam = t;
-          assignedTeamSlot = slot;
-          break;
-        }
-      }
-      if (assignedTeam !== -1) break;
-    }
-
-    // Safety: isFull guards this path before addPlayer is called.
-    if (assignedTeam === -1 || assignedTeamSlot === -1) {
-      console.error(
-        `[Room:${this.id}] Could not find an available team seat for ${playerId}`,
-      );
-      return;
-    }
+    if (!this.isJoinable) return;
 
     this.sockets.set(playerId, ws);
     this.inputQueues.set(playerId, []);
     this.revealedWisdomBridges.set(playerId, new Set());
     this.revealedWisdomSwamps.set(playerId, new Set());
 
-    // Each team spawns at its corresponding dynamic spawn point
-    const spawnTile = this.spawnPoints[assignedTeam] ?? this.spawnPoints[0];
-    // Player x,y = bottom-center of sprite (feet position)
-    const spawnX = (spawnTile.x + 0.5) * TILE_SIZE;
-    const spawnY = (spawnTile.y + 0.5) * TILE_SIZE;
-
-    // ── Per-player sprite assignment ─────────────────────────────────
-    // Available sprite count (must match the client's player animation sets).
-    // Index 0 is Female1, making it the default assignment for the first player.
-    const usedSprites = new Set(this.state.players.map((p) => p.spriteIndex));
-    let spriteIndex = -1;
-    // Try to assign a unique sprite first
-    for (let s = 0; s < PLAYER_CHARACTER_COUNT; s++) {
-      if (!usedSprites.has(s)) {
-        spriteIndex = s;
-        break;
-      }
-    }
-    // If all sprites are taken, assign randomly
-    if (spriteIndex === -1) {
-      spriteIndex = Math.floor(Math.random() * PLAYER_CHARACTER_COUNT);
-    }
-
-    const role = this.roleSeats[assignedTeam][assignedTeamSlot];
-    const wisdomOrbs = role === 'survivor' ? INITIAL_WISDOM_ORBS : 0;
-    const playerInfo: RoomPlayerInfo = {
-      id: playerId,
-      displayName,
-      teamId: assignedTeam,
-      teamSlot: assignedTeamSlot,
-      role,
-      spriteIndex,
-      x: spawnX,
-      y: spawnY,
-      facing: 'down',
-      isMoving: false,
-      isDead: false,
-      escaped: false,
-      lastProcessedInput: 0,
-      wisdomOrbs,
-    };
-    this.state.players.push(playerInfo);
-
-    if (this.state.match.status === 'waiting') {
-      this.startMatch();
-    } else if (this.state.match.status === 'running') {
-      this.syncMatchCounts();
-    }
-
+    if (this.playerCount === 1) this.lobbyVoteAvailableAtMs = Date.now() + LOBBY_VOTE_DELAY_MS;
     data.roomId = this.id;
 
-    const joinMsg: RoomJoinedMessage = {
-      type: MessageType.RoomJoined,
-      roomId: this.id,
+    const joinedMessage: LobbyJoinedMessage = {
+      type: MessageType.LobbyJoined,
       playerId,
-      mapSeed: this.mapSeed,
-      role,
-      wisdomOrbs,
-      gameState: this.cloneState(),
+      isAdmin: data.isAdmin,
+      lobby: this.getLobbyState(),
     };
-    this.send(ws, joinMsg);
+    this.send(ws, joinedMessage);
+    this.broadcastLobbyState();
 
     console.info(
-      `[Room:${this.id}] Player joined: ${displayName} (${playerId}) ${SQUAD_COLORS[assignedTeam]} squad seat ${assignedTeamSlot} role ${role} sprite ${spriteIndex} → (${spawnX}, ${spawnY}) — ${this.playerCount} player(s)`,
+      `[Room:${this.id}] Lobby player joined: ${displayName} (${playerId}) — ${this.playerCount} player(s)`,
     );
 
-    if (this.playerCount === 1) {
-      this.startLoop();
-    }
+    if (this.playerCount === LOBBY_MAX_PLAYERS) this.beginLobbyCountdown('full');
   }
 
   removePlayer(playerId: string): void {
@@ -608,22 +551,31 @@ export class Room {
     this.bridgeRepairOccupancy.delete(playerId);
     this.revealedWisdomBridges.delete(playerId);
     this.revealedWisdomSwamps.delete(playerId);
+    this.lobbyVotes.delete(playerId);
     for (const cage of this.cageStates) {
       if (cage.prisonerPlayerId !== playerId || cage.vacated) continue;
       cage.opened = true;
       cage.vacated = true;
     }
+    const wasWaiting = this.state.match.status === 'waiting';
     this.state.players = this.state.players.filter((p) => p.id !== playerId);
+
+    if (wasWaiting) {
+      this.cancelLobbyCountdown();
+      this.broadcastLobbyState();
+    }
 
     if (this.state.match.status === 'running') {
       this.syncMatchCounts();
     }
 
-    const leftMsg: PlayerLeftMessage = {
-      type: MessageType.PlayerLeft,
-      playerId,
-    };
-    this.broadcast(leftMsg);
+    if (!wasWaiting) {
+      const leftMsg: PlayerLeftMessage = {
+        type: MessageType.PlayerLeft,
+        playerId,
+      };
+      this.broadcast(leftMsg);
+    }
 
     if (this.state.match.status === 'running') {
       this.checkSurvivorVictory();
@@ -635,7 +587,63 @@ export class Room {
 
     if (this.playerCount === 0) {
       this.stopLoop();
+      this.lobbyVoteAvailableAtMs = 0;
     }
+  }
+
+  handleVoteToStart(playerId: string, msg: VoteToStartMessage): void {
+    if (
+      this.state.match.status !== 'waiting' ||
+      this.countdownHandle !== null ||
+      this.playerCount < LOBBY_MIN_PLAYERS ||
+      Date.now() < this.lobbyVoteAvailableAtMs ||
+      !this.sockets.has(playerId)
+    ) {
+      return;
+    }
+
+    if (msg.vote) this.lobbyVotes.add(playerId);
+    else this.lobbyVotes.delete(playerId);
+    this.broadcastLobbyState();
+
+    if (this.lobbyVotes.size >= getLobbyVotesRequired(this.playerCount)) {
+      this.beginLobbyCountdown('vote');
+    }
+  }
+
+  /** Allow a verified administrator to bypass all lobby start conditions. */
+  handleAdminStartGame(playerId: string): void {
+    if (
+      this.state.match.status !== 'waiting'
+      || this.playerCount === 0
+      || !this.isAdmin(playerId)
+    ) {
+      return;
+    }
+    console.info(`[Room:${this.id}] Admin ${playerId} started the match immediately`);
+    this.startMatch();
+  }
+
+  handleSendLobbyChatMessage(playerId: string, msg: SendLobbyChatMessage): void {
+    if (this.state.match.status !== 'waiting') return;
+    const senderSocket = this.sockets.get(playerId);
+    const sender = senderSocket?.getUserData();
+    const text = normalizeChatMessageText(msg.text);
+    if (!sender || text === null) return;
+
+    const now = Date.now();
+    const lastSentAt = this.lastChatSentAt.get(playerId) ?? -Infinity;
+    if (now - lastSentAt < CHAT_SEND_COOLDOWN_MS) return;
+    this.lastChatSentAt.set(playerId, now);
+
+    const chatMessage: LobbyChatMessage = {
+      type: MessageType.LobbyChatMessage,
+      playerId,
+      displayName: sender.displayName,
+      text,
+      sentAt: now,
+    };
+    this.broadcast(chatMessage);
   }
 
   // ── Input Handling ────────────────────────────────────────────────────
@@ -685,7 +693,7 @@ export class Room {
 
   /** Debug: teleport a player to an arbitrary position (updates authoritative state). */
   handleDebugTeleport(playerId: string, msg: DebugTeleportMessage): void {
-    if (!this.canPlayerAct(playerId)) return;
+    if (!this.isAdmin(playerId) || !this.canPlayerAct(playerId)) return;
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player) return;
     this.clearQueuedInputs(player);
@@ -703,7 +711,7 @@ export class Room {
     requesterId: string,
     msg: DebugSetMatchTimeMessage,
   ): void {
-    if (!this.isMatchRunning() || !this.sockets.has(requesterId)) return;
+    if (!this.isAdmin(requesterId) || !this.isMatchRunning()) return;
     if (
       typeof msg.remainingMs !== 'number' ||
       !Number.isInteger(msg.remainingMs) ||
@@ -734,7 +742,7 @@ export class Room {
 
   /** Debug: apply a player-menu action using authoritative room state. */
   handleDebugPlayerAction(requesterId: string, msg: DebugPlayerActionMessage): void {
-    if (!this.canPlayerAct(requesterId)) return;
+    if (!this.isAdmin(requesterId) || !this.canPlayerAct(requesterId)) return;
     const requester = this.state.players.find((player) => player.id === requesterId);
     const target = this.state.players.find((player) => player.id === msg.targetPlayerId);
     if (!requester || !target) return;
@@ -890,8 +898,116 @@ export class Room {
     player.isMoving = false;
   }
 
-  private startMatch(): void {
+  private isAdmin(playerId: string): boolean {
+    return this.sockets.get(playerId)?.getUserData().isAdmin === true;
+  }
+
+  private getLobbyState(): LobbyState {
+    return {
+      roomId: this.id,
+      phase: this.countdownHandle === null ? 'waiting' : 'countdown',
+      players: Array.from(this.sockets.entries()).map(([id, socket]) => ({
+        id,
+        displayName: socket.getUserData().displayName,
+        votedToStart: this.lobbyVotes.has(id),
+      })),
+      minPlayers: LOBBY_MIN_PLAYERS,
+      maxPlayers: LOBBY_MAX_PLAYERS,
+      votesRequired: getLobbyVotesRequired(this.playerCount),
+      voteAvailableAt: this.lobbyVoteAvailableAtMs,
+      countdownEndsAt: this.lobbyCountdownEndsAtMs,
+      startReason: this.lobbyStartReason,
+    };
+  }
+
+  private broadcastLobbyState(): void {
     if (this.state.match.status !== 'waiting') return;
+    const message: LobbyUpdatedMessage = {
+      type: MessageType.LobbyUpdated,
+      lobby: this.getLobbyState(),
+    };
+    this.broadcast(message);
+  }
+
+  private beginLobbyCountdown(reason: Exclude<LobbyStartReason, null>): void {
+    if (this.state.match.status !== 'waiting' || this.countdownHandle !== null) return;
+    if (reason === 'full' && this.playerCount !== LOBBY_MAX_PLAYERS) return;
+    if (
+      reason === 'vote' &&
+      (this.playerCount < LOBBY_MIN_PLAYERS ||
+        this.lobbyVotes.size < getLobbyVotesRequired(this.playerCount))
+    ) {
+      return;
+    }
+
+    this.lobbyStartReason = reason;
+    this.lobbyCountdownEndsAtMs = Date.now() + LOBBY_COUNTDOWN_MS;
+    this.countdownHandle = setTimeout(() => {
+      this.countdownHandle = null;
+      this.startMatch();
+    }, LOBBY_COUNTDOWN_MS);
+    this.broadcastLobbyState();
+    console.info(`[Room:${this.id}] Lobby countdown started (${reason})`);
+  }
+
+  private cancelLobbyCountdown(): void {
+    if (this.countdownHandle !== null) clearTimeout(this.countdownHandle);
+    this.countdownHandle = null;
+    this.lobbyCountdownEndsAtMs = null;
+    this.lobbyStartReason = null;
+    this.lobbyVotes.clear();
+  }
+
+  private createMatchPlayers(): void {
+    const participants = shuffle(
+      Array.from(this.sockets.entries()).map(([id, socket]) => ({
+        id,
+        displayName: socket.getUserData().displayName,
+      })),
+    );
+
+    const seats = participants.map((participant, index) => ({
+      ...participant,
+      teamId: index % MAX_TEAMS,
+      teamSlot: Math.floor(index / MAX_TEAMS),
+    }));
+    const occupiedTeams = Array.from(new Set(seats.map((seat) => seat.teamId)));
+    const wardenTeams = shuffle(occupiedTeams).slice(0, getWardenCountForPlayers(seats.length));
+    const wardenIds = new Set(
+      wardenTeams.map((teamId) => {
+        const teamSeats = seats.filter((seat) => seat.teamId === teamId);
+        return teamSeats[Math.floor(Math.random() * teamSeats.length)].id;
+      }),
+    );
+
+    for (const teamRoles of this.roleSeats) teamRoles.fill('survivor');
+    this.state.players = seats.map((seat, spriteIndex): RoomPlayerInfo => {
+      const role: PlayerRole = wardenIds.has(seat.id) ? 'warden' : 'survivor';
+      this.roleSeats[seat.teamId][seat.teamSlot] = role;
+      const spawnTile = this.spawnPoints[seat.teamId] ?? this.spawnPoints[0];
+      return {
+        id: seat.id,
+        displayName: seat.displayName,
+        teamId: seat.teamId,
+        teamSlot: seat.teamSlot,
+        role,
+        spriteIndex: spriteIndex % PLAYER_CHARACTER_COUNT,
+        x: (spawnTile.x + 0.5) * TILE_SIZE,
+        y: (spawnTile.y + 0.5) * TILE_SIZE,
+        facing: 'down',
+        isMoving: false,
+        isDead: false,
+        escaped: false,
+        lastProcessedInput: 0,
+        wisdomOrbs: role === 'survivor' ? INITIAL_WISDOM_ORBS : 0,
+      };
+    });
+  }
+
+  private startMatch(): void {
+    if (this.state.match.status !== 'waiting' || this.playerCount === 0) return;
+    this.cancelLobbyCountdown();
+    this.createMatchPlayers();
     const now = Date.now();
     this.matchEndsAtMs = now + MATCH_DURATION_MS;
     this.state.match.status = 'running';
@@ -899,7 +1015,26 @@ export class Room {
     this.state.match.finalRoster = null;
     this.state.match.remainingMs = MATCH_DURATION_MS;
     this.syncMatchCounts();
-    console.info(`[Room:${this.id}] Match started; deadline in 10 minutes`);
+
+    for (const player of this.state.players) {
+      const socket = this.sockets.get(player.id);
+      if (!socket) continue;
+      const joinMessage: RoomJoinedMessage = {
+        type: MessageType.RoomJoined,
+        roomId: this.id,
+        playerId: player.id,
+        mapSeed: this.mapSeed,
+        role: player.role,
+        wisdomOrbs: player.wisdomOrbs,
+        gameState: this.cloneState(),
+      };
+      this.send(socket, joinMessage);
+    }
+
+    this.startLoop();
+    console.info(
+      `[Room:${this.id}] Match started with ${this.playerCount} players; deadline in 10 minutes`,
+    );
   }
 
   /** Keep public progress derived from the currently connected private roles. */
@@ -2300,6 +2435,7 @@ export class Room {
   }
 
   destroy(): void {
+    this.cancelLobbyCountdown();
     this.stopLoop();
     this.sockets.clear();
     this.inputQueues.clear();

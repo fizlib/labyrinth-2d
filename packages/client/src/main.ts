@@ -1,5 +1,10 @@
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 import {
+  isValidRoomCode,
+  normalizeRoomCode,
+  type LobbyJoinMode,
+} from '@labyrinth/shared';
+import {
   clearOAuthParameters,
   configureSupabase,
   getOAuthErrorFromUrl,
@@ -24,6 +29,7 @@ type AppView =
   | 'profile-loading'
   | 'profile-error'
   | 'menu'
+  | 'join'
   | 'profile'
   | 'launching-game'
   | 'game';
@@ -181,6 +187,10 @@ class AppController {
   private sessionRevision = 0;
   private gameLaunchStarted = false;
   private restoringInitialSession = true;
+  private pendingRoomCode = (() => {
+    const code = normalizeRoomCode(new URL(window.location.href).searchParams.get('room'));
+    return isValidRoomCode(code) ? code : null;
+  })();
 
   async start(): Promise<void> {
     this.renderRestoring('Restoring your passage…');
@@ -371,10 +381,17 @@ class AppController {
 
   private renderMenu(): void {
     if (!this.profile || !this.identityMode) return;
+    if (this.pendingRoomCode) {
+      const roomCode = this.pendingRoomCode;
+      this.pendingRoomCode = null;
+      this.view = 'join';
+      this.renderJoinRoom(roomCode);
+      return;
+    }
     const isGuest = this.identityMode === 'guest';
     const identityLabel = isGuest
       ? 'Guest session · this tab only'
-      : this.session?.user.email ?? 'Signed in with Google';
+      : `${this.profile.is_admin ? 'Admin · ' : ''}${this.session?.user.email ?? 'Signed in with Google'}`;
     root.innerHTML = shellMarkup(`
       <section class="app-panel app-panel--menu" aria-labelledby="menu-title">
         <header class="menu-profile">
@@ -387,8 +404,9 @@ class AppController {
         </header>
         <div class="menu-divider" aria-hidden="true"><span>◆</span></div>
         <nav class="menu-actions" aria-label="Main menu">
-          <button id="create-game" class="pixel-button pixel-button--primary" type="button">Create Game</button>
-          <button id="join-game" class="pixel-button" type="button">Join Game</button>
+          <button id="quick-play" class="pixel-button pixel-button--primary" type="button">Quick Play</button>
+          <button id="create-game" class="pixel-button" type="button">Create Private Game</button>
+          <button id="join-game" class="pixel-button" type="button">Join with Code</button>
           <button id="open-profile" class="pixel-button" type="button">Profile</button>
           <button id="sign-out" class="pixel-button pixel-button--quiet" type="button">${isGuest ? 'Leave Guest Session' : 'Sign Out'}</button>
         </nav>
@@ -398,15 +416,15 @@ class AppController {
 
     this.activateAvatarFallbacks();
 
+    document.querySelector<HTMLButtonElement>('#quick-play')?.addEventListener('click', () => {
+      void this.launchGame('quick');
+    });
     document.querySelector<HTMLButtonElement>('#create-game')?.addEventListener('click', () => {
-      void this.launchGame();
+      void this.launchGame('create');
     });
     document.querySelector<HTMLButtonElement>('#join-game')?.addEventListener('click', () => {
-      const notice = document.querySelector<HTMLDivElement>('#menu-notice');
-      if (notice) {
-        notice.textContent = 'Joining named rooms arrives with the lobby milestone.';
-        notice.hidden = false;
-      }
+      this.view = 'join';
+      this.renderJoinRoom();
     });
     document.querySelector<HTMLButtonElement>('#open-profile')?.addEventListener('click', () => {
       this.profileNotice = null;
@@ -419,8 +437,54 @@ class AppController {
 
     if (window.sessionStorage.getItem(PLAY_AGAIN_STORAGE_KEY) === '1') {
       window.sessionStorage.removeItem(PLAY_AGAIN_STORAGE_KEY);
-      window.setTimeout(() => void this.launchGame(), 0);
+      window.setTimeout(() => void this.launchGame('quick'), 0);
     }
+  }
+
+  private renderJoinRoom(initialCode = ''): void {
+    if (!this.profile) return;
+    root.innerHTML = shellMarkup(`
+      <section class="app-panel app-panel--compact" aria-labelledby="join-title">
+        <div class="app-brand">${brandMarkup()}</div>
+        <h2 id="join-title" class="app-panel__heading">Join a private room</h2>
+        <p class="app-panel__copy">Enter the six-character code shared by another explorer.</p>
+        <form id="join-room-form" class="join-room-form" novalidate>
+          <label for="room-code">Room code</label>
+          <input id="room-code" name="roomCode" type="text" maxlength="6" required autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text" placeholder="ABC234" value="${escapeHtml(initialCode)}" />
+          <div id="join-room-error" class="app-alert app-alert--error" role="alert" hidden></div>
+          <div class="profile-actions">
+            <button id="back-to-menu" class="pixel-button pixel-button--quiet" type="button">Back</button>
+            <button class="pixel-button pixel-button--primary" type="submit">Join Room</button>
+          </div>
+        </form>
+      </section>`, 'app-screen--join');
+
+    const input = document.querySelector<HTMLInputElement>('#room-code');
+    input?.focus();
+    input?.select();
+    input?.addEventListener('input', () => {
+      input.value = normalizeRoomCode(input.value).slice(0, 6);
+    });
+    document.querySelector<HTMLButtonElement>('#back-to-menu')?.addEventListener('click', () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      window.history.replaceState(null, '', url);
+      this.view = 'menu';
+      this.renderMenu();
+    });
+    document.querySelector<HTMLFormElement>('#join-room-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const code = normalizeRoomCode(input?.value);
+      const error = document.querySelector<HTMLDivElement>('#join-room-error');
+      if (!isValidRoomCode(code)) {
+        if (error) {
+          error.textContent = 'Enter a valid six-character room code.';
+          error.hidden = false;
+        }
+        return;
+      }
+      void this.launchGame('join', code);
+    });
   }
 
   private renderProfile(): void {
@@ -428,7 +492,7 @@ class AppController {
     const isGuest = this.identityMode === 'guest';
     const identityLabel = isGuest
       ? 'Guest profile · this tab only'
-      : this.session?.user.email ?? '';
+      : `${this.profile.is_admin ? 'Admin · ' : ''}${this.session?.user.email ?? ''}`;
     root.innerHTML = shellMarkup(`
       <section class="app-panel app-panel--profile" aria-labelledby="profile-title">
         <header class="profile-header">
@@ -561,7 +625,7 @@ class AppController {
     }
   }
 
-  private async launchGame(): Promise<void> {
+  private async launchGame(joinMode: LobbyJoinMode, roomId = ''): Promise<void> {
     if (this.gameLaunchStarted || !this.profile || !this.identityMode) return;
     this.gameLaunchStarted = true;
     this.view = 'launching-game';
@@ -569,7 +633,12 @@ class AppController {
 
     try {
       const { startGame } = await import('./game');
-      await startGame({ displayName: this.profile.display_name });
+      await startGame({
+        displayName: this.profile.display_name,
+        joinMode,
+        roomId,
+        accessToken: this.session?.access_token,
+      });
       this.view = 'game';
     } catch {
       // The game module owns the loading-screen error presentation.

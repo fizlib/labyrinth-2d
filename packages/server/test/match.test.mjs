@@ -11,6 +11,9 @@ class FakeSocket {
       id,
       displayName: id,
       roomId: null,
+      connected: true,
+      joinPending: false,
+      isAdmin: false,
     };
   }
 
@@ -31,6 +34,7 @@ function createRoom(playerCount = 9) {
     sockets.push(socket);
     room.addPlayer(socket);
   }
+  room.startMatch();
   return { room, sockets };
 }
 
@@ -156,23 +160,24 @@ test('an action racing an expired deadline resolves as a warden win', (t) => {
   assert.equal(room.state.match.winner, 'wardens');
   assert.equal(room.state.match.remainingMs, 0);
 
-  const finalRoster = structuredClone(room.state.match.finalRoster);
   const lateSocket = new FakeSocket('late-player');
   room.addPlayer(lateSocket);
-  const joinedMessage = lateSocket.sent.find(
-    (message) => message.type === 'ROOM_JOINED',
-  );
-  assert.ok(joinedMessage);
-  assert.deepEqual(
-    joinedMessage.gameState.match.finalRoster,
-    finalRoster,
-    'late joiners receive the immutable role reveal from match completion',
-  );
+  assert.equal(lateSocket.sent.length, 0, 'ended matches reject new room members');
+  assert.equal(room.playerCount, 1);
 });
 
 test('debug timer changes the authoritative deadline and zero triggers timeout', (t) => {
   const { room, sockets } = createRoom(1);
   t.after(() => room.destroy());
+
+  const originalDeadline = room.matchEndsAtMs;
+  room.handleDebugSetMatchTime('player-0', {
+    type: 'DEBUG_SET_MATCH_TIME',
+    remainingMs: 90_000,
+  });
+  assert.equal(room.matchEndsAtMs, originalDeadline, 'regular players cannot use debug tools');
+
+  sockets[0].data.isAdmin = true;
 
   room.handleDebugSetMatchTime('player-0', {
     type: 'DEBUG_SET_MATCH_TIME',

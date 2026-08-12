@@ -54,6 +54,7 @@ import type {
   PlayerRole,
   SwampTerrain,
   CageState,
+  LobbyJoinMode,
 } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 import {
@@ -75,6 +76,7 @@ import { MobileControls, type MobileControlDirection } from './systems/MobileCon
 import { CageVisual } from './systems/Cage';
 import { ProximityChatHud } from './systems/ProximityChatHud';
 import { MatchHud } from './systems/MatchHud';
+import { LobbyOverlay } from './systems/LobbyOverlay';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
@@ -1489,10 +1491,28 @@ function showLoadingError(message: string): void {
 
   const percentText = document.getElementById('loading-percent');
   if (percentText) percentText.textContent = 'ERROR';
+
+  const content = screen.querySelector<HTMLElement>('.loading-screen__content');
+  if (content && !content.querySelector('.loading-screen__error-action')) {
+    const returnButton = document.createElement('button');
+    returnButton.className =
+      'pixel-button pixel-button--quiet loading-screen__error-action';
+    returnButton.type = 'button';
+    returnButton.textContent = 'Return to Menu';
+    returnButton.addEventListener('click', () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      window.location.href = url.toString();
+    });
+    content.appendChild(returnButton);
+  }
 }
 
 export interface GameLaunchOptions {
   displayName: string;
+  joinMode: LobbyJoinMode;
+  roomId?: string;
+  accessToken?: string;
 }
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
@@ -1573,12 +1593,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let zoomToggleState: ZoomToggleState = 'default';
   const savedZoomBeforeToggle = zoomLevel;
 
-  const debugUiEnabled = DebugSettings.sessionEnabled;
-  const debugUi = debugUiEnabled ? createDebugUI() : null;
-  if (debugUi) {
-    setupDebugToggles(debugUi);
-  }
-  const statusEl = debugUi?.status ?? null;
+  DebugSettings.setAdminAccess(false);
+  let debugUi: DebugUiDom | null = null;
+  let statusEl: HTMLDivElement | null = null;
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
@@ -2098,11 +2115,61 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   ) => void = () => {};
   let triggerInteract: () => void = () => {};
   let chatHud: ProximityChatHud | null = null;
+  let lobbyOverlay: LobbyOverlay | null = null;
   let chatInputActive = false;
   let setMobileInputEnabled: (enabled: boolean) => void = () => {};
 
   const net = new NetworkManager({
+    onLobbyJoined: (playerId, lobby, isAdmin) => {
+      DebugSettings.setAdminAccess(isAdmin);
+      if (isAdmin && !debugUi) {
+        debugUi = createDebugUI();
+        statusEl = debugUi.status;
+        setupDebugToggles(debugUi);
+        setupDebugPlayerActions(
+          debugUi,
+          net,
+          () => latestServerState,
+          () => net.playerId,
+        );
+      } else if (!isAdmin && debugUi) {
+        debugUi.root.remove();
+        debugUi = null;
+        statusEl = null;
+      }
+      const fullscreenToggle = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
+      if (fullscreenToggle) fullscreenToggle.hidden = true;
+      lobbyOverlay?.destroy();
+      lobbyOverlay = new LobbyOverlay({
+        parent: container,
+        localPlayerId: playerId,
+        initialState: lobby,
+        isAdmin,
+        onVote: (vote) => net.sendLobbyVote(vote),
+        onStartNow: () => net.sendAdminStartGame(),
+        onSendChat: (text) => net.sendLobbyChatMessage(text),
+        onLeave: () => {
+          net.disconnect();
+          window.location.reload();
+        },
+      });
+      window.requestAnimationFrame(dismissLoadingScreen);
+      console.info(`[Main] Joined lobby "${lobby.roomId}" as ${playerId}`);
+    },
+
+    onLobbyUpdated: (lobby) => {
+      lobbyOverlay?.update(lobby);
+    },
+
+    onLobbyChatMessage: (playerId, displayName, text, sentAt) => {
+      lobbyOverlay?.addMessage({ playerId, displayName, text, sentAt });
+    },
+
     onRoomJoined: (roomId, playerId, mapSeed, role, wisdomOrbs, gameState) => {
+      const fullscreenToggle = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
+      if (fullscreenToggle) fullscreenToggle.hidden = false;
+      lobbyOverlay?.destroy();
+      lobbyOverlay = null;
       updateLoadingProgress(0.99, 'Carving your path through the maze…');
       console.info(
         `[Main] Joined room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
@@ -2519,7 +2586,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onError: (code, message) => {
       console.error(`[Main] Server error [${code}]: ${message}`);
-      showLoadingError(`${message} Refresh to try again.`);
+      showLoadingError(message);
       if (statusEl) {
         statusEl.textContent = `🔴 Error: ${message}`;
         statusEl.classList.add('error');
@@ -2617,11 +2684,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       chatHud?.setEnabled(false);
       chatHud?.setCanSend(false);
       mobileControls.setWisdomAvailable(false);
-      if (statusEl) {
-        statusEl.textContent = '🔴 Disconnected';
-        statusEl.classList.remove('connected');
-        statusEl.classList.add('error');
-      }
+      DebugSettings.setAdminAccess(false);
+      debugUi?.root.remove();
+      debugUi = null;
+      statusEl = null;
     },
   });
 
@@ -2638,15 +2704,6 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       setMobileInputEnabled(!active);
     },
   });
-
-  if (debugUi) {
-    setupDebugPlayerActions(
-      debugUi,
-      net,
-      () => latestServerState,
-      () => net.playerId,
-    );
-  }
 
   // ── Interaction Helpers + Mobile Controls ────────────────────────────
 
@@ -3550,7 +3607,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   }
   const displayName = options.displayName;
 
-  net.connect(wsUrl, 'default', displayName);
+  net.connect(
+    wsUrl,
+    options.joinMode,
+    options.roomId ?? '',
+    displayName,
+    options.accessToken,
+  );
 
   console.info('─────────────────────────────────────────────────');
   console.info('  🏰 Labyrinth 2D Client');

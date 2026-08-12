@@ -8,8 +8,9 @@
 // 1. This server is the SINGLE SOURCE OF TRUTH for all game state.
 //    Clients send inputs (PlayerInput), never direct state mutations.
 //
-// 2. ROOM/LOBBY SYSTEM: Each group of up to 10 players joins a "room".
-//    One maze instance is generated per room. Room state is isolated.
+// 2. ROOM/LOBBY SYSTEM: Each group of up to 9 players joins a "room".
+//    Waiting rooms are event-driven; one isolated maze starts after the
+//    full-room countdown or an approved underfilled vote.
 //
 // 3. SERVER GAME LOOP (~20 ticks/sec): Every tick, the server:
 //    a) Applies each player's latest input to move them (constant speed).
@@ -22,16 +23,25 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import uWS from 'uWebSockets.js';
+import { randomInt } from 'node:crypto';
 
 import {
   MessageType,
-  DEFAULT_ROOM_ID,
   MAX_PLAYERS_PER_ROOM,
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH,
+  isValidRoomCode,
+  normalizeRoomCode,
   SERVER_TICK_RATE,
   type ClientToServerMessage,
+  type JoinRoomMessage,
 } from '@labyrinth/shared';
 
 import { Room, type SocketData } from './Room.js';
+import {
+  isSupabaseAdminVerificationConfigured,
+  verifyAdminAccessToken,
+} from './supabaseAdmin.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 9001;
 
@@ -39,15 +49,117 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 9001;
 
 const rooms: Map<string, Room> = new Map();
 
-/** Get or create a room by ID. */
-function getOrCreateRoom(roomId: string): Room {
-  let room = rooms.get(roomId);
-  if (!room) {
-    room = new Room(roomId);
-    rooms.set(roomId, room);
-    console.info(`[Server] Created room: ${roomId}`);
+function generateRoomCode(): string {
+  for (;;) {
+    const code = Array.from(
+      { length: ROOM_CODE_LENGTH },
+      () => ROOM_CODE_ALPHABET[randomInt(ROOM_CODE_ALPHABET.length)],
+    ).join('');
+    if (!rooms.has(code)) return code;
   }
+}
+
+function createRoom(isPublic: boolean): Room {
+  const roomId = generateRoomCode();
+  const room = new Room(roomId, isPublic);
+  rooms.set(roomId, room);
+  console.info(`[Server] Created ${isPublic ? 'public' : 'private'} room: ${roomId}`);
   return room;
+}
+
+function findQuickPlayRoom(): Room {
+  return (
+    Array.from(rooms.values()).find((room) => room.isPublic && room.isJoinable) ??
+    createRoom(true)
+  );
+}
+
+function normalizeDisplayName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const displayName = value.replace(/[\r\n\t]+/g, ' ').trim();
+  return displayName.length >= 1 && displayName.length <= 32 ? displayName : null;
+}
+
+function sendError(
+  ws: uWS.WebSocket<SocketData>,
+  code: string,
+  message: string,
+): void {
+  ws.send(JSON.stringify({ type: MessageType.Error, code, message }), false);
+}
+
+async function handleJoinRoom(
+  ws: uWS.WebSocket<SocketData>,
+  msg: JoinRoomMessage,
+): Promise<void> {
+  const data = ws.getUserData();
+  if (data.roomId || data.joinPending) {
+    sendError(ws, 'ALREADY_IN_ROOM', 'You have already joined or are joining a lobby.');
+    return;
+  }
+
+  const displayName = normalizeDisplayName(msg.displayName);
+  if (!displayName) {
+    sendError(ws, 'INVALID_DISPLAY_NAME', 'Display names must use 1–32 characters.');
+    return;
+  }
+
+  data.joinPending = true;
+  data.displayName = displayName;
+  try {
+    data.isAdmin = await verifyAdminAccessToken(msg.accessToken);
+    if (!data.connected) return;
+
+    let room: Room | undefined;
+    if (msg.mode === 'quick') {
+      room = findQuickPlayRoom();
+    } else if (msg.mode === 'create') {
+      room = createRoom(false);
+    } else if (msg.mode === 'join') {
+      const roomId = normalizeRoomCode(msg.roomId);
+      if (!isValidRoomCode(roomId)) {
+        sendError(ws, 'INVALID_ROOM_CODE', 'Enter a valid six-character room code.');
+        return;
+      }
+      room = rooms.get(roomId);
+      if (!room) {
+        sendError(ws, 'ROOM_NOT_FOUND', `Room "${roomId}" was not found.`);
+        return;
+      }
+    } else {
+      sendError(ws, 'INVALID_JOIN_MODE', 'This lobby request is not supported.');
+      return;
+    }
+
+    if (room.isFull) {
+      sendError(
+        ws,
+        'ROOM_FULL',
+        `Room "${room.id}" is full (${MAX_PLAYERS_PER_ROOM} players max).`,
+      );
+      return;
+    }
+    if (!room.isJoinable) {
+      sendError(
+        ws,
+        'ROOM_UNAVAILABLE',
+        `Room "${room.id}" is no longer accepting new players.`,
+      );
+      return;
+    }
+
+    room.addPlayer(ws);
+  } catch (error) {
+    console.error(
+      `[WS] Failed to join lobby for ${data.id}:`,
+      error instanceof Error ? error.message : error,
+    );
+    if (data.connected) {
+      sendError(ws, 'JOIN_FAILED', 'The lobby could not be joined. Please try again.');
+    }
+  } finally {
+    data.joinPending = false;
+  }
 }
 
 // ── Player ID Generator ─────────────────────────────────────────────────────
@@ -76,6 +188,9 @@ uWS
           id: generatePlayerId(),
           displayName: '',
           roomId: null,
+          connected: true,
+          joinPending: false,
+          isAdmin: false,
         },
         req.getHeader('sec-websocket-key'),
         req.getHeader('sec-websocket-protocol'),
@@ -98,24 +213,22 @@ uWS
 
         switch (msg.type) {
           case MessageType.JoinRoom: {
-            data.displayName = msg.displayName;
+            void handleJoinRoom(ws, msg);
+            break;
+          }
 
-            const roomId = msg.roomId || DEFAULT_ROOM_ID;
-            const room = getOrCreateRoom(roomId);
+          case MessageType.AdminStartGame: {
+            if (data.roomId) rooms.get(data.roomId)?.handleAdminStartGame(data.id);
+            break;
+          }
 
-            if (room.isFull) {
-              ws.send(
-                JSON.stringify({
-                  type: MessageType.Error,
-                  code: 'ROOM_FULL',
-                  message: `Room "${roomId}" is full (${MAX_PLAYERS_PER_ROOM} players max).`,
-                }),
-                false,
-              );
-              return;
-            }
+          case MessageType.VoteToStart: {
+            if (data.roomId) rooms.get(data.roomId)?.handleVoteToStart(data.id, msg);
+            break;
+          }
 
-            room.addPlayer(ws);
+          case MessageType.SendLobbyChat: {
+            if (data.roomId) rooms.get(data.roomId)?.handleSendLobbyChatMessage(data.id, msg);
             break;
           }
 
@@ -240,6 +353,7 @@ uWS
 
     close: (ws, code, _message) => {
       const data = ws.getUserData();
+      data.connected = false;
       console.info(`[WS] Disconnected: ${data.id} (code: ${code})`);
 
       if (data.roomId) {
@@ -263,6 +377,9 @@ uWS
       console.info(`  Listening on all interfaces (port ${PORT})`);
       console.info(`  Tick rate: ${SERVER_TICK_RATE} tps`);
       console.info(`  Max players/room: ${MAX_PLAYERS_PER_ROOM}`);
+      console.info(
+        `  Supabase admin verification: ${isSupabaseAdminVerificationConfigured ? 'enabled' : 'disabled'}`,
+      );
       console.info(`─────────────────────────────────────────────────`);
     } else {
       console.error(`❌ Failed to listen on port ${PORT}`);

@@ -1,16 +1,17 @@
 # Supabase Authentication Setup
 
 The client uses Supabase Auth for Google OAuth and `public.profiles` for the
-authenticated player's display name and avatar. Players can also continue as a
-guest without contacting Supabase; guest profiles live only in the current
-browser tab. The game server remains a separate WebSocket service and does not
-receive Supabase credentials.
+authenticated player's display name, avatar, and administrator status. Players
+can also continue as a guest without contacting Supabase; guest profiles live
+only in the current browser tab. The game server verifies signed-in access
+tokens with Supabase before granting any administrator capability.
 
 ## 1. Create and migrate the project
 
 Create a Supabase project, then apply
 `supabase/migrations/20260720131500_create_profiles.sql` either through your
-normal Supabase CLI migration workflow or in the dashboard SQL editor.
+normal Supabase CLI migration workflow or in the dashboard SQL editor. Then
+apply `supabase/migrations/20260811120000_add_profile_admin.sql`.
 
 The migration:
 
@@ -19,7 +20,8 @@ The migration:
 - seeds new and existing profiles from Google name/avatar metadata;
 - keeps `created_at` immutable and maintains `updated_at` in the database;
 - allows authenticated users to read, insert, and edit only their own profile;
-- restricts client writes to `display_name` and `avatar_url`; and
+- restricts client writes to `display_name` and `avatar_url`;
+- stores `is_admin` while preventing authenticated clients from changing it;
 - denies profile access to unauthenticated clients.
 
 Test the migration in a non-production project first. A failing Auth trigger
@@ -71,7 +73,41 @@ because Vite embeds those values in the public browser bundle.
 
 Restart Vite after changing environment variables.
 
-## 4. Verify the flow
+## 4. Configure administrator verification on the game server
+
+For local development, the server automatically reuses the browser-safe
+Supabase URL and publishable key from `packages/client/.env.local`. You can
+optionally copy the server example to override those values for the server:
+
+```powershell
+Copy-Item packages/server/.env.example packages/server/.env.local
+```
+
+```dotenv
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
+```
+
+`SUPABASE_ANON_KEY` is also accepted for projects still using a legacy anon
+key. A secret or `service_role` key is not required. If these settings are
+missing or Supabase cannot verify a token, administrator access fails closed.
+
+Grant administrator status only from a trusted SQL or backend context:
+
+```sql
+update public.profiles
+set is_admin = true
+where id = 'AUTH_USER_UUID';
+```
+
+The browser forwards its access token over the game WebSocket. Use `wss://` in
+production. The server validates the token with Supabase, reads that user's own
+profile through RLS, and returns the verified permission privately. Only then
+does the client show the debug menu and immediate lobby-start control. The
+server independently rejects debug and immediate-start messages from everyone
+else.
+
+## 5. Verify the flow
 
 1. Start the server and client as documented in `ARCHITECTURE.md`.
 2. Confirm the signed-out screen opens without a canvas or WebSocket request.
@@ -86,7 +122,12 @@ Restart Vite after changing environment variables.
 9. Continue as a guest and confirm no Supabase profile is created. Edit the
    guest profile, reload the tab to confirm it is restored, then choose Leave
    Guest Session and confirm the local profile is cleared.
+10. Set one test profile's `is_admin` to true from trusted SQL. Confirm that
+    account sees the debug menu and can start a one-player lobby immediately.
+11. Confirm a regular signed-in user and a guest see neither admin control and
+    cannot trigger the corresponding WebSocket actions manually.
 
 For RLS verification, use two test users: each user must be able to select and
 update only the row whose `id` equals their own Auth user ID. Neither user
-should be able to modify `id`, `created_at`, or `updated_at`, or delete a row.
+should be able to modify `id`, `is_admin`, `created_at`, or `updated_at`, or
+delete a row.

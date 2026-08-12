@@ -20,6 +20,7 @@ function isCoarsePointerDevice(): boolean {
 }
 
 const SESSION_DEBUG_ENABLED = hasDebugOverride() || (import.meta.env.DEV && !isCoarsePointerDevice());
+let adminAccess = false;
 
 export interface DebugFlags {
   /** Master switch — when false, ALL debug features are disabled. */
@@ -45,30 +46,18 @@ const DEFAULTS: DebugFlags = {
   minimized: false,
 };
 
-function constrainToSession(flags: DebugFlags): DebugFlags {
-  if (SESSION_DEBUG_ENABLED) return flags;
-  return {
-    ...flags,
-    masterEnabled: false,
-    scrollZoom: false,
-    zoomToggle: false,
-    clickTeleport: false,
-    cellBoundaries: false,
-  };
-}
-
 /** Load persisted settings from localStorage, falling back to defaults. */
 function load(): DebugFlags {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<DebugFlags>;
-      return constrainToSession({ ...DEFAULTS, ...parsed });
+      return { ...DEFAULTS, ...parsed };
     }
   } catch {
     /* ignore corrupt data */
   }
-  return constrainToSession({ ...DEFAULTS });
+  return { ...DEFAULTS };
 }
 
 /** Save current settings to localStorage. */
@@ -85,29 +74,36 @@ function save(flags: DebugFlags): void {
 const flags: DebugFlags = load();
 
 export const DebugSettings = {
-  /** Whether this session should expose debug UI and tools by default. */
+  /** Apply the permission returned by the authoritative game server. */
+  setAdminAccess(value: boolean): void {
+    adminAccess = value;
+  },
+
+  /** Whether this server-verified session may expose debug UI and tools. */
   get sessionEnabled(): boolean {
-    return SESSION_DEBUG_ENABLED;
+    return adminAccess;
   },
 
   /** Check if a specific debug feature is currently active. */
   isEnabled(feature: keyof Omit<DebugFlags, 'masterEnabled'>): boolean {
-    return SESSION_DEBUG_ENABLED && flags.masterEnabled && flags[feature];
+    return adminAccess && flags.masterEnabled && flags[feature];
   },
 
   /** Check if the master debug switch is on. */
   get masterEnabled(): boolean {
-    return flags.masterEnabled;
+    return adminAccess && flags.masterEnabled;
   },
 
   /** Toggle the master debug switch. */
   setMasterEnabled(value: boolean): void {
+    if (!adminAccess) return;
     flags.masterEnabled = value;
     save(flags);
   },
 
   /** Toggle an individual feature flag. */
   setFlag(feature: keyof DebugFlags, value: boolean): void {
+    if (!adminAccess) return;
     flags[feature] = value;
     save(flags);
   },
@@ -119,6 +115,7 @@ export const DebugSettings = {
 
   /** Reset all debug settings to defaults. */
   reset(): void {
+    if (!adminAccess) return;
     Object.assign(flags, DEFAULTS);
     save(flags);
   },

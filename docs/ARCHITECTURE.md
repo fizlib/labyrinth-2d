@@ -1,6 +1,6 @@
 # Labyrinth 2D Architecture
 
-Last updated: 2026-08-11 - Portal escape and match lifecycle
+Last updated: 2026-08-11 - Authoritative lobby, matchmaking, and start voting
 
 ## Project Overview
 
@@ -11,7 +11,11 @@ Labyrinth 2D is a multiplayer top-down pixel-art labyrinth game built as a TypeS
 - `packages/client`: the authenticated DOM app shell plus the lazy PixiJS renderer, client prediction, interpolation, HUD, and input handling.
 
 Supabase provides browser authentication and owner-private profile storage. It
-does not participate in the authoritative simulation or WebSocket protocol.
+also stores the protected `profiles.is_admin` permission. The WebSocket server
+verifies the caller's Supabase token and re-reads that permission through RLS;
+client claims never grant administrator capabilities. Verified administrators
+alone receive the debug menu and may start any non-empty lobby immediately.
+Supabase does not otherwise participate in the authoritative simulation.
 
 One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, treasure-chest state, sword-field state, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
@@ -44,11 +48,13 @@ One room owns one maze instance. The server is authoritative for player state, h
 
 ### Room Lifecycle
 
-1. A client connects and sends `JOIN_ROOM`.
-2. The server creates or reuses the room and assigns the player to the first free stable seat. Each room preselects two warden seats in different teams; all other seats are survivors.
-3. The room generates one gated maze layout from a random seed and derives team spawn points from the ungated base maze.
-4. The room starts its fixed tick loop when the first player joins.
-5. The room stops and is destroyed when the last player leaves.
+1. After loading game assets, a client connects and sends `JOIN_ROOM` in `quick`, `create`, or `join` mode.
+2. Quick Play reuses the first joinable public room or creates one. Private creation returns a generated six-character code; private joining requires an existing code.
+3. Waiting rooms are event-driven and broadcast `LobbyState` only when their roster, votes, or countdown changes. They do not run the 20 Hz simulation loop.
+4. Nine connected players start an eight-second countdown automatically. With 6-8 players, start voting unlocks after 60 seconds and requires `ceil(connected players × 2 / 3)` votes.
+5. When the countdown completes, the server balances the locked roster across all three squads, assigns hidden roles for the actual population, starts the ten-minute deadline, privately sends `ROOM_JOINED`, and starts the fixed tick loop.
+6. A roster change cancels an active countdown. New joins are rejected while a countdown or match is active.
+7. The room stops and is destroyed when the last player leaves.
 
 ### Simulation and Reconciliation
 
@@ -68,6 +74,8 @@ One room owns one maze instance. The server is authoritative for player state, h
 | Message | Purpose |
 | --- | --- |
 | `JOIN_ROOM` | Join or create a room with a display name |
+| `VOTE_TO_START` | Cast or withdraw the local player's underfilled-start vote |
+| `SEND_LOBBY_CHAT` | Submit one server-validated room-wide waiting-room message |
 | `PLAYER_INPUT` | Send one frame of movement intent plus `sequenceNumber` |
 | `ACTIVATE_RUNESTONE` | Request activation of a nearby runestone |
 | `OPEN_CHEST` | Request opening a nearby unopened treasure chest |
@@ -85,6 +93,9 @@ One room owns one maze instance. The server is authoritative for player state, h
 | Message | Purpose |
 | --- | --- |
 | `ROOM_JOINED` | Initial join payload with `playerId`, `mapSeed`, full `gameState`, and the recipient's private role/orb inventory |
+| `LOBBY_JOINED` | Private lobby admission with the server player ID and current `LobbyState` |
+| `LOBBY_UPDATED` | Event-driven public roster, vote, or countdown replacement state |
+| `LOBBY_CHAT_MESSAGE` | Transient room-wide waiting-room chat event |
 | `TICK_UPDATE` | Authoritative room snapshot broadcast every server tick |
 | `PLAYER_LEFT` | Notify clients that one player disconnected |
 | `RUNESTONE_ACTIVATED` | Broadcast that one runestone is now active |
@@ -101,6 +112,19 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `ERROR` | Report room-join or protocol errors |
 
 ### Shared State Contracts
+
+#### `LobbyState`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `roomId` | `string` | Six-character public/private room code |
+| `phase` | `'waiting' \| 'countdown'` | Current pre-game room phase |
+| `players` | `LobbyPlayerInfo[]` | Connected nicknames plus public start-vote state |
+| `minPlayers`, `maxPlayers` | `number` | Early-start minimum (`6`) and room capacity (`9`) |
+| `votesRequired` | `number` | Current two-thirds threshold |
+| `voteAvailableAt` | `number` | Server wall-clock timestamp for enabling early-start voting |
+| `countdownEndsAt` | `number \| null` | Server wall-clock countdown deadline |
+| `startReason` | `'full' \| 'vote' \| null` | Why the roster became locked |
 
 #### `PlayerInfo`
 
@@ -169,6 +193,8 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - The room-wide `ALL_RUNESTONES_ACTIVATED` event adds a gold system message to every connected player's chat announcing that the escape portal is open.
 - `PLAYER_ESCAPED` is also room-wide and adds a gold system message with the survivor's name and the remaining escape target. Escaped spectators receive these system events but are excluded from normal proximity-chat sending and delivery.
 
+Waiting-room chat uses the same normalization, 120-character limit, and per-player cooldown, but is delivered to the whole lobby. It remains transient and is not written to Supabase or replayed to later arrivals.
+
 ### Runestones and Portal Flow
 
 - The generated map contains exactly three runestone tiles inside the hub area.
@@ -181,14 +207,14 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 
 ### Match Timer and Victory
 
-- The first player joining starts a server wall-clock deadline of `600000ms`; snapshots expose authoritative remaining time and the client interpolates the top-center `MM:SS` display between ticks.
+- Completing the lobby countdown starts a server wall-clock deadline of `600000ms`; snapshots expose authoritative remaining time and the client interpolates the top-center `MM:SS` display between ticks.
 - A full room requires five survivor escapes. Underfilled rooms use `max(1, ceil(connected survivors × 5 / 7))`; connected escaped spectators remain in that population, and joins, leaves, and debug role changes recalculate it.
 - Reaching the threshold, or having every currently connected survivor escaped, ends the match immediately for survivors. Reaching the deadline below the threshold ends it for wardens, including action requests that race the next server tick.
-- Ending is immutable: queued input is cleared, the server loop stops, gameplay/chat requests are rejected, a final snapshot is broadcast, and clients freeze under a persistent result panel. The panel reveals Survivor and Warden rosters only after completion, and late joiners reconstruct the same roster from `GameState.match`.
+- Ending is immutable: queued input is cleared, the server loop stops, gameplay/chat requests are rejected, a final snapshot is broadcast, and clients freeze under a persistent result panel. The panel reveals Survivor and Warden rosters only after completion.
 
 ### Hidden Roles and Wisdom Orbs
 
-- A full room has `7` survivors and `2` wardens. The wardens occupy different teams, and a stable team-seat assignment preserves that distribution when a disconnected player is replaced.
+- A full room has `7` survivors and `2` wardens. Six-player early starts use one Warden; seven- and eight-player starts use two. When two Wardens are present they occupy different squads.
 - Each survivor starts with `1` wisdom orb; wardens start with `0`. A warden cannot request navigation or private route hints, but can use the shared interaction request to clear a nearby sword field without an orb.
 - Survivors may carry at most `3` wisdom orbs. Opening a nearby unopened chest grants one orb only when the survivor is below that cap. Wardens can instead open and permanently consume a chest without granting an orb to anyone.
 - Roles and wisdom orbs are server-authoritative private room state. They are never included in broadcast `GameState` snapshots.
@@ -312,19 +338,20 @@ The client first runs a lightweight DOM app shell with these states:
 2. show Google authentication and a local guest option when signed out;
 3. load or create the signed-in user's `public.profiles` row, or restore the
    current tab's guest profile;
-4. show Main Menu or Profile; and
-5. dynamically import and start the PixiJS game only after Create Game is
-   selected.
+4. show Main Menu, Join by Code, or Profile;
+5. dynamically import PixiJS and preload runtime assets after Quick Play, Create Private Game, or Join Room is selected;
+6. connect to the authoritative waiting room and show its DOM lobby overlay; and
+7. build the maze only after the server sends `ROOM_JOINED` at countdown completion.
 
 Guest profiles use `sessionStorage`, never call Supabase, and are discarded
 when the guest leaves the session or closes the browser tab. They support the
 same local display-name and HTTPS avatar validation as authenticated profiles.
 
-Auth, Main Menu, Profile, and the Join Game placeholder do not initialize Pixi,
-load runtime game assets, construct `NetworkManager`, or open a WebSocket. The
-existing default-room connection begins inside `startGame()` and uses the
-profile display name. A reload always restores to Main Menu rather than
-silently re-entering gameplay.
+Auth, Main Menu, Profile, and Join by Code do not initialize Pixi, load runtime
+game assets, construct `NetworkManager`, or open a WebSocket. The selected
+Quick Play/private-room connection begins inside `startGame()` and uses the
+profile display name. A reload restores to Main Menu, except that a valid
+`?room=CODE` share link opens the prefilled join form after identity restoration.
 
 See `docs/SUPABASE_SETUP.md` for the migration, Google provider, redirect URL,
 and environment configuration.
@@ -439,6 +466,8 @@ The client currently has multiple UI subsystems, not just the minimap:
 
 - `packages/shared/src/index.ts`
   - shared constants, protocol types, and re-exports
+- `packages/shared/src/lobby.ts`
+  - lobby limits, room-code validation, voting thresholds, role counts, and public state contracts
 - `packages/shared/src/physics.ts`
   - movement and collision helpers used by both client and server
 - `packages/shared/src/maps/level1.ts`
@@ -487,6 +516,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - DOM overlay for mobile touch movement and `E`-equivalent interaction
 - `packages/client/src/systems/ProximityChatHud.ts`
   - canvas-aligned DOM proximity-chat log, input, timer, and character counter
+- `packages/client/src/systems/LobbyOverlay.ts`
+  - responsive waiting-room roster, room code/share link, countdown, vote controls, and room-wide chat
 - `packages/client/src/systems/WisdomArrow.ts`
   - temporary world-space guidance arrow
 

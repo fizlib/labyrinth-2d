@@ -22,6 +22,16 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - Squads can compare their observations after meeting at the central hub.
 - Escaped survivors can no longer move through the labyrinth, act, or communicate with players who are still inside.
 
+## Lobby and match start
+
+- Players can enter Quick Play, create a private six-character room, or join a private room by code or share link.
+- Waiting rooms show all connected nicknames and provide room-wide text chat.
+- A full nine-player room starts an eight-second countdown automatically.
+- An underfilled room can start with at least six players. After one minute, any player may vote to start; two thirds of the connected roster must approve.
+- A Supabase-verified administrator may start any non-empty lobby immediately, bypassing population, delay, and vote requirements.
+- A player leaving during the countdown cancels it and returns the room to waiting.
+- Squads and hidden roles are assigned only when the countdown completes. Six-player matches use one Warden; matches with seven to nine players use two Wardens in different squads.
+
 ## Labyrinth and central hub
 
 - The three squads spawn in different locations in the labyrinth.
@@ -56,7 +66,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 
 ## Time limit and victory conditions
 
-- The match lasts **10 minutes**, starting when the first player joins, with a live top-center timer.
+- The match lasts **10 minutes**, starting when the lobby countdown completes, with a live top-center timer.
 - **Survivors win immediately when 5 of the 7 survivors have escaped.** The match ends as soon as the fifth survivor escapes.
 - **Wardens win when the timer expires and 4 or fewer survivors have escaped.**
 - With fewer than seven connected survivors, the target is `ceil(connected survivors × 5 / 7)` and is recalculated as survivors join or leave.
