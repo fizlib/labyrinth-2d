@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Labyrinth 2D — Server Dockerfile
+# False Arrow — Server Dockerfile
 # ─────────────────────────────────────────────────────────────────────────────
 # Uses Ubuntu 24.04 (glibc 2.39) because uWebSockets.js native binaries
 # require glibc ≥ 2.38, which Debian Bookworm (glibc 2.36) does not provide.

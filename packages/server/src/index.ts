@@ -1,6 +1,6 @@
 // packages/server/src/index.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Labyrinth 2D — Authoritative Game Server
+// False Arrow — Authoritative Game Server
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // MULTIPLAYER ARCHITECTURE (Authoritative Server Model):
@@ -457,7 +457,7 @@ uWS
   .listen('0.0.0.0', PORT, (listenSocket) => {
     if (listenSocket) {
       console.info(`─────────────────────────────────────────────────`);
-      console.info(`  🏰 Labyrinth 2D Server`);
+      console.info(`  🏹 False Arrow Server`);
       console.info(`  Listening on all interfaces (port ${PORT})`);
       console.info(`  Tick rate: ${SERVER_TICK_RATE} tps`);
       console.info(`  Max players/room: ${MAX_PLAYERS_PER_ROOM}`);

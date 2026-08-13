@@ -1,6 +1,6 @@
 // packages/client/src/main.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Labyrinth 2D — Client Entry Point
+// False Arrow — Client Entry Point
 // Step 9: 2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -191,7 +191,7 @@ function createDebugUI(): void {
   debugDiv.id = 'debug-ui';
   const flags = DebugSettings.getFlags();
   debugDiv.innerHTML = `
-    <h1>🏰 Labyrinth 2D — Network Debug</h1>
+    <h1>🏹 False Arrow — Network Debug</h1>
     <div class="status" id="connection-status">⏳ Connecting...</div>
     <div class="stats">
       <div class="stat-card">
@@ -789,7 +789,7 @@ async function main(): Promise<void> {
   net.connect(wsUrl, 'default', displayName);
 
   console.info('─────────────────────────────────────────────────');
-  console.info('  🏰 Labyrinth 2D Client');
+  console.info('  🏹 False Arrow Client');
   console.info('  Step 9: 2.5D Perspective (Stardew style walls)');
   console.info(`  Map: ${MAZE_SIZE}×${MAZE_SIZE} tiles (${mapPixelW}×${mapPixelH} px)`);
   console.info(`  Display name: ${displayName}`);

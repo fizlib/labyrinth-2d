@@ -1,6 +1,6 @@
 // packages/client/src/game.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Labyrinth 2D — Client Entry Point
+// False Arrow — Client Entry Point
 // Step 9: 2.5D Perspective, Feet-Based Collision, Multi-Layer Tiles
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -790,7 +790,7 @@ function createDebugUI(): DebugUiDom {
 
   debugDiv.innerHTML = `
     <div class="debug-header">
-      <h1>🏰 Labyrinth 2D — Network Debug</h1>
+      <h1>🏹 False Arrow — Network Debug</h1>
       <button id="debug-minimize-btn" title="Toggle Minimize">${flags.minimized ? '+' : '−'}</button>
     </div>
     <div class="debug-content">
@@ -3820,7 +3820,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   );
 
   console.info('─────────────────────────────────────────────────');
-  console.info('  🏰 Labyrinth 2D Client');
+  console.info('  🏹 False Arrow Client');
   console.info('  Step 9: 2.5D Perspective (Stardew style walls)');
   console.info(
     `  Map: ${MAZE_WIDTH}×${MAZE_HEIGHT} tiles (${mapPixelW}×${mapPixelH} px)`,

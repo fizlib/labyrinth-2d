@@ -1,10 +1,10 @@
-# Labyrinth 2D Architecture
+# False Arrow Architecture
 
 Last updated: 2026-08-12 - Reconnectable seats and 45-second reservations
 
 ## Project Overview
 
-Labyrinth 2D is a multiplayer top-down pixel-art labyrinth game built as a TypeScript monorepo with three workspace packages:
+False Arrow is a multiplayer top-down pixel-art labyrinth game built as a TypeScript monorepo with three workspace packages:
 
 - `packages/shared`: shared constants, protocol types, procedural map generation, navigation, and collision.
 - `packages/server`: the authoritative multiplayer simulation and room management.

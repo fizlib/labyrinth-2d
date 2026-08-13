@@ -93,7 +93,7 @@ function brandMarkup(): string {
       <span class="app-brand__rune">◆</span>
     </div>
     <p class="app-brand__eyebrow">Enter the ancient maze</p>
-    <h1 class="app-brand__title">Labyrinth</h1>`;
+    <h1 class="app-brand__title">False Arrow</h1>`;
 }
 
 function shellMarkup(content: string, modifier = ''): string {
@@ -119,7 +119,7 @@ function gameMarkup(): string {
         role="status"
         aria-live="polite"
         aria-busy="true"
-        aria-label="Loading Labyrinth 2D"
+        aria-label="Loading False Arrow"
       >
         <audio
           id="loading-theme"
@@ -197,7 +197,7 @@ function gameMarkup(): string {
         <ol id="ios-fullscreen-help-steps" class="fullscreen-help__steps">
           <li>Tap Safari’s <span class="fullscreen-help__share-icon" aria-label="Share">⇧</span> <strong>Share</strong> button.</li>
           <li>Choose <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
-          <li>Open <strong>Labyrinth</strong> from your Home Screen.</li>
+          <li>Open <strong>False Arrow</strong> from your Home Screen.</li>
         </ol>
         <button id="ios-fullscreen-help-ok" class="fullscreen-help__ok" type="button">Got it</button>
       </div>
