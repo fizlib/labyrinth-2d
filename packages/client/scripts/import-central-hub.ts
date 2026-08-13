@@ -50,6 +50,28 @@ if (edited.version !== 1 || edited.reference?.kind !== 'generated-maze-crop') {
   throw new Error('Expected a version-1 generated-maze-crop style-editor export.');
 }
 
+// Post-export correction requested for the south broken pillar. Accept either
+// the original or corrected coordinates so a future editor export can absorb it.
+const southBrokenPillar = edited.elements.find(
+  (element) =>
+    element.name === 'ancientPillarBroken' &&
+    element.x === 1542 &&
+    (element.y === 891 || element.y === 907),
+);
+const southBrokenPillarCollider = edited.colliders.find(
+  (collider) =>
+    collider.shape === 'rectangle' &&
+    collider.x === 1542 &&
+    collider.width === 16 &&
+    collider.height === 16 &&
+    (collider.y === 940 || collider.y === 956),
+);
+if (!southBrokenPillar || !southBrokenPillarCollider) {
+  throw new Error('Cannot find the south broken pillar and its 16x16 collider.');
+}
+southBrokenPillar.y = 907;
+southBrokenPillarCollider.y = 956;
+
 const tileSize = edited.sample.tileSize;
 const hub = getHubTileBounds();
 const hubSampleX = (hub.left - edited.reference.cropTileX) * tileSize;

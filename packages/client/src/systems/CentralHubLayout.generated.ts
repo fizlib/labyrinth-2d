@@ -1687,7 +1687,7 @@ export const CENTRAL_HUB_SPRITE_SPECS: readonly CentralHubSpriteSpec[] = [
 export const CENTRAL_HUB_Y_SORTED_SPRITE_SPECS: readonly CentralHubYSortedSpriteSpec[] =
   [
     [16, -16, 202, 16, 66, 502, 0, 267],
-    [16, 198, 411, 16, 66, 502, 0, 476],
+    [16, 198, 427, 16, 66, 502, 0, 492],
     [16, 481, 199, 16, 66, 502, 0, 265],
     [16, 199, -55, 16, 66, 502, 0, 10],
     [54, 152, 126, 16, 66, 504, 0, 191],

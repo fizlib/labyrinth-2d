@@ -21,6 +21,7 @@ import type {
 } from '@labyrinth/shared';
 import {
   getSwampAuthoringWidth,
+  getHubTileBounds,
   CELL_SIZE,
   TILE_FLOOR,
   TILE_FLOOR_SHADOW,
@@ -55,6 +56,10 @@ const EXPANDED_PADDING = 5;
 const MAP_TOGGLE_SIZE = 18;
 const MAP_TOGGLE_OVERLAP = 5;
 
+/** High-visibility local-player treatment used only on the full warden map. */
+const EXPANDED_PLAYER_MARKER_SIZE = 4;
+const EXPANDED_PLAYER_HIGHLIGHT_DURATION_MS = 850;
+
 const MINIMAP_TOTAL_SIZE = MINIMAP_SIZE + MINIMAP_PADDING * 2;
 
 /** Size and edge inset of the largest compact minimap pointer target. */
@@ -75,6 +80,12 @@ const COL_BRIDGE_WATER: readonly number[] = [47, 105, 125, 255]; // deep blue-gr
 const COL_BRIDGE_STONE: readonly number[] = [188, 157, 103, 255]; // pale ancient stone
 const COL_SWAMP: readonly number[] = [38, 76, 60, 255]; // murky green water
 const COL_SWAMP_DOT: readonly number[] = [104, 156, 72, 255]; // marsh vegetation
+const COL_HUB_COURTYARD: readonly number[] = [17, 53, 43, 255]; // deep green ruined courts
+const COL_HUB_ROOT: readonly number[] = [113, 73, 41, 255]; // roots and fallen ruins
+const COL_HUB_HEDGE: readonly number[] = [34, 112, 59, 255]; // thick outer forest walls
+const COL_HUB_PATH_EDGE: readonly number[] = [78, 62, 45, 255]; // rails and path shadow
+const COL_HUB_STONE: readonly number[] = [170, 151, 108, 255]; // ancient stone cross
+const COL_HUB_STONE_LIGHT: readonly number[] = [202, 181, 132, 255]; // worn slab highlights
 const COL_CHEST_OUTLINE: readonly number[] = [58, 32, 18, 255]; // dark iron/wood edge
 const COL_CHEST_WOOD: readonly number[] = [181, 91, 39, 255]; // warm chest boards
 const COL_CHEST_GOLD: readonly number[] = [255, 202, 61, 255]; // trim and latch
@@ -88,6 +99,13 @@ const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot ce
 const COL_TRAP: readonly number[] = [224, 37, 55, 255]; // warden-only trap network
 const COL_LOCAL_PLAYER = 0xffd43b; // warm yellow
 const COL_OTHER_PLAYER = 0x5acde0; // bright cyan map accent, visible on grass
+
+const HUB_COURTYARD = 1;
+const HUB_ROOT = 2;
+const HUB_HEDGE = 3;
+const HUB_PATH_EDGE = 4;
+const HUB_STONE = 5;
+const HUB_STONE_LIGHT = 6;
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -117,7 +135,9 @@ export class Minimap {
   private texture: Texture;
   private expandedOverlay: Container | null = null;
   private expandedTexture: Texture | null = null;
-  private expandedPlayerMarker: Graphics | null = null;
+  private expandedPlayerMarker: Container | null = null;
+  private expandedPlayerMarkerBody: Graphics | null = null;
+  private expandedPlayerHighlight: Graphics | null = null;
   private expandedOtherPlayersContainer: Container | null = null;
   private compactOtherPlayerMarkers: Graphics[] = [];
   private expandedOtherPlayerMarkers: Graphics[] = [];
@@ -141,6 +161,7 @@ export class Minimap {
   private dirtMask: Uint8Array;
   private bridgeMask: Uint8Array;
   private swampMask: Uint8Array;
+  private centralHubMask: Uint8Array;
   private swordFieldMask: Uint8Array;
   private chestMask: Uint8Array;
   private trapCellMask: Uint8Array;
@@ -161,6 +182,7 @@ export class Minimap {
   private readonly onExpandedChange?: (expanded: boolean) => void;
   private expanded = false;
   private suppressCanvasClick = false;
+  private expandedPlayerHighlightStartedAt = -1;
 
   // ──────────────────────────────────────────────────────────────────────
 
@@ -175,6 +197,7 @@ export class Minimap {
     this.dirtMask = dirtMask;
     this.bridgeMask = this.createBridgeMask(options.bridges ?? []);
     this.swampMask = this.createSwampMask(options.swamps ?? []);
+    this.centralHubMask = this.createCentralHubMask();
     this.swordFieldMask = this.createSwordFieldMask(options.swordFields ?? []);
     this.chestMask = this.createChestMask(options.chestDeadEnds ?? []);
     this.trapCellMask = this.createTrapCellMask(options.trapCells ?? []);
@@ -395,6 +418,8 @@ export class Minimap {
         EXPANDED_PADDING + (playerPixelY / this.mapData.tileSize) * this.expandedMapScale,
       );
     }
+
+    if (this.expanded) this.updateExpandedPlayerHighlight(performance.now());
   }
 
   /** Remove from stage and free resources. */
@@ -477,6 +502,77 @@ export class Minimap {
         ) {
           mask[tileY * this.mapData.width + tileX] = 2;
         }
+      }
+    }
+
+    return mask;
+  }
+
+  /**
+   * Cache the redesigned hub's distant silhouette at one byte per map tile.
+   * The four-tile stone cross follows the authored paths while the one-tile
+   * margins and seven-tile extensions line up with the surrounding corridors.
+   */
+  private createCentralHubMask(): Uint8Array {
+    const mask = new Uint8Array(this.mapData.width * this.mapData.height);
+    const bounds = getHubTileBounds(this.mapData.width, this.mapData.height);
+    const hubWidth = bounds.right - bounds.left + 1;
+    const hubHeight = bounds.bottom - bounds.top + 1;
+    if (hubWidth <= 0 || hubHeight <= 0) return mask;
+
+    const stoneWidth = 4;
+    const stoneStartX = bounds.left + Math.floor((hubWidth - stoneWidth) / 2);
+    const stoneEndX = stoneStartX + stoneWidth;
+    const stoneStartY = bounds.top + Math.floor((hubHeight - stoneWidth) / 2);
+    const stoneEndY = stoneStartY + stoneWidth;
+    const armExtension = 7;
+    const minX = Math.max(0, bounds.left - armExtension);
+    const maxX = Math.min(this.mapData.width - 1, bounds.right + armExtension);
+    const minY = Math.max(0, bounds.top - armExtension);
+    const maxY = Math.min(this.mapData.height - 1, bounds.bottom + armExtension);
+
+    const rootTiles = new Set([
+      '4,7',
+      '9,10',
+      '20,6',
+      '25,10',
+      '5,22',
+      '9,25',
+      '21,22',
+      '26,24',
+    ]);
+
+    for (let tileY = minY; tileY <= maxY; tileY++) {
+      for (let tileX = minX; tileX <= maxX; tileX++) {
+        const localX = tileX - bounds.left;
+        const localY = tileY - bounds.top;
+        const insideHub =
+          localX >= 0 && localX < hubWidth && localY >= 0 && localY < hubHeight;
+        let value = 0;
+
+        if (insideHub) {
+          value = rootTiles.has(`${localX},${localY}`) ? HUB_ROOT : HUB_COURTYARD;
+          const inOuterWall =
+            localX < 2 ||
+            localX >= hubWidth - 2 ||
+            localY < 2 ||
+            localY >= hubHeight - 2;
+          if (inOuterWall) value = HUB_HEDGE;
+        }
+
+        const inVerticalStone = tileX >= stoneStartX && tileX < stoneEndX;
+        const inHorizontalStone = tileY >= stoneStartY && tileY < stoneEndY;
+        const inVerticalEdge =
+          tileX >= stoneStartX - 1 && tileX <= stoneEndX;
+        const inHorizontalEdge =
+          tileY >= stoneStartY - 1 && tileY <= stoneEndY;
+
+        if (inVerticalEdge || inHorizontalEdge) value = HUB_PATH_EDGE;
+        if (inVerticalStone || inHorizontalStone) {
+          value = (tileX + tileY) % 5 === 0 ? HUB_STONE_LIGHT : HUB_STONE;
+        }
+
+        if (value !== 0) mask[tileY * this.mapData.width + tileX] = value;
       }
     }
 
@@ -658,7 +754,7 @@ export class Minimap {
     this.expandedOtherPlayersContainer = new Container();
     panel.addChild(this.expandedOtherPlayersContainer);
 
-    this.expandedPlayerMarker = this.createPlayerPixel(COL_LOCAL_PLAYER);
+    this.expandedPlayerMarker = this.createExpandedPlayerMarker();
     panel.addChild(this.expandedPlayerMarker);
 
     const contractButton = this.createMapToggleButton(
@@ -697,8 +793,11 @@ export class Minimap {
       // Gate tiles can change during play, so refresh the layout every time it opens.
       this.redrawExpandedCanvas();
       this.expandedTexture?.source.update();
+      this.startExpandedPlayerHighlight();
       // Keep the modal above other HUD elements created after the minimap.
       this.container.parent?.addChild(this.container);
+    } else {
+      this.stopExpandedPlayerHighlight();
     }
 
     this.onExpandedChange?.(expanded);
@@ -717,6 +816,78 @@ export class Minimap {
     marker.rect(0, 0, 1, 1);
     marker.fill({ color });
     return marker;
+  }
+
+  /** Create a larger local marker plus an animated locator ring for the full map. */
+  private createExpandedPlayerMarker(): Container {
+    const marker = new Container();
+
+    this.expandedPlayerHighlight = new Graphics();
+    this.expandedPlayerHighlight.circle(0, 0, EXPANDED_PLAYER_MARKER_SIZE / 2 + 2);
+    this.expandedPlayerHighlight.stroke({
+      color: COL_LOCAL_PLAYER,
+      alpha: 1,
+      width: 1.5,
+    });
+    this.expandedPlayerHighlight.visible = false;
+    marker.addChild(this.expandedPlayerHighlight);
+
+    this.expandedPlayerMarkerBody = new Graphics();
+    this.expandedPlayerMarkerBody.rect(
+      -EXPANDED_PLAYER_MARKER_SIZE / 2,
+      -EXPANDED_PLAYER_MARKER_SIZE / 2,
+      EXPANDED_PLAYER_MARKER_SIZE,
+      EXPANDED_PLAYER_MARKER_SIZE,
+    );
+    this.expandedPlayerMarkerBody.fill({ color: COL_LOCAL_PLAYER });
+    marker.addChild(this.expandedPlayerMarkerBody);
+
+    return marker;
+  }
+
+  /** Restart the quick locator pulse each time the warden expands the map. */
+  private startExpandedPlayerHighlight(): void {
+    if (!this.expandedPlayerHighlight || !this.expandedPlayerMarkerBody) return;
+
+    this.expandedPlayerHighlightStartedAt = performance.now();
+    this.expandedPlayerHighlight.visible = true;
+    this.expandedPlayerHighlight.alpha = 1;
+    this.expandedPlayerHighlight.scale.set(0.6);
+    this.expandedPlayerMarkerBody.scale.set(1.5);
+  }
+
+  private updateExpandedPlayerHighlight(now: number): void {
+    if (
+      !this.expanded ||
+      this.expandedPlayerHighlightStartedAt < 0 ||
+      !this.expandedPlayerHighlight ||
+      !this.expandedPlayerMarkerBody
+    ) {
+      return;
+    }
+
+    const progress = Math.min(
+      (now - this.expandedPlayerHighlightStartedAt) /
+        EXPANDED_PLAYER_HIGHLIGHT_DURATION_MS,
+      1,
+    );
+    const easedProgress = 1 - (1 - progress) ** 3;
+
+    this.expandedPlayerHighlight.scale.set(0.6 + easedProgress * 1.7);
+    this.expandedPlayerHighlight.alpha = 1 - progress;
+    this.expandedPlayerMarkerBody.scale.set(1 + (1 - easedProgress) * 0.5);
+
+    if (progress >= 1) this.stopExpandedPlayerHighlight();
+  }
+
+  private stopExpandedPlayerHighlight(): void {
+    this.expandedPlayerHighlightStartedAt = -1;
+    if (this.expandedPlayerHighlight) {
+      this.expandedPlayerHighlight.visible = false;
+      this.expandedPlayerHighlight.alpha = 1;
+      this.expandedPlayerHighlight.scale.set(1);
+    }
+    this.expandedPlayerMarkerBody?.scale.set(1);
   }
 
   /** Keep remote-player pixels aligned to the compact and expanded map grids. */
@@ -979,6 +1150,12 @@ export class Minimap {
     if (this.bridgeMask[tileIndex] === 1) return COL_BRIDGE_WATER;
     if (this.swampMask[tileIndex] === 2) return COL_SWAMP_DOT;
     if (this.swampMask[tileIndex] === 1) return COL_SWAMP;
+    if (this.centralHubMask[tileIndex] === HUB_STONE_LIGHT) return COL_HUB_STONE_LIGHT;
+    if (this.centralHubMask[tileIndex] === HUB_STONE) return COL_HUB_STONE;
+    if (this.centralHubMask[tileIndex] === HUB_PATH_EDGE) return COL_HUB_PATH_EDGE;
+    if (this.centralHubMask[tileIndex] === HUB_HEDGE) return COL_HUB_HEDGE;
+    if (this.centralHubMask[tileIndex] === HUB_ROOT) return COL_HUB_ROOT;
+    if (this.centralHubMask[tileIndex] === HUB_COURTYARD) return COL_HUB_COURTYARD;
 
     const isGroundTile =
       id === TILE_FLOOR ||
