@@ -20,6 +20,10 @@ function randomGuestSuffix(): string {
   return String(randomUint32() % 10_000).padStart(4, '0');
 }
 
+export function suggestGuestDisplayName(): string {
+  return `Guest ${randomGuestSuffix()}`;
+}
+
 function guestId(): string {
   try {
     const uuid = window.crypto?.randomUUID?.();
@@ -87,12 +91,13 @@ export function loadGuestProfile(): Profile | null {
   }
 }
 
-export function createGuestProfile(): Profile {
+export function createGuestProfile(displayName: string): Profile {
+  const values = validateProfileInput({ displayName, avatarUrl: '' });
   const now = new Date().toISOString();
   const profile: Profile = {
     id: guestId(),
-    display_name: `Guest ${randomGuestSuffix()}`,
-    avatar_url: null,
+    display_name: values.displayName,
+    avatar_url: values.avatarUrl,
     is_admin: false,
     created_at: now,
     updated_at: now,

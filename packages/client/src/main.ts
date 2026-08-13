@@ -18,6 +18,7 @@ import {
   clearGuestProfile,
   createGuestProfile,
   loadGuestProfile,
+  suggestGuestDisplayName,
   updateGuestProfile,
 } from './auth/guest';
 import {
@@ -35,6 +36,7 @@ type AppView =
   | 'auth'
   | 'profile-loading'
   | 'profile-error'
+  | 'guest-name'
   | 'menu'
   | 'join'
   | 'profile'
@@ -386,7 +388,47 @@ class AppController {
       void this.signInWithGoogle();
     });
     document.querySelector<HTMLButtonElement>('#guest-sign-in')?.addEventListener('click', () => {
-      this.enterGuestMode(loadGuestProfile() ?? createGuestProfile());
+      const guestProfile = loadGuestProfile();
+      if (guestProfile) this.enterGuestMode(guestProfile);
+      else this.renderGuestName();
+    });
+  }
+
+  private renderGuestName(): void {
+    this.view = 'guest-name';
+    root.innerHTML = shellMarkup(`
+      <section class="app-panel app-panel--join" aria-label="Choose your explorer name">
+        <form id="guest-name-form" class="join-room-form guest-name-form" novalidate>
+          <label for="guest-display-name">Choose your explorer name</label>
+          <input id="guest-display-name" name="displayName" type="text" maxlength="32" required autocomplete="nickname" enterkeyhint="go" value="${escapeHtml(suggestGuestDisplayName())}" />
+          <div id="guest-name-error" class="app-alert app-alert--error" role="alert" hidden></div>
+          <div class="profile-actions">
+            <button id="back-to-auth" class="pixel-button pixel-button--quiet" type="button">Back</button>
+            <button class="pixel-button pixel-button--primary" type="submit">Continue</button>
+          </div>
+        </form>
+      </section>`, 'app-screen--join');
+
+    const input = document.querySelector<HTMLInputElement>('#guest-display-name');
+    input?.focus();
+    input?.select();
+    document.querySelector<HTMLButtonElement>('#back-to-auth')?.addEventListener('click', () => {
+      this.view = 'auth';
+      this.renderAuth();
+    });
+    document.querySelector<HTMLFormElement>('#guest-name-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const error = document.querySelector<HTMLDivElement>('#guest-name-error');
+      try {
+        this.enterGuestMode(createGuestProfile(input?.value ?? ''));
+      } catch (guestNameError) {
+        if (error) {
+          error.textContent = errorMessage(guestNameError, 'Enter a valid display name.');
+          error.hidden = false;
+        }
+        input?.focus();
+        input?.select();
+      }
     });
   }
 
@@ -424,6 +466,17 @@ class AppController {
     }
   }
 
+  private consumePendingRoomCode(): string | null {
+    const roomCode = this.pendingRoomCode;
+    if (!roomCode) return null;
+
+    this.pendingRoomCode = null;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    window.history.replaceState(null, '', url);
+    return roomCode;
+  }
+
   private renderMenu(): void {
     if (!this.profile || !this.identityMode) return;
 
@@ -431,7 +484,7 @@ class AppController {
     if (playAgain) {
       window.sessionStorage.removeItem(PLAY_AGAIN_STORAGE_KEY);
       clearReconnectSession();
-      this.pendingRoomCode = null;
+      this.consumePendingRoomCode();
     } else {
       const reconnectSession = loadReconnectSession(this.profile.id);
       const reconnectRoomCode = reconnectSession?.roomId
@@ -442,7 +495,7 @@ class AppController {
         reconnectSession &&
         (!this.pendingRoomCode || reconnectRoomCode === this.pendingRoomCode)
       ) {
-        this.pendingRoomCode = null;
+        this.consumePendingRoomCode();
         this.view = 'launching-game';
         this.renderRestoring('Reclaiming your place in the maze…');
         window.setTimeout(
@@ -460,11 +513,9 @@ class AppController {
       }
     }
 
-    if (this.pendingRoomCode) {
-      const roomCode = this.pendingRoomCode;
-      this.pendingRoomCode = null;
-      this.view = 'join';
-      this.renderJoinRoom(roomCode);
+    const roomCode = this.consumePendingRoomCode();
+    if (roomCode) {
+      void this.launchGame('join', roomCode);
       return;
     }
     const isGuest = this.identityMode === 'guest';

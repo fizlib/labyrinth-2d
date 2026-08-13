@@ -1185,6 +1185,12 @@ body {
   outline-offset: 3px;
 }
 
+.app-panel--join .guest-name-form input {
+  font-size: 1.35rem;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .app-panel--join .profile-actions {
   margin-top: 2px;
   gap: 10px;

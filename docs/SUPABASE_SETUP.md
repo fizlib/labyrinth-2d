@@ -119,9 +119,9 @@ else.
 7. Select Create Game and confirm this is the first point at which PixiJS loads
    and the `/ws` connection opens.
 8. Sign out from Main Menu and confirm the Auth screen returns.
-9. Continue as a guest and confirm no Supabase profile is created. Edit the
-   guest profile, reload the tab to confirm it is restored, then choose Leave
-   Guest Session and confirm the local profile is cleared.
+9. Continue as a guest, choose a display name, and confirm no Supabase profile
+   is created. Edit the guest profile, reload the tab to confirm it is restored,
+   then choose Leave Guest Session and confirm the local profile is cleared.
 10. Set one test profile's `is_admin` to true from trusted SQL. Confirm that
     account sees the debug menu and can start a one-player lobby immediately.
 11. Confirm a regular signed-in user and a guest see neither admin control and

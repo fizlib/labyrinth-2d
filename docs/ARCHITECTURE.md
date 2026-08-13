@@ -340,15 +340,17 @@ The client first runs a lightweight DOM app shell with these states:
 
 1. restore the persisted Supabase session;
 2. show Google authentication and a local guest option when signed out;
-3. load or create the signed-in user's `public.profiles` row, or restore the
-   current tab's guest profile;
-4. show Main Menu, Join by Code, or Profile;
-5. dynamically import PixiJS and preload runtime assets after Quick Play, Create Private Game, or Join Room is selected;
-6. connect to the authoritative waiting room and show its DOM lobby overlay; and
-7. restore the loading screen when the match starts, then build the maze only
+3. ask a new guest to choose a display name, or restore the current tab's
+   existing guest profile;
+4. load or create the signed-in user's `public.profiles` row;
+5. show Main Menu, Join by Code, or Profile;
+6. dynamically import PixiJS and preload runtime assets after Quick Play, Create Private Game, or Join Room is selected;
+7. connect to the authoritative waiting room and show its DOM lobby overlay; and
+8. restore the loading screen when the match starts, then build the maze only
    after the server sends `ROOM_JOINED` at countdown completion.
 
-Guest profiles use `sessionStorage`, never call Supabase, and are discarded
+Guest profiles are created only after the naming form is submitted, use
+`sessionStorage`, never call Supabase, and are discarded
 when the guest leaves the session or closes the browser tab. They support the
 same local display-name and HTTPS avatar validation as authenticated profiles.
 
@@ -358,8 +360,10 @@ Quick Play/private-room connection begins inside `startGame()` and uses the
 profile display name. Each occupied seat has a private 256-bit bearer token in
 the current tab's `sessionStorage`, scoped to the current profile ID. After
 identity restoration, a reload automatically resumes that seat; a different
-explicit `?room=CODE` invitation clears the stored seat and opens its prefilled
-join form instead.
+explicit `?room=CODE` invitation clears the stored seat and connects directly
+to the invited room's lobby instead. The client consumes the `room` query
+parameter before connecting so leaving the lobby does not trigger another join;
+the reconnect session retains the room ID for genuine reload recovery.
 
 See `docs/SUPABASE_SETUP.md` for the migration, Google provider, redirect URL,
 and environment configuration.
