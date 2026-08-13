@@ -1995,6 +1995,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       entityLayer.addChild(decoration);
     }
 
+    for (const sprite of renderer.centralHubYSortedSprites) {
+      entityLayer.addChild(sprite);
+    }
+
     for (const tree of renderer.treeSprites) {
       entityLayer.addChild(tree);
     }
@@ -3498,7 +3502,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         const dy = localY - rsCenterY;
         const distSq = dx * dx + dy * dy;
         if (distSq < INTERACT_RANGE_SQ) {
-          considerPrompt(0, distSq, rs.sprite.x, rs.sprite.y - 34);
+          considerPrompt(
+            0,
+            distSq,
+            rs.sprite.x,
+            rs.sprite.y - rs.sprite.height - 2,
+          );
         }
       }
 

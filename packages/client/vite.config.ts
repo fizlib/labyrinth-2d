@@ -19,6 +19,11 @@ interface CatalogAsset {
 }
 
 const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const centralHubRuntimeAssets = new Set<string>(
+  JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, 'central-hub-runtime-assets.json'), 'utf8'),
+  ) as string[],
+);
 
 function classifyAsset(name: string, relativePath: string): string {
   const value = `${relativePath}/${name}`.toLowerCase();
@@ -87,8 +92,13 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
 
   const shouldIncludePublicPath = (candidate: string): boolean => {
     if (characterFrameSourceRoots.some((root) => isWithin(root, candidate))) return false;
+    if (!isWithin(styleLibraryRoot, candidate)) return true;
     if (includeFullStyleLibrary) return true;
-    return !isWithin(styleLibraryRoot, candidate);
+
+    const relativePath = path.relative(styleLibraryRoot, candidate).split(path.sep).join('/');
+    return [...centralHubRuntimeAssets].some(
+      (assetPath) => relativePath === '' || assetPath === relativePath || assetPath.startsWith(`${relativePath}/`),
+    );
   };
 
   const scan = async (): Promise<CatalogAsset[]> => {

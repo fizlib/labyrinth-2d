@@ -38,6 +38,7 @@ import {
   getNavigationDirectionForPosition,
   CHEST_INTERACTION_RANGE,
   getChestInteractionPoint,
+  getCentralHubRunestonePlacements,
   BRIDGE_WALKWAY_COLUMNS,
   BRIDGE_WALKWAY_ROWS,
   BRIDGE_REPAIR_DURATION_MS,
@@ -293,8 +294,19 @@ function toPublicPlayerInfo(player: RoomPlayerInfo): PlayerInfo {
 /** Pixel distance threshold for runestone activation (1.5 tiles). */
 const RUNESTONE_ACTIVATION_RANGE = 28;
 
-/** Find all runestone tiles in the map data and return their positions. */
+/** Resolve exact authored runestone anchors, with marker-tile fallback for other maps. */
 function findRunestonePositions(map: TileMapData): RunestoneInfo[] {
+  const authoredPlacements = getCentralHubRunestonePlacements(map);
+  if (authoredPlacements.length > 0) {
+    return authoredPlacements.map((placement) => ({
+      index: placement.index,
+      squadColor: SQUAD_COLORS[placement.index],
+      tileX: placement.tileX,
+      tileY: placement.tileY,
+      activated: false,
+    }));
+  }
+
   const runestones: RunestoneInfo[] = [];
   const tileTypes = [TILE_RUNESTONE_1, TILE_RUNESTONE_2, TILE_RUNESTONE_3];
   for (let y = 0; y < map.height; y++) {

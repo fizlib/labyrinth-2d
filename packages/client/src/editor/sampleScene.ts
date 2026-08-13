@@ -7,13 +7,15 @@ import {
   TILE_RUNESTONE_1,
   TILE_RUNESTONE_2,
   TILE_RUNESTONE_3,
-  TILE_TREE,
   WALL_HEIGHT,
   WALL_WIDTH,
   generateMazeLayout,
   getBridgeBounds,
   getChestDeadEndBounds,
   getHubTileBounds,
+  getCentralHubCollisionBounds,
+  getCentralHubRunestonePlacements,
+  isCentralHubSuppressedGroundTile,
   getDecoratedVerticalPassageBounds,
   getTIntersectionDecorationBounds,
   getPortalBounds,
@@ -70,6 +72,10 @@ import {
   DECORATED_VERTICAL_PASSAGE_SPRITES,
   getDecoratedVerticalPassageAssetPath,
 } from '../systems/DecoratedVerticalPassageLayout';
+import {
+  CENTRAL_HUB_ASSETS,
+  CENTRAL_HUB_SPRITE_SPECS,
+} from '../systems/CentralHubLayout.generated';
 import type {
   EditorCollider,
   EditorElement,
@@ -114,8 +120,6 @@ const PORTAL_TERRAIN_Z = 1;
 const PORTAL_GROUND_DETAIL_Z = 3;
 const PORTAL_PLATFORM_STRUCTURE_Z = 240000;
 const PORTAL_Z = 240002;
-const HUB_TREE = `${FOREST_ROOT}/tree_primary_02.png`;
-const HUB_TREE_SHADOW = `${FOREST_ROOT}/tree_shadow.png`;
 const GRASS_IDS = [102, 105, 108, 154] as const;
 const BRIDGE_NATIVE_SIZE_BY_ASSET: Partial<
   Record<BridgeObstacleAsset, readonly [number, number]>
@@ -455,6 +459,7 @@ function addGroundElements(layout: GeneratedMazeLayout, elements: EditorElement[
     const mapY = CROP_TILE_Y + sampleY;
     for (let sampleX = 0; sampleX < SAMPLE_TILES_WIDE; sampleX++) {
       const mapX = CROP_TILE_X + sampleX;
+      if (isCentralHubSuppressedGroundTile(mapX, mapY, map)) continue;
       const tileId = map.data[mapY * map.width + mapX];
       const forest = isForestWallTileId(tileId);
       const gateApproach = layout.dirtMask[mapY * map.width + mapX] === 1;
@@ -998,54 +1003,43 @@ function addCentralHubElements(
   elements: EditorElement[],
   colliders: EditorCollider[],
 ): void {
+  const hub = getHubTileBounds(map.width, map.height);
+  const hubSampleX = (hub.left - CROP_TILE_X) * TILE;
+  const hubSampleY = (hub.top - CROP_TILE_Y) * TILE;
+
+  for (const [
+    assetIndex,
+    x,
+    y,
+    width,
+    height,
+    zIndex,
+    flipX,
+  ] of CENTRAL_HUB_SPRITE_SPECS) {
+    const asset = CENTRAL_HUB_ASSETS[assetIndex];
+    const role: SemanticRole =
+      zIndex <= 3 ? 'ground.grass' : zIndex === 505 ? 'bush' : 'decoration';
+    elements.push(
+      assetElement(
+        `Central hub · ${asset.name}`,
+        role,
+        asset.path,
+        asset.nativeWidth,
+        asset.nativeHeight,
+        hubSampleX + x,
+        hubSampleY + y,
+        width,
+        height,
+        zIndex,
+        flipX === 1,
+      ),
+    );
+  }
+
+  const markerTiles = new Map<number, { mapX: number; mapY: number }>();
   for (let mapY = CROP_TILE_Y; mapY < CROP_TILE_Y + SAMPLE_TILES_HIGH; mapY++) {
     for (let mapX = CROP_TILE_X; mapX < CROP_TILE_X + SAMPLE_TILES_WIDE; mapX++) {
       const tileId = map.data[mapY * map.width + mapX];
-      const localTileX = (mapX - CROP_TILE_X) * TILE;
-      const localTileY = (mapY - CROP_TILE_Y) * TILE;
-
-      if (tileId === TILE_TREE) {
-        elements.push(
-          assetElement(
-            `Central hub · tree contact shadow · map tile ${mapX},${mapY}`,
-            'shadow',
-            HUB_TREE_SHADOW,
-            50,
-            50,
-            localTileX + TILE / 2 - 27,
-            localTileY + TILE - 4 - 12,
-            54,
-            24,
-            100,
-          ),
-        );
-        const tree = assetElement(
-          `Central hub · sacred tree · map tile ${mapX},${mapY}`,
-          'tree.large',
-          HUB_TREE,
-          164,
-          214,
-          localTileX + TILE / 2 - 43,
-          localTileY + TILE - 112,
-          86,
-          112,
-          1000 + (mapY + 1) * 1000 + 800,
-        );
-        elements.push(tree);
-        colliders.push(
-          collider(
-            `Central hub · sacred tree solid tile ${mapX},${mapY}`,
-            localTileX,
-            localTileY,
-            TILE,
-            TILE,
-            'tree.large',
-            tree.id,
-          ),
-        );
-        continue;
-      }
-
       if (
         tileId !== TILE_RUNESTONE_1 &&
         tileId !== TILE_RUNESTONE_2 &&
@@ -1053,34 +1047,47 @@ function addCentralHubElements(
       )
         continue;
       const runestoneIndex = tileId - TILE_RUNESTONE_1;
-      const runestone = assetElement(
-        `Central hub · runestone ${runestoneIndex + 1} · map tile ${mapX},${mapY}`,
+      markerTiles.set(runestoneIndex, { mapX, mapY });
+    }
+  }
+
+  for (const placement of getCentralHubRunestonePlacements(map)) {
+    const marker = markerTiles.get(placement.index);
+    if (!marker) continue;
+    elements.push(
+      assetElement(
+        `Central hub · runestone ${placement.index + 1} · map tile ${marker.mapX},${marker.mapY}`,
         'runestone',
         RUNESTONE_SHEET,
         TILE,
         TILE * 2,
-        localTileX,
-        localTileY - TILE,
-        TILE,
-        TILE * 2,
-        1000 + (mapY + 1) * 1000 + 700,
+        placement.x - CROP_TILE_X * TILE,
+        placement.y - CROP_TILE_Y * TILE,
+        placement.width,
+        placement.height,
+        1000 + (marker.mapY + 1) * 1000 + 700,
         false,
         false,
-        { x: runestoneIndex * TILE * 2, y: 0, width: TILE, height: TILE * 2 },
-      );
-      elements.push(runestone);
-      colliders.push(
-        collider(
-          `Central hub · runestone ${runestoneIndex + 1} solid tile ${mapX},${mapY}`,
-          localTileX,
-          localTileY,
-          TILE,
-          TILE,
-          'runestone',
-          runestone.id,
-        ),
-      );
-    }
+        { x: placement.index * TILE * 2, y: 0, width: TILE, height: TILE * 2 },
+      ),
+    );
+  }
+
+  for (const [index, bounds] of getCentralHubCollisionBounds(map).entries()) {
+    colliders.push(
+      collider(
+        `Central hub · authored collider ${index + 1}`,
+        bounds.left - CROP_TILE_X * TILE,
+        bounds.top - CROP_TILE_Y * TILE,
+        bounds.right - bounds.left + 1,
+        bounds.bottom - bounds.top + 1,
+        'freeform',
+        null,
+        bounds.shape,
+        bounds.flipX,
+        bounds.flipY,
+      ),
+    );
   }
 }
 
@@ -1371,7 +1378,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
     notes: [
       'Exact crop of generated maze seed 44: map cells (2,5) through (8,14), using the same wall-placement builder and generated obstacle layout as the game.',
       'Connection letters are N/E/S/W openings. This fixture includes both straights, all four turns, every T-junction orientation, a four-way cross, and every dead-end orientation.',
-      'The central hub section includes its editable ground tiles, thick side walls, corrected north-west and north-east corner transitions, sacred tree, tree shadow, and three runestones.',
+      'The central hub section includes the redesigned ruins repaint, exact authored colliders, and three repositioned runestones.',
       'The portal section is anchored between seed-44 cells (8,13) and (8,14), which both have intact north forest walls. It includes the exact editable clearing, raised stone platform, inactive portal frame, split wall opening, portal hitbox, and six authored platform-edge colliders; the central stairway remains walkable.',
       'The bridge obstacle is anchored between seed-44 cells (5,11) and (5,12), with forest banks on both sides and open north/south cells. It includes the exact water repaint, stone walkway, bank decorations, and six authored colliders.',
       'The swamp obstacle spans seed-44 cells (2,5) and (3,5), with its exact authored water, banks, lilies, reeds, and cattails preserved as the editor reference.',

@@ -32,6 +32,7 @@ import {
 import { getPlayerSwampTerrain, SWAMP_SPEED_MULTIPLIER } from './swamp.js';
 import { getSwordFieldCollisionBounds, type SwordFieldState } from './sword-field.js';
 import { findActivePlayerCage, getCageCollisionBounds, type CageState } from './cage.js';
+import { getCentralHubCollisionBounds } from './central-hub.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -526,6 +527,10 @@ export function isPositionValid(
         return false;
       }
     }
+  }
+
+  for (const bounds of getCentralHubCollisionBounds(map)) {
+    if (intersectsAuthoredCollision(left, top, right, bottom, bounds)) return false;
   }
 
   // Check the portal rectangle and authored platform polygons.

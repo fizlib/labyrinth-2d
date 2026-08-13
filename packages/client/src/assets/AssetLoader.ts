@@ -41,6 +41,7 @@ import { getFiorwoodsRuntimeAssetPath } from './runtimeAssetPaths';
 import { CAGE_GROUND_ASSET_PATHS } from '../systems/CageGroundLayout';
 import { T_INTERSECTION_DECORATION_ASSET_PATHS } from '../systems/TIntersectionDecorationLayout';
 import { DECORATED_VERTICAL_PASSAGE_ASSET_PATHS } from '../systems/DecoratedVerticalPassageLayout';
+import { CENTRAL_HUB_ASSET_PATHS } from '../systems/CentralHubLayout.generated';
 
 export interface FrontGateTextures {
   topLeft: Texture;
@@ -202,6 +203,8 @@ export interface GameAssets {
   tIntersectionDecorationTextures: ReadonlyMap<string, Texture>;
   /** Authored terrain and foliage used by decorated vertical passages. */
   decoratedVerticalPassageTextures: ReadonlyMap<string, Texture>;
+  /** Static ground and ruins modules used by the redesigned central hub. */
+  centralHubTextures: ReadonlyMap<string, Texture>;
   /** Number of activation frames (the rest are active idle frames). */
   portalActivationCount: number;
   /** Wisdom orb HUD texture. */
@@ -279,6 +282,7 @@ export async function loadAssets(
   let chestDeadEndTextures = new Map<string, Texture>();
   let tIntersectionDecorationTextures = new Map<string, Texture>();
   let decoratedVerticalPassageTextures = new Map<string, Texture>();
+  let centralHubTextures = new Map<string, Texture>();
   let portalActivationCount = 6;
   let wisdomOrbTexture: Texture;
   let expandMapButtonTexture: Texture | null = null;
@@ -873,6 +877,24 @@ export async function loadAssets(
     }
   }
 
+  try {
+    centralHubTextures = new Map(
+      await Promise.all(
+        CENTRAL_HUB_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded central hub (${centralHubTextures.size} source modules)`,
+    );
+  } catch (error) {
+    centralHubTextures.clear();
+    console.warn('[Assets] Central-hub modules unavailable', error);
+  }
+
   reportProgress(0.84, 'Lighting the hidden portal…');
 
   // ── Portal spritesheet (2 rows: row 1 = activation, row 2 = active idle) ──────
@@ -1214,6 +1236,7 @@ export async function loadAssets(
     chestDeadEndTextures,
     tIntersectionDecorationTextures,
     decoratedVerticalPassageTextures,
+    centralHubTextures,
     portalActivationCount,
     wisdomOrbTexture,
     expandMapButtonTexture,

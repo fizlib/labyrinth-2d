@@ -150,6 +150,15 @@ export {
 } from './cage.js';
 
 export {
+  CENTRAL_HUB_AUTHORING_TILE_SIZE,
+  getCentralHubCollisionBounds,
+  getCentralHubRunestonePlacements,
+  isCentralHubSuppressedGroundTile,
+  type CentralHubCollisionBounds,
+  type CentralHubRunestonePlacement,
+} from './central-hub.js';
+
+export {
   TRAP_CELL_INTERACTION_RANGE,
   getTrapCellWorldBounds,
   isPlayerInTrapCell,

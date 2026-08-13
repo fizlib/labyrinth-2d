@@ -190,6 +190,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Sword fields preserve the ten small fence/marker colliders from the first editor export. The additional `149×32` central blocker from the second export remains solid through the shake-and-sink sequence and is removed only when the server marks the field cleared.
 - Spawned cages use the shared dynamic-collider path and the editor-authored 18x14 base collider. Closed prisoners cannot change position, but their movement input still drives replicated facing and walk animation; opened prisoners may move only north/south until clear, while every other player collides with the cage. A vacated cage remains permanently solid.
 - Collision respects the portal from the beginning of the match. Its authored wall cutout opens four tiles of walkable platform behind the arch, while mirrored rectangle and right-triangle edge colliders keep players inside the masonry and leave the central stairs open.
+- The redesigned central hub is baked from the exact 1,293-sprite style-editor repaint. Its 23 exported rectangle/right-triangle colliders are shared by client prediction and server simulation, and its three runestones use exact pixel anchors for rendering and activation instead of their legacy tile hitboxes.
 
 ### Proximity Text Chat
 
@@ -301,7 +302,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 4. Carve the remaining `15 x 15` maze with recursive backtracking.
 5. Open the four hub entrances into the surrounding maze.
 6. Post-process solid regions into the final 2.5D wall tile set.
-7. Place the hub tree and the three runestones.
+7. Place the three non-solid runestone objective markers; the hub repaint, exact runestone positions, and colliders come from the authored central-hub layout.
 8. Compute spawn points from the ungated maze, then stamp one closed gate cell per team along the chosen spawn-to-hub routes when a qualifying vertical (north-south) corridor cell exists. Horizontal passages never receive gates.
 9. Stamp a visual-only dirt mask around each closed gate so the client can render short dirt approaches that transition back into grass.
 10. Select up to 12 bridge passages across the whole maze, independently of spawn-to-hub routes. Each bridge connects two empty 6×6 cells, retains forest walls along its west and east banks, excludes spawn/hub/gate cells, and never shares either adjacent cell with another bridge.
@@ -339,7 +340,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 | `10` | `TILE_WALL_CORNER_BL` | Bottom-left outer corner |
 | `11` | `TILE_WALL_CORNER_BR` | Bottom-right outer corner |
 | `12` | `TILE_WALL_TOP_EDGE` | Top exposed rock edge |
-| `13` | `TILE_TREE` | Hub tree |
+| `13` | `TILE_TREE` | Reserved decorative tree marker (not currently generated) |
 | `14` | `TILE_RUNESTONE_1` | Runestone type 1 |
 | `15` | `TILE_RUNESTONE_2` | Runestone type 2 |
 | `16` | `TILE_RUNESTONE_3` | Runestone type 3 |

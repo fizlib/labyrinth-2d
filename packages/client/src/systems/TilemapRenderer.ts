@@ -46,6 +46,7 @@ import {
   INTERNAL_WIDTH,
   INTERNAL_HEIGHT,
   CELL_SIZE,
+  isCentralHubSuppressedGroundTile,
 } from '@labyrinth/shared';
 import type { DirtTextures, GameAssets, FrontGateTextures } from '../assets/AssetLoader';
 import {
@@ -62,6 +63,7 @@ import { addSwordFields, type SwordFieldVisual } from './SwordField';
 import { addChestDeadEnds, type ChestDeadEndVisual } from './ChestDeadEnd';
 import { addTIntersectionDecorations } from './TIntersectionDecoration';
 import { addDecoratedVerticalPassages } from './DecoratedVerticalPassage';
+import { addCentralHub } from './CentralHub';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -392,6 +394,8 @@ export class TilemapRenderer {
 
   // ── Extracted entities — add individually to entityLayer ────────────────
   readonly treeSprites: Sprite[] = [];
+  /** Hub pillars sorted at their authored rectangular collider's lower edge. */
+  readonly centralHubYSortedSprites: Sprite[] = [];
   readonly runestoneSprites: RunestoneSpriteData[] = [];
   readonly gateSprites: Sprite[] = [];
   readonly pressurePlateSprites: PressurePlateSpriteData[] = [];
@@ -486,7 +490,10 @@ export class TilemapRenderer {
             const localY = (y - startY) * ts;
 
             // ── Background tile ──────────────────────────────────
-            if (usesGroundBackgroundTile(tileId)) {
+            if (
+              usesGroundBackgroundTile(tileId) &&
+              !isCentralHubSuppressedGroundTile(x, y, map)
+            ) {
               const forestTile = isForestWallTileId(tileId);
               const forestGroundInUnderlayLayer =
                 forestTile && getForestGroundZIndex(x, y, map) > 0;
@@ -846,6 +853,15 @@ export class TilemapRenderer {
       assets.decoratedVerticalPassageTextures,
       this.groundDetailLayer,
     );
+    const centralHubRender = addCentralHub(
+      map,
+      assets.centralHubTextures,
+      assets.runestoneTextures,
+      renderer,
+      this.groundDetailLayer,
+    );
+    this.centralHubYSortedSprites.push(...centralHubRender.ySortedSprites);
+    this.runestoneSprites.push(...centralHubRender.runestones);
 
     // ── Step 3: Extract Special Entities ──────────────────────────────
 
@@ -877,31 +893,6 @@ export class TilemapRenderer {
           treeSprite.height = treeHeight;
           treeSprite.zIndex = (y + 1) * ts;
           this.treeSprites.push(treeSprite);
-        }
-
-        if (
-          tileId === TILE_RUNESTONE_1 ||
-          tileId === TILE_RUNESTONE_2 ||
-          tileId === TILE_RUNESTONE_3
-        ) {
-          const rsIdx =
-            tileId === TILE_RUNESTONE_1 ? 0 : tileId === TILE_RUNESTONE_2 ? 1 : 2;
-          const rsTex = assets.runestoneTextures[rsIdx][0]; // start inactive
-          const rsSprite = new Sprite(rsTex);
-          rsSprite.anchor.set(0.5, 1.0);
-          rsSprite.x = x * ts + ts / 2;
-          rsSprite.y = (y + 1) * ts;
-          rsSprite.width = 16;
-          rsSprite.height = 32;
-          rsSprite.zIndex = (y + 1) * ts;
-
-          this.runestoneSprites.push({
-            sprite: rsSprite,
-            index: rsIdx,
-            tileX: x,
-            tileY: y,
-            activated: false,
-          });
         }
       }
     }
@@ -1120,6 +1111,11 @@ export class TilemapRenderer {
       sprite.destroy({ children: true });
     }
 
+    for (const sprite of this.centralHubYSortedSprites) {
+      sprite.parent?.removeChild(sprite);
+      sprite.destroy();
+    }
+
     for (const rs of this.runestoneSprites) {
       rs.sprite.parent?.removeChild(rs.sprite);
       rs.sprite.destroy();
@@ -1146,6 +1142,7 @@ export class TilemapRenderer {
     this.chestDeadEndSprites.length = 0;
     this.chestDeadEndVisuals.length = 0;
     this.tIntersectionDecorationSprites.length = 0;
+    this.centralHubYSortedSprites.length = 0;
     this.runestoneSprites.length = 0;
     this.gateSprites.length = 0;
     this.pressurePlateSprites.length = 0;
