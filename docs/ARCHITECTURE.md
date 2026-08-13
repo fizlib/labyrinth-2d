@@ -345,7 +345,8 @@ The client first runs a lightweight DOM app shell with these states:
 4. show Main Menu, Join by Code, or Profile;
 5. dynamically import PixiJS and preload runtime assets after Quick Play, Create Private Game, or Join Room is selected;
 6. connect to the authoritative waiting room and show its DOM lobby overlay; and
-7. build the maze only after the server sends `ROOM_JOINED` at countdown completion.
+7. restore the loading screen when the match starts, then build the maze only
+   after the server sends `ROOM_JOINED` at countdown completion.
 
 Guest profiles use `sessionStorage`, never call Supabase, and are discarded
 when the guest leaves the session or closes the browser tab. They support the

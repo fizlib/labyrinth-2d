@@ -1374,6 +1374,7 @@ const LOADING_THEME_START_SECONDS = 4;
 const LOADING_THEME_FADE_MS = 480;
 let loadingThemeUnlockCleanup: (() => void) | null = null;
 let loadingThemeFadeFrame: number | null = null;
+let loadingScreenDismissTimer: number | null = null;
 
 function getLoadingTheme(): HTMLAudioElement | null {
   return document.getElementById('loading-theme') as HTMLAudioElement | null;
@@ -1474,18 +1475,58 @@ function updateLoadingProgress(progress: number, status: string): void {
   if (percentText) percentText.textContent = `${percentage.toString().padStart(2, '0')}%`;
 }
 
+function showLoadingScreen(progress: number, status: string): void {
+  const screen = document.getElementById('loading-screen');
+  if (!screen) return;
+
+  if (loadingScreenDismissTimer !== null) {
+    window.clearTimeout(loadingScreenDismissTimer);
+    loadingScreenDismissTimer = null;
+  }
+
+  screen.classList.remove('loading-screen--complete', 'loading-screen--error');
+  screen.setAttribute('aria-busy', 'true');
+  updateLoadingProgress(progress, status);
+}
+
+function runAfterLoadingScreenPaint(task: () => void): void {
+  let started = false;
+  const runOnce = (): void => {
+    if (started) return;
+    started = true;
+    try {
+      task();
+    } catch (error) {
+      console.error('[Main] Failed to build the maze:', error);
+      showLoadingError('The maze could not be opened. Refresh to try again.');
+    }
+  };
+  const fallbackTimer = window.setTimeout(runOnce, 50);
+
+  window.requestAnimationFrame(() => {
+    window.setTimeout(() => {
+      window.clearTimeout(fallbackTimer);
+      runOnce();
+    }, 0);
+  });
+}
+
 function dismissLoadingScreen(): void {
   const screen = document.getElementById('loading-screen');
   if (!screen) return;
 
+  if (loadingScreenDismissTimer !== null) {
+    window.clearTimeout(loadingScreenDismissTimer);
+  }
+
   updateLoadingProgress(1, 'The way is open.');
   screen.setAttribute('aria-busy', 'false');
 
-  window.setTimeout(() => {
+  loadingScreenDismissTimer = window.setTimeout(() => {
+    loadingScreenDismissTimer = null;
     screen.classList.add('loading-screen--complete');
     fadeOutLoadingTheme();
   }, 240);
-  window.setTimeout(() => screen.remove(), 780);
 }
 
 function showLoadingError(message: string): void {
@@ -2166,7 +2207,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           initialState: lobby,
           isAdmin,
           onVote: (vote) => net.sendLobbyVote(vote),
-          onStartNow: () => net.sendAdminStartGame(),
+          onStartNow: () => {
+            showLoadingScreen(0.9, 'Opening the gates to the maze…');
+            net.sendAdminStartGame();
+          },
           onKick: (playerId) => net.sendAdminKickPlayer(playerId),
           onSendChat: (text) => net.sendLobbyChatMessage(text),
           onLeave: () => {
@@ -2205,6 +2249,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       isAdmin,
       resumed,
     ) => {
+      showLoadingScreen(0.92, 'Carving your path through the maze…');
+      runAfterLoadingScreenPaint(() => {
       DebugSettings.setAdminAccess(isAdmin);
       if (isAdmin && !debugUi) {
         debugUi = createDebugUI();
@@ -2450,6 +2496,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       updatePlayerNameTagScreenPositions();
       if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
       window.requestAnimationFrame(dismissLoadingScreen);
+      });
     },
 
     onTickUpdate: (gameState) => {
