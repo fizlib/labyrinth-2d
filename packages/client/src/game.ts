@@ -1162,10 +1162,8 @@ function updateDebugUI(
   ];
   const matchEnded = state.match.status === 'ended';
   for (const control of timerControls) control.disabled = matchEnded;
-  const timerInputFocused =
-    document.activeElement === debugUi.matchTimerMinutes ||
-    document.activeElement === debugUi.matchTimerSeconds;
-  if (!timerInputFocused) {
+  const timerFormFocused = debugUi.matchTimerForm.contains(document.activeElement);
+  if (!timerFormFocused) {
     const totalSeconds = Math.ceil(state.match.remainingMs / 1_000);
     debugUi.matchTimerMinutes.value = String(Math.floor(totalSeconds / 60));
     debugUi.matchTimerSeconds.value = String(totalSeconds % 60);

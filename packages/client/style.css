@@ -1185,7 +1185,7 @@ body {
   outline-offset: 3px;
 }
 
-.app-panel--join .guest-name-form input {
+.app-panel--join .display-name-form input {
   font-size: 1.35rem;
   letter-spacing: normal;
   text-transform: none;
@@ -1239,6 +1239,10 @@ body {
   border-radius: 8px;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   text-shadow: none;
+}
+
+.app-panel--join .app-status:empty {
+  display: none;
 }
 
 .field-hint {

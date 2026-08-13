@@ -40,8 +40,10 @@ import {
 
 import { Room, type SocketData } from './Room.js';
 import {
-  isSupabaseAdminVerificationConfigured,
-  verifyAdminAccessToken,
+  isSupabasePlayerVerificationConfigured,
+  isSupabaseMatchPersistenceConfigured,
+  recordMatchResult,
+  verifyPlayerAccessToken,
 } from './supabaseAdmin.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 9001;
@@ -50,6 +52,8 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 9001;
 
 const rooms: Map<string, Room> = new Map();
 const roomsByReconnectToken: Map<string, Room> = new Map();
+const roomsByUserId: Map<string, Room> = new Map();
+const pendingMatchWritesByUserId: Map<string, Promise<void>> = new Map();
 
 function generateRoomCode(): string {
   for (;;) {
@@ -65,16 +69,46 @@ function createRoom(isPublic: boolean): Room {
   const roomId = generateRoomCode();
   let room: Room;
   room = new Room(roomId, isPublic, {
-    onSeatReleased: (reconnectToken) => {
+    matchRecordingEnabled: isSupabaseMatchPersistenceConfigured,
+    onSeatReleased: (reconnectToken, userId, retainUserClaim) => {
       if (roomsByReconnectToken.get(reconnectToken) === room) {
         roomsByReconnectToken.delete(reconnectToken);
+      }
+      if (userId && !retainUserClaim && roomsByUserId.get(userId) === room) {
+        roomsByUserId.delete(userId);
       }
     },
     onEmpty: () => {
       if (rooms.get(roomId) !== room) return;
+      for (const [userId, claimedRoom] of roomsByUserId) {
+        if (claimedRoom === room) roomsByUserId.delete(userId);
+      }
       room.destroy();
       rooms.delete(roomId);
       console.info(`[Server] Destroyed empty room: ${roomId}`);
+    },
+    onMatchEnded: (record) => {
+      const write = recordMatchResult(record).catch((error) => {
+        console.error(
+          `[Match] Failed to persist match ${record.matchId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      });
+      for (const participant of record.participants) {
+        pendingMatchWritesByUserId.set(participant.profileId, write);
+      }
+      void write.finally(() => {
+        for (const participant of record.participants) {
+          if (pendingMatchWritesByUserId.get(participant.profileId) === write) {
+            pendingMatchWritesByUserId.delete(participant.profileId);
+          }
+        }
+      });
+    },
+    onMatchCompleted: (userIds) => {
+      for (const userId of userIds) {
+        if (roomsByUserId.get(userId) === room) roomsByUserId.delete(userId);
+      }
     },
   });
   rooms.set(roomId, room);
@@ -95,11 +129,7 @@ function normalizeDisplayName(value: unknown): string | null {
   return displayName.length >= 1 && displayName.length <= 32 ? displayName : null;
 }
 
-function sendError(
-  ws: uWS.WebSocket<SocketData>,
-  code: string,
-  message: string,
-): void {
+function sendError(ws: uWS.WebSocket<SocketData>, code: string, message: string): void {
   ws.send(JSON.stringify({ type: MessageType.Error, code, message }), false);
 }
 
@@ -138,8 +168,24 @@ async function handleJoinRoom(
   data.joinPending = true;
   data.displayName = displayName;
   try {
-    data.isAdmin = await verifyAdminAccessToken(msg.accessToken);
+    let identity = await verifyPlayerAccessToken(msg.accessToken);
     if (!data.connected) return;
+
+    const pendingMatchWrite = identity
+      ? pendingMatchWritesByUserId.get(identity.userId)
+      : undefined;
+    if (pendingMatchWrite) {
+      await pendingMatchWrite;
+      if (!data.connected) return;
+      identity = await verifyPlayerAccessToken(msg.accessToken);
+      if (!data.connected) return;
+    }
+
+    data.userId = identity?.userId ?? null;
+    data.isAdmin = identity?.isAdmin ?? false;
+    data.rating = identity?.rating ?? 1200;
+    data.ratedMatches = identity?.ratedMatches ?? 0;
+    if (identity) data.displayName = identity.displayName;
 
     const roomClaimedWhileVerifying = roomsByReconnectToken.get(msg.reconnectToken);
     if (roomClaimedWhileVerifying) {
@@ -149,6 +195,15 @@ async function handleJoinRoom(
       } else if (result !== 'resumed') {
         sendError(ws, 'RECONNECT_FAILED', 'That reserved seat is no longer available.');
       }
+      return;
+    }
+
+    if (data.userId && roomsByUserId.has(data.userId)) {
+      sendError(
+        ws,
+        'ACCOUNT_ALREADY_IN_ROOM',
+        'This account already has an occupied game seat.',
+      );
       return;
     }
 
@@ -191,10 +246,15 @@ async function handleJoinRoom(
     }
 
     if (!room.addPlayer(ws, msg.reconnectToken)) {
-      sendError(ws, 'JOIN_FAILED', 'The lobby could not reserve a seat. Please try again.');
+      sendError(
+        ws,
+        'JOIN_FAILED',
+        'The lobby could not reserve a seat. Please try again.',
+      );
       return;
     }
     roomsByReconnectToken.set(msg.reconnectToken, room);
+    if (data.userId) roomsByUserId.set(data.userId, room);
   } catch (error) {
     console.error(
       `[WS] Failed to join lobby for ${data.id}:`,
@@ -268,6 +328,9 @@ uWS
           connected: true,
           joinPending: false,
           isAdmin: false,
+          userId: null,
+          rating: 1200,
+          ratedMatches: 0,
         },
         req.getHeader('sec-websocket-key'),
         req.getHeader('sec-websocket-protocol'),
@@ -320,7 +383,8 @@ uWS
           }
 
           case MessageType.SendLobbyChat: {
-            if (data.roomId) rooms.get(data.roomId)?.handleSendLobbyChatMessage(data.id, msg);
+            if (data.roomId)
+              rooms.get(data.roomId)?.handleSendLobbyChatMessage(data.id, msg);
             break;
           }
 
@@ -462,7 +526,10 @@ uWS
       console.info(`  Tick rate: ${SERVER_TICK_RATE} tps`);
       console.info(`  Max players/room: ${MAX_PLAYERS_PER_ROOM}`);
       console.info(
-        `  Supabase admin verification: ${isSupabaseAdminVerificationConfigured ? 'enabled' : 'disabled'}`,
+        `  Supabase player verification: ${isSupabasePlayerVerificationConfigured ? 'enabled' : 'disabled'}`,
+      );
+      console.info(
+        `  Match result persistence: ${isSupabaseMatchPersistenceConfigured ? 'enabled' : 'disabled'}`,
       );
       console.info(`─────────────────────────────────────────────────`);
     } else {

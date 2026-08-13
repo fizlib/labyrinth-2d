@@ -8,6 +8,7 @@
 //   - Tile coordinates converted to pixel coordinates (tile.x * tileSize).
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { randomUUID } from 'node:crypto';
 import type uWS from 'uWebSockets.js';
 
 import {
@@ -67,6 +68,8 @@ import {
   getLobbyVotesRequired,
   getWardenCountForPlayers,
   MATCH_DURATION_MS,
+  INITIAL_ELO_RATING,
+  calculateTeamEloRatings,
   getSurvivorEscapeThreshold,
   getRemainingSurvivorsToEscape,
   isWithinPortalInteractionRange,
@@ -147,6 +150,10 @@ export interface SocketData {
   connected: boolean;
   joinPending: boolean;
   isAdmin: boolean;
+  /** Verified Supabase profile id, or null for a guest/unverified session. */
+  userId: string | null;
+  rating: number;
+  ratedMatches: number;
 }
 
 type PlayerSocket = uWS.WebSocket<SocketData>;
@@ -193,14 +200,58 @@ interface RoomSeat {
   id: string;
   displayName: string;
   isAdmin: boolean;
+  userId: string | null;
+  rating: number;
+  ratedMatches: number;
   reconnectToken: string;
   reservationHandle: ReturnType<typeof setTimeout> | null;
 }
 
 export interface RoomOptions {
   reconnectGraceMs?: number;
-  onSeatReleased?: (reconnectToken: string) => void;
+  matchRecordingEnabled?: boolean;
+  onSeatReleased?: (
+    reconnectToken: string,
+    userId: string | null,
+    retainUserClaim: boolean,
+  ) => void;
   onEmpty?: () => void;
+  onMatchEnded?: (record: MatchRecord) => void;
+  onMatchCompleted?: (userIds: string[]) => void;
+}
+
+interface MatchRosterEntry {
+  playerId: string;
+  displayName: string;
+  userId: string | null;
+  rating: number;
+  ratedMatches: number;
+  role: PlayerRole;
+  escaped: boolean;
+  abandoned: boolean;
+}
+
+export interface MatchParticipantRecord {
+  profileId: string;
+  displayName: string;
+  role: PlayerRole;
+  escaped: boolean;
+  abandoned: boolean;
+  ratingBefore: number;
+  ratedMatchesBefore: number;
+  ratingDelta: number;
+  ratingAfter: number;
+}
+
+export interface MatchRecord {
+  matchId: string;
+  roomId: string;
+  winner: MatchWinner;
+  playerCount: number;
+  rated: boolean;
+  startedAt: string;
+  endedAt: string;
+  participants: MatchParticipantRecord[];
 }
 
 export type ReconnectResult = 'resumed' | 'in-use' | 'not-found';
@@ -307,8 +358,23 @@ export class Room {
   private lobbyVoteAvailableAtMs = 0;
   private readonly lobbyVotes = new Set<string>();
   private readonly reconnectGraceMs: number;
-  private readonly onSeatReleased: (reconnectToken: string) => void;
+  private readonly onSeatReleased: (
+    reconnectToken: string,
+    userId: string | null,
+    retainUserClaim: boolean,
+  ) => void;
   private readonly onEmpty: () => void;
+  private readonly onMatchEnded: (record: MatchRecord) => void;
+  private readonly onMatchCompleted: (userIds: string[]) => void;
+  private readonly matchRecordingEnabled: boolean;
+
+  /** Immutable identity/role roster captured at the beginning of a match. */
+  private matchRoster: MatchRosterEntry[] = [];
+  private matchId: string | null = null;
+  private matchStartedAtMs: number | null = null;
+  private matchIsRanked = false;
+  private rankedDisabled = false;
+  private matchResultEmitted = false;
 
   /** Server wall-clock deadline, initialized when the lobby countdown completes. */
   private matchEndsAtMs: number | null = null;
@@ -420,6 +486,10 @@ export class Room {
     this.reconnectGraceMs = options.reconnectGraceMs ?? RECONNECT_GRACE_MS;
     this.onSeatReleased = options.onSeatReleased ?? (() => {});
     this.onEmpty = options.onEmpty ?? (() => {});
+    this.onMatchEnded = options.onMatchEnded ?? (() => {});
+    this.onMatchCompleted = options.onMatchCompleted ?? (() => {});
+    this.matchRecordingEnabled =
+      options.matchRecordingEnabled ?? options.onMatchEnded !== undefined;
     this.roleSeats = createEmptyRoleSeats();
     this.mapSeed = Math.floor(Math.random() * 2147483647);
     const layout = generateMazeLayout(this.mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
@@ -541,7 +611,11 @@ export class Room {
   }
 
   get isJoinable(): boolean {
-    return this.state.match.status === 'waiting' && this.countdownHandle === null && !this.isFull;
+    return (
+      this.state.match.status === 'waiting' &&
+      this.countdownHandle === null &&
+      !this.isFull
+    );
   }
 
   addPlayer(ws: PlayerSocket, reconnectToken: string): boolean {
@@ -555,6 +629,9 @@ export class Room {
       id: playerId,
       displayName,
       isAdmin: data.isAdmin,
+      userId: data.userId ?? null,
+      rating: Number.isInteger(data.rating) ? data.rating : INITIAL_ELO_RATING,
+      ratedMatches: Number.isInteger(data.ratedMatches) ? data.ratedMatches : 0,
       reconnectToken,
       reservationHandle: null,
     });
@@ -563,7 +640,8 @@ export class Room {
     this.revealedWisdomBridges.set(playerId, new Set());
     this.revealedWisdomSwamps.set(playerId, new Set());
 
-    if (this.playerCount === 1) this.lobbyVoteAvailableAtMs = Date.now() + LOBBY_VOTE_DELAY_MS;
+    if (this.playerCount === 1)
+      this.lobbyVoteAvailableAtMs = Date.now() + LOBBY_VOTE_DELAY_MS;
     data.roomId = this.id;
 
     this.sendLobbyJoined(ws, playerId);
@@ -591,6 +669,9 @@ export class Room {
     data.id = seat.id;
     data.displayName = seat.displayName;
     data.isAdmin = seat.isAdmin;
+    data.userId = seat.userId;
+    data.rating = seat.rating;
+    data.ratedMatches = seat.ratedMatches;
     data.roomId = this.id;
 
     const player = this.state.players.find((candidate) => candidate.id === seat.id);
@@ -659,13 +740,23 @@ export class Room {
     this.revealedWisdomBridges.delete(playerId);
     this.revealedWisdomSwamps.delete(playerId);
     this.lobbyVotes.delete(playerId);
-    this.onSeatReleased(seat.reconnectToken);
+    this.onSeatReleased(
+      seat.reconnectToken,
+      seat.userId,
+      this.state.match.status === 'running',
+    );
     for (const cage of this.cageStates) {
       if (cage.prisonerPlayerId !== playerId || cage.vacated) continue;
       cage.opened = true;
       cage.vacated = true;
     }
     const wasWaiting = this.state.match.status === 'waiting';
+    if (this.state.match.status === 'running') {
+      const participant = this.matchRoster.find(
+        (candidate) => candidate.playerId === playerId,
+      );
+      if (participant) participant.abandoned = true;
+    }
     this.state.players = this.state.players.filter((p) => p.id !== playerId);
 
     if (wasWaiting) {
@@ -753,13 +844,14 @@ export class Room {
   /** Allow a verified administrator to bypass all lobby start conditions. */
   handleAdminStartGame(playerId: string): void {
     if (
-      this.state.match.status !== 'waiting'
-      || this.playerCount === 0
-      || !this.allSeatsConnected
-      || !this.isAdmin(playerId)
+      this.state.match.status !== 'waiting' ||
+      this.playerCount === 0 ||
+      !this.allSeatsConnected ||
+      !this.isAdmin(playerId)
     ) {
       return;
     }
+    this.disableRanking('administrator bypassed normal lobby start');
     console.info(`[Room:${this.id}] Admin ${playerId} started the match immediately`);
     this.startMatch();
   }
@@ -767,13 +859,15 @@ export class Room {
   /** Allow a verified administrator to permanently remove another lobby seat. */
   handleAdminKickPlayer(requesterId: string, msg: AdminKickPlayerMessage): void {
     if (
-      this.state.match.status !== 'waiting'
-      || !this.isAdmin(requesterId)
-      || msg.playerId === requesterId
-      || !this.seats.has(msg.playerId)
+      this.state.match.status !== 'waiting' ||
+      !this.isAdmin(requesterId) ||
+      msg.playerId === requesterId ||
+      !this.seats.has(msg.playerId)
     ) {
       return;
     }
+
+    this.disableRanking('administrator changed the lobby roster');
 
     const targetSeat = this.seats.get(msg.playerId)!;
     const targetSocket = this.sockets.get(msg.playerId);
@@ -863,6 +957,7 @@ export class Room {
     if (!this.isAdmin(playerId) || !this.canPlayerAct(playerId)) return;
     const player = this.state.players.find((p) => p.id === playerId);
     if (!player) return;
+    this.disableRanking('debug teleport used');
     this.clearQueuedInputs(player);
     this.bridgeTraversals.delete(playerId);
     this.bridgeRepairOccupancy.delete(playerId);
@@ -874,10 +969,7 @@ export class Room {
   }
 
   /** Debug: replace the authoritative time remaining for the running match. */
-  handleDebugSetMatchTime(
-    requesterId: string,
-    msg: DebugSetMatchTimeMessage,
-  ): void {
+  handleDebugSetMatchTime(requesterId: string, msg: DebugSetMatchTimeMessage): void {
     if (!this.isAdmin(requesterId) || !this.isMatchRunning()) return;
     if (
       typeof msg.remainingMs !== 'number' ||
@@ -887,6 +979,8 @@ export class Room {
     ) {
       return;
     }
+
+    this.disableRanking('debug match timer used');
 
     const now = Date.now();
     this.matchEndsAtMs = now + msg.remainingMs;
@@ -913,6 +1007,8 @@ export class Room {
     const requester = this.state.players.find((player) => player.id === requesterId);
     const target = this.state.players.find((player) => player.id === msg.targetPlayerId);
     if (!requester || !target) return;
+
+    this.disableRanking('debug player action used');
 
     switch (msg.action) {
       case 'teleport-to':
@@ -1069,6 +1165,13 @@ export class Room {
     return this.seats.get(playerId)?.isAdmin === true && this.sockets.has(playerId);
   }
 
+  private disableRanking(reason: string): void {
+    if (this.rankedDisabled) return;
+    this.rankedDisabled = true;
+    this.matchIsRanked = false;
+    console.info(`[Room:${this.id}] Elo disabled: ${reason}`);
+  }
+
   private getLobbyState(): LobbyState {
     return {
       roomId: this.id,
@@ -1170,7 +1273,10 @@ export class Room {
       teamSlot: Math.floor(index / MAX_TEAMS),
     }));
     const occupiedTeams = Array.from(new Set(seats.map((seat) => seat.teamId)));
-    const wardenTeams = shuffle(occupiedTeams).slice(0, getWardenCountForPlayers(seats.length));
+    const wardenTeams = shuffle(occupiedTeams).slice(
+      0,
+      getWardenCountForPlayers(seats.length),
+    );
     const wardenIds = new Set(
       wardenTeams.map((teamId) => {
         const teamSeats = seats.filter((seat) => seat.teamId === teamId);
@@ -1203,6 +1309,36 @@ export class Room {
     });
   }
 
+  private captureStartingRoster(now: number): void {
+    this.matchId = randomUUID();
+    this.matchStartedAtMs = now;
+    this.matchResultEmitted = false;
+    this.matchRoster = this.state.players.map((player) => {
+      const seat = this.seats.get(player.id)!;
+      return {
+        playerId: player.id,
+        displayName: player.displayName,
+        userId: seat.userId,
+        rating: seat.rating,
+        ratedMatches: seat.ratedMatches,
+        role: player.role,
+        escaped: false,
+        abandoned: false,
+      };
+    });
+
+    const authenticatedIds = this.matchRoster
+      .map((participant) => participant.userId)
+      .filter((userId): userId is string => userId !== null);
+    this.matchIsRanked =
+      this.matchRecordingEnabled &&
+      this.isPublic &&
+      !this.rankedDisabled &&
+      this.matchRoster.length === LOBBY_MAX_PLAYERS &&
+      authenticatedIds.length === this.matchRoster.length &&
+      new Set(authenticatedIds).size === authenticatedIds.length;
+  }
+
   private startMatch(): void {
     if (
       this.state.match.status !== 'waiting' ||
@@ -1214,6 +1350,7 @@ export class Room {
     this.cancelLobbyCountdown();
     this.createMatchPlayers();
     const now = Date.now();
+    this.captureStartingRoster(now);
     this.matchEndsAtMs = now + MATCH_DURATION_MS;
     this.state.match.status = 'running';
     this.state.match.winner = null;
@@ -1229,7 +1366,7 @@ export class Room {
 
     this.startLoop();
     console.info(
-      `[Room:${this.id}] Match started with ${this.playerCount} players; deadline in 10 minutes`,
+      `[Room:${this.id}] Match started with ${this.playerCount} players; deadline in 10 minutes; ${this.matchIsRanked ? 'ranked' : 'unranked'}`,
     );
   }
 
@@ -1260,7 +1397,9 @@ export class Room {
   private canPlayerAct(playerId: string): boolean {
     if (!this.isMatchRunning()) return false;
     const player = this.state.players.find((candidate) => candidate.id === playerId);
-    return Boolean(player && player.connected && !player.escaped && this.sockets.has(playerId));
+    return Boolean(
+      player && player.connected && !player.escaped && this.sockets.has(playerId),
+    );
   }
 
   private checkSurvivorVictory(): void {
@@ -1271,8 +1410,7 @@ export class Room {
     const occupiedSurvivors = occupiedSurvivorPlayers.length;
     this.syncMatchCounts();
     const allOccupiedSurvivorsEscaped =
-      occupiedSurvivors > 0 &&
-      occupiedSurvivorPlayers.every((player) => player.escaped);
+      occupiedSurvivors > 0 && occupiedSurvivorPlayers.every((player) => player.escaped);
     if (
       allOccupiedSurvivorsEscaped ||
       (occupiedSurvivors > 0 &&
@@ -1289,11 +1427,19 @@ export class Room {
     this.refreshMatchTime(now);
     this.state.match.status = 'ended';
     this.state.match.winner = winner;
-    this.state.match.finalRoster = this.state.players.map((player) => ({
-      playerId: player.id,
-      displayName: player.displayName,
-      role: player.role,
-      escaped: player.escaped,
+    for (const participant of this.matchRoster) {
+      const player = this.state.players.find(
+        (candidate) => candidate.id === participant.playerId,
+      );
+      if (!player) continue;
+      participant.role = player.role;
+      participant.escaped = player.escaped;
+    }
+    this.state.match.finalRoster = this.matchRoster.map((participant) => ({
+      playerId: participant.playerId,
+      displayName: participant.displayName,
+      role: participant.role,
+      escaped: participant.escaped,
     }));
     for (const player of this.state.players) this.clearQueuedInputs(player);
 
@@ -1313,9 +1459,91 @@ export class Room {
     };
     this.broadcast(endedMessage);
     this.stopLoop();
+    this.emitMatchResult(winner, now);
+    this.onMatchCompleted(
+      this.matchRoster
+        .map((participant) => participant.userId)
+        .filter((userId): userId is string => userId !== null),
+    );
     console.info(
       `[Room:${this.id}] Match ended: ${winner} win (${this.state.match.escapedCount}/${this.state.match.escapeThreshold} escapes)`,
     );
+  }
+
+  private emitMatchResult(winner: MatchWinner, endedAtMs: number): void {
+    if (
+      !this.matchRecordingEnabled ||
+      this.matchResultEmitted ||
+      !this.matchId ||
+      this.matchStartedAtMs === null
+    ) {
+      return;
+    }
+    this.matchResultEmitted = true;
+
+    try {
+      const authenticatedRoster = this.matchRoster.filter(
+        (participant): participant is MatchRosterEntry & { userId: string } =>
+          participant.userId !== null,
+      );
+
+      const eloResults = this.matchIsRanked
+        ? calculateTeamEloRatings(
+            authenticatedRoster.map((participant) => ({
+              playerId: participant.playerId,
+              role: participant.role,
+              rating: participant.rating,
+              matchesPlayed: participant.ratedMatches,
+            })),
+            winner,
+          )
+        : authenticatedRoster.map((participant) => ({
+            playerId: participant.playerId,
+            role: participant.role,
+            rating: participant.rating,
+            matchesPlayed: participant.ratedMatches,
+            expectedScore: 0,
+            actualScore: 0 as const,
+            kFactor: 0,
+            ratingDelta: 0,
+            ratingAfter: participant.rating,
+          }));
+      const eloByPlayerId = new Map(
+        eloResults.map((result) => [result.playerId, result]),
+      );
+      const participants: MatchParticipantRecord[] = authenticatedRoster.map(
+        (participant) => {
+          const elo = eloByPlayerId.get(participant.playerId)!;
+          return {
+            profileId: participant.userId,
+            displayName: participant.displayName,
+            role: participant.role,
+            escaped: participant.escaped,
+            abandoned: participant.abandoned,
+            ratingBefore: elo.rating,
+            ratedMatchesBefore: elo.matchesPlayed,
+            ratingDelta: elo.ratingDelta,
+            ratingAfter: elo.ratingAfter,
+          };
+        },
+      );
+
+      this.onMatchEnded({
+        matchId: this.matchId,
+        roomId: this.id,
+        winner,
+        playerCount: this.matchRoster.length,
+        rated: this.matchIsRanked,
+        startedAt: new Date(this.matchStartedAtMs).toISOString(),
+        endedAt: new Date(endedAtMs).toISOString(),
+        participants,
+      });
+    } catch (error) {
+      console.error(
+        `[Room:${this.id}] Failed to prepare match result:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   /** Reply privately with a selected player's authoritative role for debug UI. */
@@ -2629,7 +2857,8 @@ export class Room {
       tick: this.state.tick,
       match: {
         ...this.state.match,
-        finalRoster: this.state.match.finalRoster?.map((player) => ({ ...player })) ?? null,
+        finalRoster:
+          this.state.match.finalRoster?.map((player) => ({ ...player })) ?? null,
       },
       players: this.state.players.map(toPublicPlayerInfo),
       runestones: this.runestones.map((r) => ({ ...r })),
@@ -2661,6 +2890,7 @@ export class Room {
     this.bridgeFailureFeedbackExpirations.clear();
     this.bridgeRepairOccupancy.clear();
     this.bridgeRepairs.clear();
+    this.matchRoster = [];
     this.state.players = [];
   }
 }

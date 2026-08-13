@@ -14,6 +14,9 @@ class FakeSocket {
       connected: true,
       joinPending: false,
       isAdmin: false,
+      userId: null,
+      rating: 1200,
+      ratedMatches: 0,
     };
   }
 
@@ -175,7 +178,11 @@ test('debug timer changes the authoritative deadline and zero triggers timeout',
     type: 'DEBUG_SET_MATCH_TIME',
     remainingMs: 90_000,
   });
-  assert.equal(room.matchEndsAtMs, originalDeadline, 'regular players cannot use debug tools');
+  assert.equal(
+    room.matchEndsAtMs,
+    originalDeadline,
+    'regular players cannot use debug tools',
+  );
 
   sockets[0].data.isAdmin = true;
   room.seats.get('player-0').isAdmin = true;
@@ -208,4 +215,141 @@ test('debug timer changes the authoritative deadline and zero triggers timeout',
   assert.equal(room.state.match.status, 'ended');
   assert.equal(room.state.match.winner, 'wardens');
   assert.equal(room.state.match.remainingMs, 0);
+});
+
+test('authenticated public starting rosters emit one Elo result', (t) => {
+  const records = [];
+  const room = new Room(`ranked-${Math.random()}`, true, {
+    matchRecordingEnabled: true,
+    onMatchEnded: (record) => records.push(record),
+  });
+  t.after(() => room.destroy());
+
+  for (let index = 0; index < 9; index++) {
+    const socket = new FakeSocket(`ranked-player-${index}`);
+    socket.data.userId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    socket.data.ratedMatches = 10;
+    room.addPlayer(socket, `ranked-token-${index}`);
+  }
+
+  room.startMatch();
+  room.endMatch('survivors', Date.now());
+  room.endMatch('wardens', Date.now());
+
+  assert.equal(records.length, 1);
+  assert.equal(records[0].rated, true);
+  assert.equal(records[0].participants.length, 9);
+  assert.ok(
+    records[0].participants.every((participant) => participant.ratedMatchesBefore === 10),
+  );
+  for (const participant of records[0].participants) {
+    assert.equal(participant.ratingDelta, participant.role === 'survivor' ? 12 : -12);
+  }
+});
+
+test('ranked results retain and mark players who abandoned the starting roster', (t) => {
+  const records = [];
+  const room = new Room(`ranked-leaver-${Math.random()}`, true, {
+    matchRecordingEnabled: true,
+    onMatchEnded: (record) => records.push(record),
+  });
+  t.after(() => room.destroy());
+
+  for (let index = 0; index < 9; index++) {
+    const socket = new FakeSocket(`ranked-leaver-${index}`);
+    socket.data.userId = `10000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    room.addPlayer(socket, `ranked-leaver-token-${index}`);
+  }
+
+  room.startMatch();
+  const leaver = room.state.players.find((player) => player.role === 'warden');
+  assert.ok(leaver);
+  const leaverProfileId = room.seats.get(leaver.id).userId;
+  room.removePlayer(leaver.id);
+  room.endMatch('survivors', Date.now());
+
+  assert.equal(records.length, 1);
+  const recordedLeaver = records[0].participants.find(
+    (participant) => participant.profileId === leaverProfileId,
+  );
+  assert.ok(recordedLeaver);
+  assert.equal(recordedLeaver.abandoned, true);
+  assert.equal(room.state.match.finalRoster.length, 9);
+});
+
+test('private, guest-containing, guest-only, and underfilled matches record without Elo', (t) => {
+  const records = [];
+  const options = {
+    matchRecordingEnabled: true,
+    onMatchEnded: (record) => {
+      records.push(record);
+    },
+  };
+  const privateRoom = new Room(`private-${Math.random()}`, false, options);
+  const publicRoom = new Room(`guest-public-${Math.random()}`, true, options);
+  const guestOnlyRoom = new Room(`guest-only-${Math.random()}`, true, options);
+  const underfilledRoom = new Room(`underfilled-public-${Math.random()}`, true, options);
+  t.after(() => privateRoom.destroy());
+  t.after(() => publicRoom.destroy());
+  t.after(() => guestOnlyRoom.destroy());
+  t.after(() => underfilledRoom.destroy());
+
+  for (let index = 0; index < 6; index++) {
+    const privateSocket = new FakeSocket(`private-player-${index}`);
+    privateSocket.data.userId = `20000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    privateRoom.addPlayer(privateSocket, `private-token-${index}`);
+
+    const publicSocket = new FakeSocket(`public-player-${index}`);
+    if (index > 0) {
+      publicSocket.data.userId = `30000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    }
+    publicRoom.addPlayer(publicSocket, `public-token-${index}`);
+
+    const underfilledSocket = new FakeSocket(`underfilled-player-${index}`);
+    underfilledSocket.data.userId = `40000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    underfilledRoom.addPlayer(underfilledSocket, `underfilled-token-${index}`);
+  }
+
+  guestOnlyRoom.addPlayer(new FakeSocket('guest-only-player'), 'guest-only-token');
+
+  privateRoom.startMatch();
+  publicRoom.startMatch();
+  guestOnlyRoom.startMatch();
+  underfilledRoom.startMatch();
+  privateRoom.endMatch('wardens', Date.now());
+  publicRoom.endMatch('wardens', Date.now());
+  guestOnlyRoom.endMatch('wardens', Date.now());
+  underfilledRoom.endMatch('wardens', Date.now());
+
+  assert.equal(records.length, 4);
+  const privateRecord = records.find((record) => record.roomId === privateRoom.id);
+  const guestRecord = records.find((record) => record.roomId === publicRoom.id);
+  const guestOnlyRecord = records.find((record) => record.roomId === guestOnlyRoom.id);
+  const underfilledRecord = records.find(
+    (record) => record.roomId === underfilledRoom.id,
+  );
+  assert.ok(privateRecord);
+  assert.ok(guestRecord);
+  assert.ok(guestOnlyRecord);
+  assert.ok(underfilledRecord);
+  assert.equal(privateRecord.rated, false);
+  assert.equal(privateRecord.playerCount, 6);
+  assert.equal(privateRecord.participants.length, 6);
+  assert.equal(guestRecord.rated, false);
+  assert.equal(guestRecord.playerCount, 6);
+  assert.equal(guestRecord.participants.length, 5);
+  assert.equal(guestOnlyRecord.rated, false);
+  assert.equal(guestOnlyRecord.playerCount, 1);
+  assert.equal(guestOnlyRecord.participants.length, 0);
+  assert.equal(underfilledRecord.rated, false);
+  assert.equal(underfilledRecord.playerCount, 6);
+  assert.equal(underfilledRecord.participants.length, 6);
+  assert.ok(
+    records.every((record) =>
+      record.participants.every(
+        (participant) =>
+          participant.ratingDelta === 0 && participant.ratingAfter === 1200,
+      ),
+    ),
+  );
 });

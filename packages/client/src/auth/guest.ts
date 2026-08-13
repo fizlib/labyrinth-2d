@@ -16,12 +16,42 @@ function randomUint32(): number {
   return Math.floor(Math.random() * UINT32_RANGE);
 }
 
-function randomGuestSuffix(): string {
-  return String(randomUint32() % 10_000).padStart(4, '0');
+const GUEST_NAME_ADJECTIVES = [
+  'Brave',
+  'Bright',
+  'Clever',
+  'Curious',
+  'Daring',
+  'Gentle',
+  'Hidden',
+  'Lucky',
+  'Merry',
+  'Misty',
+  'Quiet',
+  'Swift',
+] as const;
+
+const GUEST_NAME_NOUNS = [
+  'Badger',
+  'Compass',
+  'Falcon',
+  'Fox',
+  'Lantern',
+  'Otter',
+  'Owl',
+  'Raven',
+  'Rover',
+  'Sparrow',
+  'Torch',
+  'Wanderer',
+] as const;
+
+function randomItem<T>(items: readonly T[]): T {
+  return items[randomUint32() % items.length]!;
 }
 
 export function suggestGuestDisplayName(): string {
-  return `Guest ${randomGuestSuffix()}`;
+  return `${randomItem(GUEST_NAME_ADJECTIVES)} ${randomItem(GUEST_NAME_NOUNS)}`;
 }
 
 function guestId(): string {
@@ -82,6 +112,7 @@ export function loadGuestProfile(): Profile | null {
       display_name: values.displayName,
       avatar_url: values.avatarUrl,
       is_admin: false,
+      display_name_chosen: true,
       created_at: candidate.created_at,
       updated_at: candidate.updated_at,
     };
@@ -99,6 +130,7 @@ export function createGuestProfile(displayName: string): Profile {
     display_name: values.displayName,
     avatar_url: values.avatarUrl,
     is_admin: false,
+    display_name_chosen: true,
     created_at: now,
     updated_at: now,
   };

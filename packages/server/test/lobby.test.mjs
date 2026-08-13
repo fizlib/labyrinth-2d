@@ -14,6 +14,9 @@ class FakeSocket {
       connected: true,
       joinPending: false,
       isAdmin,
+      userId: null,
+      rating: 1200,
+      ratedMatches: 0,
     };
   }
 
@@ -102,9 +105,15 @@ test('only admins can kick another player from a waiting lobby', (t) => {
   assert.equal(room.playerCount, 1);
   assert.equal(regularSocket.data.roomId, null);
   assert.ok(regularSocket.sent.some((message) => message.type === 'LOBBY_KICKED'));
-  assert.equal(room.reconnectPlayer(new FakeSocket('replacement'), 'regular-token'), 'not-found');
+  assert.equal(
+    room.reconnectPlayer(new FakeSocket('replacement'), 'regular-token'),
+    'not-found',
+  );
   const latest = adminSocket.sent.findLast((message) => message.type === 'LOBBY_UPDATED');
-  assert.deepEqual(latest.lobby.players.map((player) => player.id), ['admin-player']);
+  assert.deepEqual(
+    latest.lobby.players.map((player) => player.id),
+    ['admin-player'],
+  );
 });
 
 test('six players can vote into a countdown and receive balanced private match seats', (t) => {
@@ -172,7 +181,9 @@ test('lobby chat is room-wide, normalized, and rate limited', (t) => {
   });
 
   for (const socket of sockets) {
-    const messages = socket.sent.filter((message) => message.type === 'LOBBY_CHAT_MESSAGE');
+    const messages = socket.sent.filter(
+      (message) => message.type === 'LOBBY_CHAT_MESSAGE',
+    );
     assert.equal(messages.length, 1);
     assert.equal(messages[0].text, 'hello explorers');
   }
@@ -203,9 +214,17 @@ test('a lobby disconnect reserves the seat, cancels countdown, and resumes the s
   assert.equal(room.reconnectPlayer(replacement, 'token-0'), 'resumed');
   assert.equal(replacement.data.id, 'player-0');
   assert.equal(room.connectedPlayerCount, 9);
-  assert.notEqual(room.countdownHandle, null, 'a full connected roster starts a fresh countdown');
+  assert.notEqual(
+    room.countdownHandle,
+    null,
+    'a full connected roster starts a fresh countdown',
+  );
   assert.ok(replacement.sent.some((message) => message.type === 'LOBBY_JOINED'));
-  assert.equal(room.disconnectPlayer('player-0', sockets[0]), false, 'stale closes are ignored');
+  assert.equal(
+    room.disconnectPlayer('player-0', sockets[0]),
+    false,
+    'stale closes are ignored',
+  );
   assert.equal(room.connectedPlayerCount, 9);
 });
 
@@ -220,7 +239,10 @@ test('reserved seats cannot be replaced and live seats cannot be reclaimed twice
   const replacement = new FakeSocket('temporary-id');
   assert.equal(room.reconnectPlayer(replacement, 'token-0'), 'resumed');
   assert.equal(room.reconnectPlayer(new FakeSocket('duplicate'), 'token-0'), 'in-use');
-  assert.equal(room.reconnectPlayer(new FakeSocket('unknown'), 'missing-token'), 'not-found');
+  assert.equal(
+    room.reconnectPlayer(new FakeSocket('unknown'), 'missing-token'),
+    'not-found',
+  );
 });
 
 test('active-match reconnect preserves private state and victory thresholds', (t) => {
@@ -248,8 +270,14 @@ test('active-match reconnect preserves private state and victory thresholds', (t
   assert.equal(joined.playerId, player.id);
   assert.equal(joined.role, player.role);
   assert.equal(joined.wisdomOrbs, 2);
-  assert.equal(joined.gameState.players.find((candidate) => candidate.id === player.id).x, player.x);
-  assert.equal(joined.gameState.players.find((candidate) => candidate.id === player.id).connected, true);
+  assert.equal(
+    joined.gameState.players.find((candidate) => candidate.id === player.id).x,
+    player.x,
+  );
+  assert.equal(
+    joined.gameState.players.find((candidate) => candidate.id === player.id).connected,
+    true,
+  );
 });
 
 test('temporarily disconnected match players are inert in occupancy interactions', (t) => {
@@ -260,9 +288,7 @@ test('temporarily disconnected match players are inert in occupancy interactions
   const disconnectedSurvivor = room.state.players.find(
     (player) => player.id === 'player-0',
   );
-  const connectedWarden = room.state.players.find(
-    (player) => player.id === 'player-1',
-  );
+  const connectedWarden = room.state.players.find((player) => player.id === 'player-1');
   assert.ok(disconnectedSurvivor);
   assert.ok(connectedWarden);
   disconnectedSurvivor.role = 'survivor';
@@ -311,21 +337,31 @@ test('active-match expiry performs the final removal only after grace', async (t
   const originalThreshold = room.state.match.escapeThreshold;
 
   room.disconnectPlayer(player.id, sockets[0]);
-  assert.equal(room.state.players.some((candidate) => candidate.id === player.id), true);
+  assert.equal(
+    room.state.players.some((candidate) => candidate.id === player.id),
+    true,
+  );
   assert.equal(room.state.match.escapeThreshold, originalThreshold);
 
   await delay(30);
-  assert.equal(room.state.players.some((candidate) => candidate.id === player.id), false);
-  assert.ok(sockets[1].sent.some(
-    (message) => message.type === 'PLAYER_LEFT' && message.playerId === player.id,
-  ));
+  assert.equal(
+    room.state.players.some((candidate) => candidate.id === player.id),
+    false,
+  );
+  assert.ok(
+    sockets[1].sent.some(
+      (message) => message.type === 'PLAYER_LEFT' && message.playerId === player.id,
+    ),
+  );
 });
 
 test('grace expiry and explicit leave permanently release seats', async (t) => {
   let emptyNotifications = 0;
   const { room, sockets } = createLobby(1, {
     reconnectGraceMs: 15,
-    onEmpty: () => { emptyNotifications++; },
+    onEmpty: () => {
+      emptyNotifications++;
+    },
   });
   t.after(() => room.destroy());
 
@@ -343,7 +379,10 @@ test('grace expiry and explicit leave permanently release seats', async (t) => {
   assert.equal(explicitRoom.removePlayer('explicit-player'), true);
   assert.equal(explicitRoom.playerCount, 0);
   await delay(25);
-  assert.equal(explicitRoom.reconnectPlayer(new FakeSocket('late'), 'explicit-token'), 'not-found');
+  assert.equal(
+    explicitRoom.reconnectPlayer(new FakeSocket('late'), 'explicit-token'),
+    'not-found',
+  );
 });
 
 test('ended matches can be reclaimed during the grace window', (t) => {

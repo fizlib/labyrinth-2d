@@ -9,9 +9,11 @@ import {
   configureSupabase,
   getOAuthErrorFromUrl,
   getOAuthRedirectUrl,
+  loadPlayerStats,
   loadOrCreateProfile,
   updateProfile,
   type Profile,
+  type PlayerStats,
   type Session,
 } from './auth/supabase';
 import {
@@ -37,6 +39,7 @@ type AppView =
   | 'profile-loading'
   | 'profile-error'
   | 'guest-name'
+  | 'account-name'
   | 'menu'
   | 'join'
   | 'profile'
@@ -208,6 +211,7 @@ class AppController {
   private readonly configuration = configureSupabase();
   private session: Session | null = null;
   private profile: Profile | null = null;
+  private playerStats: PlayerStats | null = null;
   private identityMode: IdentityMode | null = null;
   private view: AppView = 'restoring';
   private authError: string | null = null;
@@ -217,7 +221,9 @@ class AppController {
   private gameLaunchStarted = false;
   private restoringInitialSession = true;
   private pendingRoomCode = (() => {
-    const code = normalizeRoomCode(new URL(window.location.href).searchParams.get('room'));
+    const code = normalizeRoomCode(
+      new URL(window.location.href).searchParams.get('room'),
+    );
     return isValidRoomCode(code) ? code : null;
   })();
 
@@ -238,12 +244,10 @@ class AppController {
     }
 
     const oauthError = getOAuthErrorFromUrl();
-    client.auth.onAuthStateChange(
-      (event: AuthChangeEvent, session: Session | null) => {
-        if (this.restoringInitialSession && event === 'INITIAL_SESSION') return;
-        window.setTimeout(() => void this.handleAuthChange(event, session), 0);
-      },
-    );
+    client.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      if (this.restoringInitialSession && event === 'INITIAL_SESSION') return;
+      window.setTimeout(() => void this.handleAuthChange(event, session), 0);
+    });
 
     try {
       const { data, error } = await client.auth.getSession();
@@ -259,6 +263,7 @@ class AppController {
     } catch (error) {
       this.session = null;
       this.profile = null;
+      this.playerStats = null;
       this.authError = errorMessage(error, 'Unable to restore your session.');
       this.view = 'auth';
       this.renderAuth();
@@ -268,18 +273,22 @@ class AppController {
     }
   }
 
-  private async handleAuthChange(event: AuthChangeEvent, session: Session | null): Promise<void> {
+  private async handleAuthChange(
+    event: AuthChangeEvent,
+    session: Session | null,
+  ): Promise<void> {
     if (this.identityMode === 'guest') {
       if (!session) return;
       clearGuestProfile();
       this.identityMode = null;
       this.profile = null;
+      this.playerStats = null;
     }
 
     if (
-      !session
-      && this.identityMode === 'authenticated'
-      && (this.view === 'launching-game' || this.view === 'game')
+      !session &&
+      this.identityMode === 'authenticated' &&
+      (this.view === 'launching-game' || this.view === 'game')
     ) {
       window.dispatchEvent(new Event(RELEASE_ROOM_EVENT));
       clearReconnectSession();
@@ -303,6 +312,7 @@ class AppController {
       if (this.identityMode === 'guest') return;
       this.identityMode = null;
       this.profile = null;
+      this.playerStats = null;
       this.profileError = null;
       this.view = 'auth';
       this.renderAuth();
@@ -312,7 +322,15 @@ class AppController {
     this.identityMode = 'authenticated';
 
     if (this.profile?.id === session.user.id) {
-      if (this.view !== 'profile' && this.view !== 'launching-game' && this.view !== 'game') {
+      if (!this.profile.display_name_chosen) {
+        if (this.view !== 'account-name') this.renderAccountName();
+        return;
+      }
+      if (
+        this.view !== 'profile' &&
+        this.view !== 'launching-game' &&
+        this.view !== 'game'
+      ) {
         this.view = 'menu';
         this.renderMenu();
       }
@@ -324,15 +342,25 @@ class AppController {
 
     try {
       const profile = await loadOrCreateProfile(this.configuration.client!, session.user);
+      const playerStats = await loadPlayerStats(
+        this.configuration.client!,
+        session.user.id,
+      );
       if (revision !== this.sessionRevision) return;
       this.profile = profile;
+      this.playerStats = playerStats;
       this.profileError = null;
       this.authError = null;
+      if (!profile.display_name_chosen) {
+        this.renderAccountName();
+        return;
+      }
       this.view = 'menu';
       this.renderMenu();
     } catch (error) {
       if (revision !== this.sessionRevision) return;
       this.profile = null;
+      this.playerStats = null;
       this.profileError = errorMessage(error, 'Unable to load your profile.');
       this.view = 'profile-error';
       this.renderProfileError();
@@ -340,7 +368,8 @@ class AppController {
   }
 
   private renderRestoring(status: string): void {
-    root.innerHTML = shellMarkup(`
+    root.innerHTML = shellMarkup(
+      `
       <section class="loading-screen__content loading-screen__content--restoring" role="status" aria-live="polite" aria-busy="true">
         <div class="loading-screen__progress-frame">
           <div
@@ -352,12 +381,15 @@ class AppController {
         <div class="loading-screen__readout">
           <span>${escapeHtml(status)}</span>
         </div>
-      </section>`, 'app-screen--loading');
+      </section>`,
+      'app-screen--loading',
+    );
   }
 
   private renderAuth(): void {
     const configured = this.configuration.client !== null;
-    root.innerHTML = shellMarkup(`
+    root.innerHTML = shellMarkup(
+      `
       <section class="app-panel app-panel--auth" aria-labelledby="auth-title">
         <div class="app-brand">
           <img class="app-brand__logo" src="/assets/home/false-arrow-logo.png" alt="False Arrow" />
@@ -382,23 +414,30 @@ class AppController {
         </button>
         <p id="auth-status" class="app-status" aria-live="polite"></p>
         <p class="app-panel__fineprint">Guest progress won’t be saved.</p>
-      </section>`, 'app-screen--auth');
+      </section>`,
+      'app-screen--auth',
+    );
 
-    document.querySelector<HTMLButtonElement>('#google-sign-in')?.addEventListener('click', () => {
-      void this.signInWithGoogle();
-    });
-    document.querySelector<HTMLButtonElement>('#guest-sign-in')?.addEventListener('click', () => {
-      const guestProfile = loadGuestProfile();
-      if (guestProfile) this.enterGuestMode(guestProfile);
-      else this.renderGuestName();
-    });
+    document
+      .querySelector<HTMLButtonElement>('#google-sign-in')
+      ?.addEventListener('click', () => {
+        void this.signInWithGoogle();
+      });
+    document
+      .querySelector<HTMLButtonElement>('#guest-sign-in')
+      ?.addEventListener('click', () => {
+        const guestProfile = loadGuestProfile();
+        if (guestProfile) this.enterGuestMode(guestProfile);
+        else this.renderGuestName();
+      });
   }
 
   private renderGuestName(): void {
     this.view = 'guest-name';
-    root.innerHTML = shellMarkup(`
+    root.innerHTML = shellMarkup(
+      `
       <section class="app-panel app-panel--join" aria-label="Choose your explorer name">
-        <form id="guest-name-form" class="join-room-form guest-name-form" novalidate>
+        <form id="guest-name-form" class="join-room-form display-name-form" novalidate>
           <label for="guest-display-name">Choose your explorer name</label>
           <input id="guest-display-name" name="displayName" type="text" maxlength="32" required autocomplete="nickname" enterkeyhint="go" value="${escapeHtml(suggestGuestDisplayName())}" />
           <div id="guest-name-error" class="app-alert app-alert--error" role="alert" hidden></div>
@@ -407,35 +446,119 @@ class AppController {
             <button class="pixel-button pixel-button--primary" type="submit">Continue</button>
           </div>
         </form>
-      </section>`, 'app-screen--join');
+      </section>`,
+      'app-screen--join',
+    );
 
     const input = document.querySelector<HTMLInputElement>('#guest-display-name');
     input?.focus();
     input?.select();
-    document.querySelector<HTMLButtonElement>('#back-to-auth')?.addEventListener('click', () => {
-      this.view = 'auth';
-      this.renderAuth();
-    });
-    document.querySelector<HTMLFormElement>('#guest-name-form')?.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const error = document.querySelector<HTMLDivElement>('#guest-name-error');
-      try {
-        this.enterGuestMode(createGuestProfile(input?.value ?? ''));
-      } catch (guestNameError) {
-        if (error) {
-          error.textContent = errorMessage(guestNameError, 'Enter a valid display name.');
-          error.hidden = false;
+    document
+      .querySelector<HTMLButtonElement>('#back-to-auth')
+      ?.addEventListener('click', () => {
+        this.view = 'auth';
+        this.renderAuth();
+      });
+    document
+      .querySelector<HTMLFormElement>('#guest-name-form')
+      ?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const error = document.querySelector<HTMLDivElement>('#guest-name-error');
+        try {
+          this.enterGuestMode(createGuestProfile(input?.value ?? ''));
+        } catch (guestNameError) {
+          if (error) {
+            error.textContent = errorMessage(
+              guestNameError,
+              'Enter a valid display name.',
+            );
+            error.hidden = false;
+          }
+          input?.focus();
+          input?.select();
         }
-        input?.focus();
-        input?.select();
-      }
+      });
+  }
+
+  private renderAccountName(): void {
+    if (!this.profile || !this.session) return;
+    this.view = 'account-name';
+    root.innerHTML = shellMarkup(
+      `
+      <section class="app-panel app-panel--join" aria-label="Choose your explorer name">
+        <form id="account-name-form" class="join-room-form display-name-form" novalidate>
+          <label for="account-display-name">Choose your explorer name</label>
+          <input id="account-display-name" name="displayName" type="text" maxlength="32" required autocomplete="nickname" enterkeyhint="go" value="" />
+          <div id="account-name-error" class="app-alert app-alert--error" role="alert" hidden></div>
+          <p id="account-name-status" class="app-status" aria-live="polite"></p>
+          <div class="profile-actions">
+            <button id="cancel-account-name" class="pixel-button pixel-button--quiet" type="button">Sign Out</button>
+            <button id="save-account-name" class="pixel-button pixel-button--primary" type="submit">Continue</button>
+          </div>
+        </form>
+      </section>`,
+      'app-screen--join',
+    );
+
+    const form = document.querySelector<HTMLFormElement>('#account-name-form');
+    const input = document.querySelector<HTMLInputElement>('#account-display-name');
+    input?.focus();
+    document
+      .querySelector<HTMLButtonElement>('#cancel-account-name')
+      ?.addEventListener('click', () => void this.signOut('#account-name-status'));
+    form?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void this.saveInitialAccountName(form);
     });
+  }
+
+  private async saveInitialAccountName(form: HTMLFormElement): Promise<void> {
+    const client = this.configuration.client;
+    if (!client || !this.session || !this.profile) return;
+    const input = form.querySelector<HTMLInputElement>('#account-display-name');
+    const saveButton = form.querySelector<HTMLButtonElement>('#save-account-name');
+    const cancelButton = form.querySelector<HTMLButtonElement>('#cancel-account-name');
+    const status = form.querySelector<HTMLElement>('#account-name-status');
+    const error = form.querySelector<HTMLDivElement>('#account-name-error');
+
+    if (saveButton) saveButton.disabled = true;
+    if (cancelButton) cancelButton.disabled = true;
+    if (status) status.textContent = 'Saving your explorer name…';
+    if (error) error.hidden = true;
+
+    try {
+      this.profile = await updateProfile(
+        client,
+        this.session.user.id,
+        {
+          displayName: input?.value ?? '',
+          avatarUrl: this.profile.avatar_url ?? '',
+        },
+        true,
+      );
+      this.view = 'menu';
+      this.renderMenu();
+    } catch (accountNameError) {
+      if (saveButton) saveButton.disabled = false;
+      if (cancelButton) cancelButton.disabled = false;
+      if (status) status.textContent = '';
+      if (error) {
+        error.textContent = errorMessage(
+          accountNameError,
+          'Unable to save your display name.',
+        );
+        error.hidden = false;
+      }
+      input?.focus();
+      input?.select();
+    }
   }
 
   private enterGuestMode(profile: Profile): void {
     ++this.sessionRevision;
     this.session = null;
     this.profile = profile;
+    this.playerStats = null;
     this.identityMode = 'guest';
     this.authError = null;
     this.profileError = null;
@@ -487,10 +610,9 @@ class AppController {
       this.consumePendingRoomCode();
     } else {
       const reconnectSession = loadReconnectSession(this.profile.id);
-      const reconnectRoomCode = reconnectSession?.roomId
-        ?? (reconnectSession?.joinMode === 'join'
-          ? reconnectSession.requestedRoomId
-          : null);
+      const reconnectRoomCode =
+        reconnectSession?.roomId ??
+        (reconnectSession?.joinMode === 'join' ? reconnectSession.requestedRoomId : null);
       if (
         reconnectSession &&
         (!this.pendingRoomCode || reconnectRoomCode === this.pendingRoomCode)
@@ -499,11 +621,12 @@ class AppController {
         this.view = 'launching-game';
         this.renderRestoring('Reclaiming your place in the maze…');
         window.setTimeout(
-          () => void this.launchGame(
-            reconnectSession.joinMode,
-            reconnectSession.requestedRoomId,
-            reconnectSession,
-          ),
+          () =>
+            void this.launchGame(
+              reconnectSession.joinMode,
+              reconnectSession.requestedRoomId,
+              reconnectSession,
+            ),
           0,
         );
         return;
@@ -520,7 +643,11 @@ class AppController {
     }
     const isGuest = this.identityMode === 'guest';
     const statusLabel = this.profile.is_admin ? 'Admin' : isGuest ? 'Guest' : 'Explorer';
-    root.innerHTML = shellMarkup(`
+    const ratingLabel = this.playerStats
+      ? `Elo ${this.playerStats.rating} · ${this.playerStats.wins}W–${this.playerStats.losses}L`
+      : 'Unranked';
+    root.innerHTML = shellMarkup(
+      `
       <div class="app-menu-shell">
         <img class="app-menu-logo" src="/assets/home/false-arrow-logo.png" alt="False Arrow" />
         <section class="app-panel app-panel--menu" aria-labelledby="menu-title">
@@ -532,7 +659,7 @@ class AppController {
               <h1 id="menu-title">${escapeHtml(this.profile.display_name)}</h1>
               <span>${escapeHtml(statusLabel)}</span>
             </div>
-            <span class="menu-rating" aria-label="Player rating">ELO 1200</span>
+            <span class="menu-rating" aria-label="Player rating and record">${escapeHtml(ratingLabel)}</span>
           </header>
           <div class="menu-divider" aria-hidden="true"><span>◇</span></div>
           <nav class="menu-actions" aria-label="Main menu">
@@ -546,28 +673,40 @@ class AppController {
           <div id="menu-notice" class="app-alert app-alert--notice" role="status" aria-live="polite" hidden></div>
           <p id="menu-status" class="app-status" aria-live="polite"></p>
         </section>
-      </div>`, 'app-screen--menu');
+      </div>`,
+      'app-screen--menu',
+    );
 
     this.activateAvatarFallbacks();
 
-    document.querySelector<HTMLButtonElement>('#quick-play')?.addEventListener('click', () => {
-      void this.launchGame('quick');
-    });
-    document.querySelector<HTMLButtonElement>('#create-game')?.addEventListener('click', () => {
-      void this.launchGame('create');
-    });
-    document.querySelector<HTMLButtonElement>('#join-game')?.addEventListener('click', () => {
-      this.view = 'join';
-      this.renderJoinRoom();
-    });
-    document.querySelector<HTMLButtonElement>('#open-profile-avatar')?.addEventListener('click', () => {
-      this.profileNotice = null;
-      this.view = 'profile';
-      this.renderProfile();
-    });
-    document.querySelector<HTMLButtonElement>('#sign-out')?.addEventListener('click', () => {
-      void this.signOut();
-    });
+    document
+      .querySelector<HTMLButtonElement>('#quick-play')
+      ?.addEventListener('click', () => {
+        void this.launchGame('quick');
+      });
+    document
+      .querySelector<HTMLButtonElement>('#create-game')
+      ?.addEventListener('click', () => {
+        void this.launchGame('create');
+      });
+    document
+      .querySelector<HTMLButtonElement>('#join-game')
+      ?.addEventListener('click', () => {
+        this.view = 'join';
+        this.renderJoinRoom();
+      });
+    document
+      .querySelector<HTMLButtonElement>('#open-profile-avatar')
+      ?.addEventListener('click', () => {
+        this.profileNotice = null;
+        this.view = 'profile';
+        this.renderProfile();
+      });
+    document
+      .querySelector<HTMLButtonElement>('#sign-out')
+      ?.addEventListener('click', () => {
+        void this.signOut();
+      });
 
     if (playAgain) {
       window.setTimeout(() => void this.launchGame('quick'), 0);
@@ -576,7 +715,8 @@ class AppController {
 
   private renderJoinRoom(initialCode = ''): void {
     if (!this.profile) return;
-    root.innerHTML = shellMarkup(`
+    root.innerHTML = shellMarkup(
+      `
       <section class="app-panel app-panel--join" aria-label="Join with code">
         <form id="join-room-form" class="join-room-form" novalidate>
           <label for="room-code">Enter room code</label>
@@ -587,7 +727,9 @@ class AppController {
             <button class="pixel-button pixel-button--primary" type="submit">Join Room</button>
           </div>
         </form>
-      </section>`, 'app-screen--join');
+      </section>`,
+      'app-screen--join',
+    );
 
     const input = document.querySelector<HTMLInputElement>('#room-code');
     input?.focus();
@@ -595,33 +737,41 @@ class AppController {
     input?.addEventListener('input', () => {
       input.value = normalizeRoomCode(input.value).slice(0, 6);
     });
-    document.querySelector<HTMLButtonElement>('#back-to-menu')?.addEventListener('click', () => {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('room');
-      window.history.replaceState(null, '', url);
-      this.view = 'menu';
-      this.renderMenu();
-    });
-    document.querySelector<HTMLFormElement>('#join-room-form')?.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const code = normalizeRoomCode(input?.value);
-      const error = document.querySelector<HTMLDivElement>('#join-room-error');
-      if (!isValidRoomCode(code)) {
-        if (error) {
-          error.textContent = 'Enter a valid six-character room code.';
-          error.hidden = false;
+    document
+      .querySelector<HTMLButtonElement>('#back-to-menu')
+      ?.addEventListener('click', () => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('room');
+        window.history.replaceState(null, '', url);
+        this.view = 'menu';
+        this.renderMenu();
+      });
+    document
+      .querySelector<HTMLFormElement>('#join-room-form')
+      ?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const code = normalizeRoomCode(input?.value);
+        const error = document.querySelector<HTMLDivElement>('#join-room-error');
+        if (!isValidRoomCode(code)) {
+          if (error) {
+            error.textContent = 'Enter a valid six-character room code.';
+            error.hidden = false;
+          }
+          return;
         }
-        return;
-      }
-      void this.launchGame('join', code);
-    });
+        void this.launchGame('join', code);
+      });
   }
 
   private renderProfile(): void {
     if (!this.profile || !this.identityMode) return;
     const isGuest = this.identityMode === 'guest';
     const statusLabel = this.profile.is_admin ? 'Admin' : isGuest ? 'Guest' : 'Explorer';
-    root.innerHTML = shellMarkup(`
+    const competitiveRecord = this.playerStats
+      ? `${this.playerStats.rating} Elo · ${this.playerStats.wins}W–${this.playerStats.losses}L · ${this.playerStats.matches_played} matches (${this.playerStats.rated_matches} rated)`
+      : 'Unranked';
+    root.innerHTML = shellMarkup(
+      `
       <section class="app-panel app-panel--profile" aria-labelledby="profile-title">
         <header class="profile-header">
           ${avatarMarkup(this.profile, 'large')}
@@ -635,6 +785,7 @@ class AppController {
           <input id="display-name" name="displayName" type="text" maxlength="32" required autocomplete="nickname" value="${escapeHtml(this.profile.display_name)}" />
           <p class="field-hint">Shown to other explorers inside the game.</p>
           <dl class="profile-timestamps">
+            <div><dt>Competitive</dt><dd>${escapeHtml(competitiveRecord)}</dd></div>
             <div><dt>Created</dt><dd>${escapeHtml(formatDate(this.profile.created_at))}</dd></div>
             <div><dt>Updated</dt><dd>${escapeHtml(formatDate(this.profile.updated_at))}</dd></div>
           </dl>
@@ -646,20 +797,26 @@ class AppController {
             <button id="save-profile" class="pixel-button pixel-button--primary" type="submit">Save Profile</button>
           </div>
         </form>
-      </section>`, 'app-screen--profile');
+      </section>`,
+      'app-screen--profile',
+    );
 
     this.activateAvatarFallbacks();
 
-    document.querySelector<HTMLButtonElement>('#back-to-menu')?.addEventListener('click', () => {
-      this.view = 'menu';
-      this.renderMenu();
-    });
-    document.querySelector<HTMLFormElement>('#profile-form')?.addEventListener('submit', (event) => {
-      event.preventDefault();
-      if (event.currentTarget instanceof HTMLFormElement) {
-        void this.saveProfile(event.currentTarget);
-      }
-    });
+    document
+      .querySelector<HTMLButtonElement>('#back-to-menu')
+      ?.addEventListener('click', () => {
+        this.view = 'menu';
+        this.renderMenu();
+      });
+    document
+      .querySelector<HTMLFormElement>('#profile-form')
+      ?.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (event.currentTarget instanceof HTMLFormElement) {
+          void this.saveProfile(event.currentTarget);
+        }
+      });
   }
 
   private async saveProfile(form: HTMLFormElement): Promise<void> {
@@ -684,7 +841,8 @@ class AppController {
       if (this.identityMode === 'guest') {
         this.profile = updateGuestProfile(this.profile, input);
       } else {
-        if (!client || !this.session) throw new Error('Your signed-in session is unavailable.');
+        if (!client || !this.session)
+          throw new Error('Your signed-in session is unavailable.');
         this.profile = await updateProfile(client, this.session.user.id, input);
       }
       this.profileNotice = 'Profile saved.';
@@ -701,7 +859,8 @@ class AppController {
   }
 
   private renderProfileError(): void {
-    root.innerHTML = shellMarkup(`
+    root.innerHTML = shellMarkup(
+      `
       <section class="app-panel app-panel--compact" aria-labelledby="profile-error-title">
         <div class="app-brand">${brandMarkup()}</div>
         <h2 id="profile-error-title" class="app-panel__heading">Explorer record unavailable</h2>
@@ -711,14 +870,20 @@ class AppController {
           <button id="error-sign-out" class="pixel-button pixel-button--quiet" type="button">Sign Out</button>
         </div>
         <p id="error-status" class="app-status" aria-live="polite"></p>
-      </section>`, 'app-screen--error');
+      </section>`,
+      'app-screen--error',
+    );
 
-    document.querySelector<HTMLButtonElement>('#retry-profile')?.addEventListener('click', () => {
-      void this.reconcileSession(this.session);
-    });
-    document.querySelector<HTMLButtonElement>('#error-sign-out')?.addEventListener('click', () => {
-      void this.signOut('#error-status');
-    });
+    document
+      .querySelector<HTMLButtonElement>('#retry-profile')
+      ?.addEventListener('click', () => {
+        void this.reconcileSession(this.session);
+      });
+    document
+      .querySelector<HTMLButtonElement>('#error-sign-out')
+      ?.addEventListener('click', () => {
+        void this.signOut('#error-status');
+      });
   }
 
   private async signOut(statusSelector = '#menu-status'): Promise<void> {
@@ -730,9 +895,12 @@ class AppController {
       this.identityMode = null;
       this.session = null;
       this.profile = null;
+      this.playerStats = null;
       this.profileNotice = null;
       this.view = 'auth';
-      this.authError = this.configuration.client ? null : this.configuration.error.message;
+      this.authError = this.configuration.client
+        ? null
+        : this.configuration.error.message;
       this.renderAuth();
       return;
     }
@@ -741,12 +909,16 @@ class AppController {
     if (!client) return;
     const status = document.querySelector<HTMLElement>(statusSelector);
     const buttons = root.querySelectorAll<HTMLButtonElement>('button');
-    buttons.forEach((button) => { button.disabled = true; });
+    buttons.forEach((button) => {
+      button.disabled = true;
+    });
     if (status) status.textContent = 'Signing out…';
 
     const { error } = await client.auth.signOut();
     if (error) {
-      buttons.forEach((button) => { button.disabled = false; });
+      buttons.forEach((button) => {
+        button.disabled = false;
+      });
       if (status) status.textContent = `Sign out failed: ${error.message}`;
     }
   }

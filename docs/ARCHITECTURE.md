@@ -1,6 +1,6 @@
 # False Arrow Architecture
 
-Last updated: 2026-08-12 - Reconnectable seats and 45-second reservations
+Last updated: 2026-08-13 - Persistent competitive records and team Elo
 
 ## Project Overview
 
@@ -10,12 +10,15 @@ False Arrow is a multiplayer top-down pixel-art labyrinth game built as a TypeSc
 - `packages/server`: the authoritative multiplayer simulation and room management.
 - `packages/client`: the authenticated DOM app shell plus the lazy PixiJS renderer, client prediction, interpolation, HUD, and input handling.
 
-Supabase provides browser authentication and owner-private profile storage. It
-also stores the protected `profiles.is_admin` permission. The WebSocket server
-verifies the caller's Supabase token and re-reads that permission through RLS;
-client claims never grant administrator capabilities. Verified administrators
-alone receive the debug menu and may start any non-empty lobby immediately.
-Supabase does not otherwise participate in the authoritative simulation.
+Supabase provides browser authentication, owner-private profile storage, and
+owner-private competitive records. It also stores the protected
+`profiles.is_admin` permission. The WebSocket server verifies the caller's
+Supabase token and re-reads identity, rating, and permission through RLS; client
+claims never grant identity, rating, or administrator capabilities. A trusted
+server-only RPC atomically records every completed-match ledger, updates every
+authenticated player's win/loss record, and changes ratings only for eligible
+matches. Supabase does not participate in the live
+authoritative simulation.
 
 One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, treasure-chest state, sword-field state, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
@@ -216,6 +219,17 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 - Reaching the threshold, or having every occupied survivor escaped, ends the match immediately for survivors. Reaching the deadline below the threshold ends it for wardens, including action requests that race the next server tick.
 - Ending is immutable: queued input is cleared, the server loop stops, gameplay/chat requests are rejected, a final snapshot is broadcast, and clients freeze under a persistent result panel. The panel reveals Survivor and Warden rosters only after completion.
 
+### Competitive Records and Team Elo
+
+- Every authenticated profile has a `player_stats` row starting at `1200` Elo with zero total matches, rated matches, wins, and losses. The main menu and profile read these owner-private counters directly from Supabase; completed-match history is stored in `matches` and authenticated roster results in `match_participants`.
+- To keep low-population queues usable, Quick Play still fills the first available public lobby without a rating filter. Rating-aware queue grouping is deferred until concurrency supports it.
+- A match is rated only when a public room starts normally with a full roster of 9 distinct authenticated profiles and server-side match persistence is configured. Underfilled games, private games, guest-containing games, administrator-altered games, and debugged matches are unranked.
+- Every completed match gets a persistent ledger row. It increments total matches and either wins or losses for each authenticated starting player, even when the match is private, underfilled, contains guests, or is otherwise unranked. Guest-only matches have no profile counters to update.
+- The server captures the complete starting roster before play. Permanent leavers remain in the result ledger and are marked abandoned, so leaving cannot erase a loss or match result.
+- Survivor and Warden team strength use average rating because the sides have different player counts. The first ten rated matches use `K=40`; established players use `K=24`; ratings have a floor of `100`.
+- Only the team result affects Elo. Escapes and abandonment are retained for auditing and future statistics but do not award performance bonuses.
+- Every match has a server-generated UUID. The service-role-only `record_match_result` database function locks all authenticated participant records and writes the match, participants, all-match counters, and any eligible rating changes in one idempotent transaction. Unranked participants receive a zero rating change, and only `rated_matches` controls the provisional K-factor.
+
 ### Hidden Roles and Wisdom Orbs
 
 - A full room has `7` survivors and `2` wardens. Six-player early starts use one Warden; seven- and eight-player starts use two. When two Wardens are present they occupy different squads.
@@ -342,7 +356,8 @@ The client first runs a lightweight DOM app shell with these states:
 2. show Google authentication and a local guest option when signed out;
 3. ask a new guest to choose a display name, or restore the current tab's
    existing guest profile;
-4. load or create the signed-in user's `public.profiles` row;
+4. load or create the signed-in user's `public.profiles` row and require a new
+   account to choose its display name once;
 5. show Main Menu, Join by Code, or Profile;
 6. dynamically import PixiJS and preload runtime assets after Quick Play, Create Private Game, or Join Room is selected;
 7. connect to the authoritative waiting room and show its DOM lobby overlay; and
@@ -353,6 +368,9 @@ Guest profiles are created only after the naming form is submitted, use
 `sessionStorage`, never call Supabase, and are discarded
 when the guest leaves the session or closes the browser tab. They support the
 same local display-name and HTTPS avatar validation as authenticated profiles.
+Authenticated profiles persist completion in `display_name_chosen`; migrations
+mark pre-existing profiles complete, while newly created profiles receive an
+empty naming form before the menu or an invited lobby can open.
 
 Auth, Main Menu, Profile, and Join by Code do not initialize Pixi, load runtime
 game assets, construct `NetworkManager`, or open a WebSocket. The selected

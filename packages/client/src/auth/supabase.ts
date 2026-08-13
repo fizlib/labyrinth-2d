@@ -12,6 +12,18 @@ export interface Profile {
   display_name: string;
   avatar_url: string | null;
   is_admin: boolean;
+  display_name_chosen: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlayerStats {
+  profile_id: string;
+  rating: number;
+  matches_played: number;
+  rated_matches: number;
+  wins: number;
+  losses: number;
   created_at: string;
   updated_at: string;
 }
@@ -27,13 +39,22 @@ interface ProfilesTable {
     id: string;
     display_name: string;
     avatar_url?: string | null;
+    display_name_chosen?: boolean;
     created_at?: string;
     updated_at?: string;
   };
   Update: Record<string, unknown> & {
     display_name?: string;
     avatar_url?: string | null;
+    display_name_chosen?: boolean;
   };
+  Relationships: [];
+}
+
+interface PlayerStatsTable {
+  Row: PlayerStats & Record<string, unknown>;
+  Insert: Record<string, unknown> & { profile_id: string };
+  Update: Record<string, unknown>;
   Relationships: [];
 }
 
@@ -41,6 +62,7 @@ interface Database {
   public: {
     Tables: {
       profiles: ProfilesTable;
+      player_stats: PlayerStatsTable;
     };
     Views: Record<never, never>;
     Functions: Record<never, never>;
@@ -57,7 +79,10 @@ export type SupabaseConfiguration =
   | { client: SupabaseClient<Database>; error: null }
   | { client: null; error: SupabaseConfigurationError };
 
-const PROFILE_COLUMNS = 'id, display_name, avatar_url, is_admin, created_at, updated_at';
+const PROFILE_COLUMNS =
+  'id, display_name, avatar_url, is_admin, display_name_chosen, created_at, updated_at';
+const PLAYER_STATS_COLUMNS =
+  'profile_id, rating, matches_played, rated_matches, wins, losses, created_at, updated_at';
 const MAX_DISPLAY_NAME_LENGTH = 32;
 const MAX_AVATAR_URL_LENGTH = 2048;
 
@@ -68,7 +93,10 @@ function isLocalHostname(hostname: string): boolean {
 function validateSupabaseUrl(value: string): string | null {
   try {
     const url = new URL(value);
-    if (url.protocol === 'https:' || (url.protocol === 'http:' && isLocalHostname(url.hostname))) {
+    if (
+      url.protocol === 'https:' ||
+      (url.protocol === 'http:' && isLocalHostname(url.hostname))
+    ) {
       return url.href.replace(/\/$/, '');
     }
   } catch {
@@ -112,7 +140,9 @@ export function validateProfileInput(input: ProfileUpdateInput): {
   const displayNameLength = Array.from(displayName).length;
 
   if (displayNameLength < 1 || displayNameLength > MAX_DISPLAY_NAME_LENGTH) {
-    throw new Error(`Display name must be between 1 and ${MAX_DISPLAY_NAME_LENGTH} characters.`);
+    throw new Error(
+      `Display name must be between 1 and ${MAX_DISPLAY_NAME_LENGTH} characters.`,
+    );
   }
 
   const rawAvatarUrl = input.avatarUrl.trim();
@@ -143,13 +173,17 @@ function firstMetadataString(user: User, keys: readonly string[]): string | null
   return null;
 }
 
-function seedProfileValues(user: User): { displayName: string; avatarUrl: string | null } {
+function seedProfileValues(user: User): {
+  displayName: string;
+  avatarUrl: string | null;
+} {
   const metadataName = firstMetadataString(user, ['full_name', 'name', 'user_name']);
   const emailName = user.email?.split('@')[0]?.trim();
   const rawDisplayName = metadataName || emailName || 'Explorer';
-  const displayName = Array.from(rawDisplayName.trim().replace(/\s+/g, ' '))
-    .slice(0, MAX_DISPLAY_NAME_LENGTH)
-    .join('') || 'Explorer';
+  const displayName =
+    Array.from(rawDisplayName.trim().replace(/\s+/g, ' '))
+      .slice(0, MAX_DISPLAY_NAME_LENGTH)
+      .join('') || 'Explorer';
   const rawAvatarUrl = firstMetadataString(user, ['avatar_url', 'picture']) ?? '';
 
   try {
@@ -203,21 +237,44 @@ export async function loadOrCreateProfile(
     );
   }
 
-  throw new Error(`Unable to create your profile: ${createError?.message ?? 'Unknown error'}`);
+  throw new Error(
+    `Unable to create your profile: ${createError?.message ?? 'Unknown error'}`,
+  );
+}
+
+export async function loadPlayerStats(
+  client: SupabaseClient<Database>,
+  userId: string,
+): Promise<PlayerStats> {
+  const { data, error } = await client
+    .from('player_stats')
+    .select(PLAYER_STATS_COLUMNS)
+    .eq('profile_id', userId)
+    .single();
+
+  if (error || !data) {
+    throw new Error(
+      `Unable to load competitive stats: ${error?.message ?? 'Record not found'}`,
+    );
+  }
+  return data;
 }
 
 export async function updateProfile(
   client: SupabaseClient<Database>,
   userId: string,
   input: ProfileUpdateInput,
+  completeDisplayNameChoice = false,
 ): Promise<Profile> {
   const values = validateProfileInput(input);
+  const update: ProfilesTable['Update'] = {
+    display_name: values.displayName,
+    avatar_url: values.avatarUrl,
+  };
+  if (completeDisplayNameChoice) update.display_name_chosen = true;
   const { data, error } = await client
     .from('profiles')
-    .update({
-      display_name: values.displayName,
-      avatar_url: values.avatarUrl,
-    })
+    .update(update)
     .eq('id', userId)
     .select(PROFILE_COLUMNS)
     .single();
@@ -232,10 +289,12 @@ export function getOAuthErrorFromUrl(): string | null {
   const url = new URL(window.location.href);
   const query = url.searchParams;
   const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
-  return query.get('error_description')
-    ?? query.get('error')
-    ?? hash.get('error_description')
-    ?? hash.get('error');
+  return (
+    query.get('error_description') ??
+    query.get('error') ??
+    hash.get('error_description') ??
+    hash.get('error')
+  );
 }
 
 export function clearOAuthParameters(): void {
@@ -257,7 +316,11 @@ export function clearOAuthParameters(): void {
   const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
   const hadOAuthHash = oauthParameters.some((parameter) => hash.has(parameter));
   if (hadOAuthHash) url.hash = '';
-  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+  window.history.replaceState(
+    {},
+    document.title,
+    `${url.pathname}${url.search}${url.hash}`,
+  );
 }
 
 export function getOAuthRedirectUrl(): string {

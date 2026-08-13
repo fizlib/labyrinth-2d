@@ -160,12 +160,23 @@ export {
 
 export {
   MATCH_DURATION_MS,
+  INITIAL_ELO_RATING,
+  MIN_ELO_RATING,
+  ELO_RATING_SCALE,
+  ELO_PROVISIONAL_MATCHES,
+  ELO_PROVISIONAL_K_FACTOR,
+  ELO_ESTABLISHED_K_FACTOR,
   PORTAL_INTERACTION_RANGE,
   SURVIVOR_ESCAPE_RATIO_NUMERATOR,
   SURVIVOR_ESCAPE_RATIO_DENOMINATOR,
   getSurvivorEscapeThreshold,
   getRemainingSurvivorsToEscape,
   isWithinPortalInteractionRange,
+  calculateTeamEloRatings,
+  type EloRole,
+  type EloWinner,
+  type TeamEloParticipant,
+  type TeamEloResult,
 } from './match.js';
 
 // ── Re-export map data ──────────────────────────────────────────────────────

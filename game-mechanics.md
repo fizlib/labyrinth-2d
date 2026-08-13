@@ -91,6 +91,16 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - Escaped survivors cannot move, act, or use proximity chat, but continue to receive global system announcements.
 - When either side wins, simulation and gameplay input freeze and every player sees a centered result panel that reveals the final Survivor and Warden rosters.
 
+## Match records and Elo
+
+- Signed-in players start at **1200 Elo** and have persistent total matches, rated matches, wins, and losses.
+- Public Quick Play remains broad while the concurrent population is small; it does not yet restrict lobbies by rating.
+- A public match is rated only when its full 9-player starting roster is signed in. Underfilled, private, guest-containing, administrator-altered, and debugged matches are unranked.
+- Every completed match gets a history row and adds one match plus either one win or one loss for each signed-in starting player, including private, underfilled, guest-containing, and otherwise unranked games. Guest-only games still have match history, but guests have no persistent account counters.
+- Elo compares the average Survivor rating with the average Warden rating, so the larger Survivor side does not receive artificial strength from its player count.
+- The first 10 rated matches use a faster `K=40`; later matches use `K=24`. Only the winning side affects rating—individual objectives do not grant rating bonuses.
+- Players who permanently leave remain on the starting roster, receive the final team result, and are recorded as abandoned.
+
 ## Wisdom orbs
 
 - Every survivor receives **1 wisdom orb**.

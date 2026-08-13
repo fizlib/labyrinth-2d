@@ -1,17 +1,32 @@
 # Supabase Authentication Setup
 
 The client uses Supabase Auth for Google OAuth and `public.profiles` for the
-authenticated player's display name, avatar, and administrator status. Players
+authenticated player's display name, avatar, administrator status, and
+owner-private competitive record. Players
 can also continue as a guest without contacting Supabase; guest profiles live
 only in the current browser tab. The game server verifies signed-in access
-tokens with Supabase before granting any administrator capability.
+tokens with Supabase before attaching an account or granting any administrator
+capability. Every completed match is written by the trusted server; only
+eligible public matches change Elo, and only authenticated players have
+persistent counters.
 
 ## 1. Create and migrate the project
 
 Create a Supabase project, then apply
 `supabase/migrations/20260720131500_create_profiles.sql` either through your
 normal Supabase CLI migration workflow or in the dashboard SQL editor. Then
-apply `supabase/migrations/20260811120000_add_profile_admin.sql`.
+apply `supabase/migrations/20260811120000_add_profile_admin.sql` and
+`supabase/migrations/20260813120000_add_competitive_stats.sql`, followed by
+`supabase/migrations/20260813130000_require_display_name_choice.sql` and
+`supabase/migrations/20260813140000_record_all_completed_matches.sql`, then
+`supabase/migrations/20260813150000_reset_match_schema.sql`, in order.
+If the competitive-stats migration was already applied, apply only the newer
+unapplied migrations; do not rerun or edit its database migration record.
+
+The final reset migration intentionally drops the earlier `competitive_*`
+tables and recreates the empty record system as `player_stats`, `matches`, and
+`match_participants`. It is destructive to any match or rating data in those
+old tables and is appropriate here only because no matches have been recorded.
 
 The migration:
 
@@ -20,8 +35,14 @@ The migration:
 - seeds new and existing profiles from Google name/avatar metadata;
 - keeps `created_at` immutable and maintains `updated_at` in the database;
 - allows authenticated users to read, insert, and edit only their own profile;
-- restricts client writes to `display_name` and `avatar_url`;
+- prompts new accounts to choose a display name once while treating existing
+  profiles as already onboarded;
+- restricts client writes to `display_name`, `avatar_url`, and the account's
+  display-name onboarding flag;
 - stores `is_admin` while preventing authenticated clients from changing it;
+- creates owner-readable `player_stats` plus server-only `matches` and
+  `match_participants` ledgers;
+- installs one service-role-only, idempotent transaction for completed matches;
 - denies profile access to unauthenticated clients.
 
 Test the migration in a non-production project first. A failing Auth trigger
@@ -73,7 +94,7 @@ because Vite embeds those values in the public browser bundle.
 
 Restart Vite after changing environment variables.
 
-## 4. Configure administrator verification on the game server
+## 4. Configure player verification and match persistence on the game server
 
 For local development, the server automatically reuses the browser-safe
 Supabase URL and publishable key from `packages/client/.env.local`. You can
@@ -86,11 +107,16 @@ Copy-Item packages/server/.env.example packages/server/.env.local
 ```dotenv
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
+SUPABASE_SECRET_KEY=sb_secret_YOUR_SERVER_KEY
 ```
 
 `SUPABASE_ANON_KEY` is also accepted for projects still using a legacy anon
-key. A secret or `service_role` key is not required. If these settings are
-missing or Supabase cannot verify a token, administrator access fails closed.
+key. `SUPABASE_SERVICE_ROLE_KEY` is accepted in place of the newer secret key.
+The secret is required to record match results and must exist only in the game
+server environment. If it is missing, matches continue normally but no
+persistent match, win/loss, or rating updates are written. If token verification
+fails, the connection is treated as an unverified guest and cannot make a match
+eligible for rating or receive persistent counters.
 
 Grant administrator status only from a trusted SQL or backend context:
 
@@ -102,17 +128,28 @@ where id = 'AUTH_USER_UUID';
 
 The browser forwards its access token over the game WebSocket. Use `wss://` in
 production. The server validates the token with Supabase, reads that user's own
-profile through RLS, and returns the verified permission privately. Only then
-does the client show the debug menu and immediate lobby-start control. The
-server independently rejects debug and immediate-start messages from everyone
-else.
+profile and competitive snapshot through RLS, and retains the verified profile
+ID on the reconnectable room seat. Only then does the client show the debug menu
+and immediate lobby-start control. The server independently rejects debug and
+immediate-start messages from everyone else.
+
+One authenticated account may occupy only one server seat at a time. An
+eligible ranked match must be a public Quick Play room with a full roster of 9
+authenticated players. Underfilled rooms, private rooms, guest-containing rooms, administrator-started or
+administrator-edited rooms, and matches that use debug actions are unranked.
+They still increment total matches and wins/losses for every authenticated
+starting player; they simply store a zero Elo change and do not increment
+`rated_matches`. Guest-only matches still create a match-ledger row but have no
+profile counters to update.
 
 ## 5. Verify the flow
 
 1. Start the server and client as documented in `ARCHITECTURE.md`.
 2. Confirm the signed-out screen opens without a canvas or WebSocket request.
-3. Sign in with Google and confirm a matching `public.profiles` row exists.
-4. Reload and confirm the session returns to Main Menu.
+3. Sign up with a new Google account and confirm the empty display-name prompt
+   appears and a matching `public.profiles` row exists.
+4. Choose a display name, reload, and confirm the session returns directly to
+   Main Menu without prompting again.
 5. Edit the display name and an optional HTTPS avatar URL, then reload to
    confirm persistence.
 6. Select Join Game and confirm it only shows the lobby placeholder.
