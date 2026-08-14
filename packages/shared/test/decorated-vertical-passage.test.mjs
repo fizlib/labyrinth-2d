@@ -51,6 +51,8 @@ test('decorated vertical passages deterministically reserve otherwise empty cell
         first.tIntersectionDecorations,
         portal,
         seed,
+        DECORATED_VERTICAL_PASSAGE_DENSITY,
+        first.spikeGateObstacles,
       ),
     );
 
@@ -68,6 +70,14 @@ test('decorated vertical passages deterministically reserve otherwise empty cell
     for (const sword of first.swordFields) {
       occupy(occupied, sword.westCellX, sword.cellY);
       occupy(occupied, sword.westCellX + 1, sword.cellY);
+    }
+    for (const spikeGate of first.spikeGateObstacles) {
+      occupy(occupied, spikeGate.cellX, spikeGate.cellY);
+      occupy(
+        occupied,
+        spikeGate.cellX + (spikeGate.orientation === 'horizontal' ? 1 : 0),
+        spikeGate.cellY + (spikeGate.orientation === 'vertical' ? 1 : 0),
+      );
     }
     for (const trap of first.trapCells) occupy(occupied, trap.cellX, trap.cellY);
     for (const chest of first.chestDeadEnds) occupy(occupied, chest.cellX, chest.cellY);
@@ -119,6 +129,7 @@ test('occupying either passage cell suppresses that visual prefab', () => {
     portal,
     seed,
     1,
+    layout.spikeGateObstacles,
   );
   const candidate = allCandidates[0];
   assert.ok(candidate);
@@ -137,6 +148,7 @@ test('occupying either passage cell suppresses that visual prefab', () => {
       portal,
       seed,
       1,
+      layout.spikeGateObstacles,
     );
     assert.equal(
       withOccupiedCell.some(

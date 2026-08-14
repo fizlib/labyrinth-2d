@@ -46,6 +46,12 @@ test('trap cells are deterministic, complete 6x6 floors, and avoid solid authore
       occupied.add(`${sword.westCellX},${sword.cellY}`);
       occupied.add(`${sword.westCellX + 1},${sword.cellY}`);
     }
+    for (const spikeGate of first.spikeGateObstacles) {
+      occupied.add(`${spikeGate.cellX},${spikeGate.cellY}`);
+      occupied.add(
+        `${spikeGate.cellX + (spikeGate.orientation === 'horizontal' ? 1 : 0)},${spikeGate.cellY + (spikeGate.orientation === 'vertical' ? 1 : 0)}`,
+      );
+    }
     for (const chest of first.chestDeadEnds)
       occupied.add(`${chest.cellX},${chest.cellY}`);
     for (const trap of first.trapCells) {

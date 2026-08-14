@@ -10,6 +10,7 @@ import type { HubDirection } from './navigation.js';
 import type { BridgeEntrySide, BridgeState } from './bridge.js';
 import type { SwordFieldState } from './sword-field.js';
 import type { CageState } from './cage.js';
+import type { SpikeGateState, SpikePlateState } from './spike-gate.js';
 import type { LobbyJoinMode, LobbyState } from './lobby.js';
 
 export {
@@ -132,6 +133,34 @@ export {
 } from './sword-field.js';
 
 export {
+  SPIKE_GATE_AUTHORING_TILE_SIZE,
+  SPIKE_GATE_TERRAIN_COLUMNS,
+  SPIKE_GATE_TERRAIN_ROWS,
+  SPIKE_GATE_COLUMN_STRIDE,
+  SPIKE_GATE_HORIZONTAL_TERRAIN_COLUMNS,
+  SPIKE_GATE_HORIZONTAL_TERRAIN_ROWS,
+  SPIKE_GATE_VERTICAL_TERRAIN_COLUMNS,
+  SPIKE_GATE_VERTICAL_TERRAIN_ROWS,
+  SPIKE_GATE_HORIZONTAL_STRIDE,
+  SPIKE_GATE_VERTICAL_STRIDE,
+  SPIKE_GATES_PER_OBSTACLE,
+  SPIKE_PLATES_PER_GATE,
+  SPIKE_PLATES_PER_OBSTACLE,
+  SPIKE_GATE_COLORS,
+  getSpikeGateStateIndex,
+  getSpikeGateBarrierOffset,
+  getSpikePlateStateIndex,
+  getSpikeGateCollisionBounds,
+  getSpikeGatePlatePlacements,
+  type SpikeGateColor,
+  type SpikeGateBounds,
+  type SpikeGateState,
+  type SpikePlateState,
+  type SpikePlatePlacement,
+  type SpikePlateSide,
+} from './spike-gate.js';
+
+export {
   CAGE_INTERACTION_RANGE,
   CAGE_COLLIDER_WIDTH,
   CAGE_COLLIDER_TOP_OFFSET,
@@ -225,6 +254,9 @@ export {
   CHEST_DEAD_END_DENSITY,
   T_INTERSECTION_DECORATION_DENSITY,
   DECORATED_VERTICAL_PASSAGE_DENSITY,
+  SPIKE_GATE_OBSTACLE_DENSITY,
+  MIN_SPIKE_GATE_OBSTACLES,
+  MAX_SPIKE_GATE_OBSTACLES,
   TRAP_CELL_DENSITY,
   MIN_TRAP_CELLS,
   MAX_TRAP_CELLS,
@@ -232,6 +264,7 @@ export {
   getChestDeadEndVariant,
   computeChestDeadEndPlacements,
   computeSwordFieldPlacements,
+  computeSpikeGateObstaclePlacements,
   computeTeamRouteSwordFieldPlacements,
   computeTrapCellPlacements,
   computeTIntersectionDecorationPlacements,
@@ -247,6 +280,8 @@ export {
   type BridgePlacement,
   type SwampPlacement,
   type SwordFieldPlacement,
+  type SpikeGateOrientation,
+  type SpikeGateObstaclePlacement,
   type TIntersectionDecorationPlacement,
   type DecoratedVerticalPassagePlacement,
   type TrapCellPlacement,
@@ -830,6 +865,10 @@ export interface GameState {
   chestStates: ChestState[];
   /** Shared lowering/cleared state for each deterministic sword barrier. */
   swordFieldStates: SwordFieldState[];
+  /** Per-barrier open/closed state for every generated spike-gate chain. */
+  spikeGateStates: SpikeGateState[];
+  /** Physical occupancy state for each of the spike gates' paired plates. */
+  spikePlateStates: SpikePlateState[];
   /** Spawned survivor cages, including vacated cages that remain solid forever. */
   cageStates: CageState[];
 }

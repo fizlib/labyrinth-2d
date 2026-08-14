@@ -36,6 +36,7 @@ import { BRIDGE_OBSTACLE_ASSET_PATHS } from '../systems/BridgeObstacleLayout';
 import { SWAMP_OBSTACLE_ASSET_PATHS } from '../systems/SwampObstacleLayout';
 import { CHEST_DEAD_END_ASSET_PATHS } from '../systems/ChestDeadEndLayout';
 import { SWORD_FIELD_ASSET_PATHS } from '../systems/SwordFieldLayout';
+import { SPIKE_GATE_ASSET_PATHS } from '../systems/SpikeGateLayout';
 import { CHARACTER_ATLAS_MANIFEST, CHARACTER_ATLAS_PATH } from './characterAtlasManifest';
 import { getFiorwoodsRuntimeAssetPath } from './runtimeAssetPaths';
 import { CAGE_GROUND_ASSET_PATHS } from '../systems/CageGroundLayout';
@@ -197,6 +198,8 @@ export interface GameAssets {
   swampObstacleTextures: ReadonlyMap<string, Texture>;
   /** Authored ground, fence, graves, and swords used by sword fields. */
   swordFieldTextures: ReadonlyMap<string, Texture>;
+  /** Colored spike pillars, transition frames, and paired plate sprites. */
+  spikeGateTextures: ReadonlyMap<string, Texture>;
   /** Authored tree backing, chest, and rock used by treasure dead ends. */
   chestDeadEndTextures: ReadonlyMap<string, Texture>;
   /** Authored ruins, signpost, bushes, rock, and flowers used at decorated T-junctions. */
@@ -279,6 +282,7 @@ export async function loadAssets(
   let bridgeObstacleTextures = new Map<string, Texture>();
   let swampObstacleTextures = new Map<string, Texture>();
   let swordFieldTextures = new Map<string, Texture>();
+  let spikeGateTextures = new Map<string, Texture>();
   let chestDeadEndTextures = new Map<string, Texture>();
   let tIntersectionDecorationTextures = new Map<string, Texture>();
   let decoratedVerticalPassageTextures = new Map<string, Texture>();
@@ -1034,6 +1038,25 @@ export async function loadAssets(
     console.warn('[Assets] Sword-field modules unavailable', error);
   }
 
+  // ── Cooperative spike-gate modules ─────────────────────────────────────
+  try {
+    spikeGateTextures = new Map(
+      await Promise.all(
+        SPIKE_GATE_ASSET_PATHS.map(async (path) => {
+          const texture = await Assets.load<Texture>(path);
+          texture.source.scaleMode = 'nearest';
+          return [path, texture] as const;
+        }),
+      ),
+    );
+    console.info(
+      `[Assets] Loaded spike gates (${spikeGateTextures.size} source modules)`,
+    );
+  } catch (error) {
+    spikeGateTextures.clear();
+    console.warn('[Assets] Spike-gate modules unavailable', error);
+  }
+
   // ── Authored chest dead-end modules ─────────────────────────────────────
   try {
     chestDeadEndTextures = new Map(
@@ -1233,6 +1256,7 @@ export async function loadAssets(
     bridgeObstacleTextures,
     swampObstacleTextures,
     swordFieldTextures,
+    spikeGateTextures,
     chestDeadEndTextures,
     tIntersectionDecorationTextures,
     decoratedVerticalPassageTextures,

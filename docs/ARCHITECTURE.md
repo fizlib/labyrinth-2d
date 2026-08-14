@@ -1,6 +1,6 @@
 # False Arrow Architecture
 
-Last updated: 2026-08-13 - Persistent competitive records and team Elo
+Last updated: 2026-08-14 - Cooperative spike-gate obstacle chains
 
 ## Project Overview
 
@@ -171,6 +171,8 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | `swordFieldStates` | `SwordFieldState[]` | Authoritative blocking, lowering, and cleared state for every generated sword field |
 | `gateStates` | `GateState[]` | Authoritative open/closed state for every generated gate |
 | `pressurePlateStates` | `PressurePlateState[]` | Authoritative physical-press and warden-latch state for every gate button |
+| `spikeGateStates` | `SpikeGateState[]` | Authoritative open/closed state for every active colored barrier in each spike-gate obstacle |
+| `spikePlateStates` | `SpikePlateState[]` | Authoritative physical occupancy for each spike gate's two nearest plates |
 | `cageStates` | `CageState[]` | Authoritative spawned, opened, and permanently vacated cage state |
 
 ## Shared Gameplay Systems
@@ -183,6 +185,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
 - Physical button occupancy treats wardens and survivors identically: two distinct players on the spawn-side buttons or one player on the hub-side button hold the gate open only while that physical requirement remains satisfied.
 - Wardens can separately latch nearby buttons with `E`; when a latch completes one side's button requirement, the gate opens for five seconds, resets every associated button, and requires occupied buttons to be released before another activation cycle.
+- Spike-gate obstacles use exact `13x95` vertical barriers in east-west passages and export-70 `95x9` horizontal barriers in north-south passages. Vertical compositions are limited to straight corridor sections and place the third yellow barrier in the authored slot above red. Each collider is removed independently while either of that colored gate's two nearest plates is occupied, with identical checks in client prediction and server simulation.
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
 - Directional treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
 - Decorated north- and south-closed T-junctions use orientation-specific style-editor rectangles for their bushes, rock, and signpost on both the predicting client and authoritative server. The south-closed variant's inferred prop colliders reuse the established object hitbox dimensions.
@@ -267,6 +270,15 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 - The server consumes one orb only for survivors, records the lowering start tick, keeps the main collider active for the full animation, then marks the field cleared. Late joiners reconstruct the correct visual phase from the current server tick.
 - Fence, grave, and ground art remain after all forty-one swords disappear, matching the supplied editor layout.
 
+### Spike Gates
+
+- Each deterministic spike-gate obstacle spans one otherwise-unoccupied horizontal or vertical two-cell route. Short or branching horizontal routes use red and blue barriers; yellow is included when the second cell continues straight without a perpendicular bypass. Vertical gates are selected only in straight north-south sections, use all three barriers, and place yellow above red. Horizontal barriers repeat the exported 4x6 Fiorwoods stamp with an explicit 16px grass column between stamps. Vertical barriers repeat the export-67 6x3 stamp with an explicit 16px grass row between stamps.
+- Every colored gate has exactly two physical plates, one on each side. A plate affects only its nearest gate; either plate holds that gate open, enabling two players to relay one another through the chain.
+- Plate occupancy is role-agnostic and server-authoritative. Pressed plates replicate with `plateActivated`; disconnected players are inert and do not hold a gate open.
+- Each barrier repeats the exact half-scale `statuePillars_* 6` editor composition. Opening plays the color-matched `10, 11, 12, 13` sinking frames and closing reverses through the sequence back to frame `6`.
+- Pillar sprites participate individually in entity Y-sorting at their bottom pixel, matching the central-hub pillars. Players below a pillar draw in front of it, while players above it draw behind it.
+- Releasing the last plate restores the authoritative collider immediately, independently of the closing animation. A player overlapping that collider is ejected to their recorded approach side; a player already stuck inside is pushed opposite their facing direction.
+
 ### Trap Cells and Cages
 
 - Each generated room deterministically selects 6-10 well-spaced, obstacle-free 6x6 maze cells after all other objective and obstacle placement. Trap cells never overlap the hub, team spawns, gates, bridges, swamps, sword fields, treasure cells, or the portal platform.
@@ -281,7 +293,7 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 
 Map generation lives in `packages/shared/src/maps/level1.ts`.
 
-`generateMazeLayout()` returns the tile map, spawn points, gate, bridge, swamp, sword-field, decorated T-junction, decorated vertical-passage, trap-cell, and chest placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable obstacle and cage state lives in `GameState`.
+`generateMazeLayout()` returns the tile map, spawn points, gate, bridge, swamp, sword-field, spike-gate, decorated T-junction, decorated vertical-passage, trap-cell, and chest placements, and a visual-only `dirtMask` used by the client ground renderer and minimap. Each bridge placement includes its deterministic hidden safe-tile mask; mutable obstacle and cage state lives in `GameState`.
 
 ### Core Layout
 
@@ -308,7 +320,7 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 10. Select up to 12 bridge passages across the whole maze, independently of spawn-to-hub routes. Each bridge connects two empty 6×6 cells, retains forest walls along its west and east banks, excludes spawn/hub/gate cells, and never shares either adjacent cell with another bridge.
 11. Assign every bridge a distinct deterministic hidden route through its 2×6 central-stone walkway. The permanent stair tiles at both ends are outside the puzzle. Routes have one safe tile at each endpoint and one or two non-adjacent rows where the route crosses between columns.
 12. Exclude actual safe player spawn cells, identify every dead end in all four orientations, deterministically select 60% of the eligible cells, then attach each cell's weighted one-, two-, or three-chest direction-mapped prefab. Portal placement excludes those reserved cells.
-13. After portal and sword-field placement, choose 6-10 deterministic trap cells from the remaining complete 6x6 walkable cells, preferring at least one cell of spacing between highlights.
+13. After portal and sword-field placement, select 3-6 deterministic horizontal or vertical passages for spike-gate chains, excluding every reserved objective and authored obstacle cell. Horizontal routes use two barriers in short or branching sections and add yellow in a continuing bounded corridor; vertical routes are limited to straight north-south sections, receive first consideration so the rarer orientation appears when eligible, and use yellow in the open slot above red. Then choose 6-10 deterministic trap cells from the remaining complete 6x6 walkable cells, preferring at least one cell of spacing between highlights.
 14. From the remaining north-closed E/S/W and south-closed N/E/W T-junctions, deterministically select up to 85% for the matching authored stone-ruin, signpost, and vegetation decoration, always selecting at least one whenever a compatible footprint exists. Each prefab reserves its center, west, east, and open vertical cell and is skipped when any is occupied by an objective, solid authored obstacle, spawn, hub, portal platform, or another selected prefab; floor-only trap cells may overlap it.
 15. Deterministically decorate 16% of the remaining open north-south cell boundaries, always selecting at least one when a compatible pair exists. Each exact style-editor (22) prefab reserves both adjacent 6x6 cells and cannot overlap any other generated cell occupant, trap, or decorated T-junction footprint.
 

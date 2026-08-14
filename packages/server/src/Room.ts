@@ -75,6 +75,11 @@ import {
   getRemainingSurvivorsToEscape,
   isWithinPortalInteractionRange,
   SWORD_FIELD_LOWER_DURATION_MS,
+  SPIKE_GATES_PER_OBSTACLE,
+  SPIKE_PLATES_PER_OBSTACLE,
+  getSpikeGateCollisionBounds,
+  getSpikeGateStateIndex,
+  getSpikeGatePlatePlacements,
   getBridgeCollapseMask,
   getBridgeRepairCollapsedMask,
   getBridgeBankReturnPosition,
@@ -92,6 +97,10 @@ import {
   type ChestDeadEndPlacement,
   type SwampPlacement,
   type SwordFieldPlacement,
+  type SpikeGateObstaclePlacement,
+  type SpikeGateBounds,
+  type SpikeGateState,
+  type SpikePlateState,
   type TIntersectionDecorationPlacement,
   type DecoratedVerticalPassagePlacement,
   type TrapCellPlacement,
@@ -355,6 +364,40 @@ function isPlayerOnPlate(
   return pLeft <= tRight && pRight >= tLeft && pTop <= tBottom && pBottom >= tTop;
 }
 
+function isPlayerOnWorldPlate(
+  playerX: number,
+  playerY: number,
+  plate: { x: number; y: number; width: number; height: number },
+): boolean {
+  const playerLeft = playerX - FEET_HITBOX_W / 2;
+  const playerTop = playerY - FEET_HITBOX_H;
+  const playerRight = playerLeft + FEET_HITBOX_W - 1;
+  const playerBottom = playerY - 1;
+  return (
+    playerLeft <= plate.x + plate.width - 1 &&
+    playerRight >= plate.x &&
+    playerTop <= plate.y + plate.height - 1 &&
+    playerBottom >= plate.y
+  );
+}
+
+function isPlayerOverlappingWorldBounds(
+  playerX: number,
+  playerY: number,
+  bounds: SpikeGateBounds,
+): boolean {
+  const playerLeft = playerX - FEET_HITBOX_W / 2;
+  const playerTop = playerY - FEET_HITBOX_H;
+  const playerRight = playerLeft + FEET_HITBOX_W - 1;
+  const playerBottom = playerY - 1;
+  return (
+    playerLeft <= bounds.right &&
+    playerRight >= bounds.left &&
+    playerTop <= bounds.bottom &&
+    playerBottom >= bounds.top
+  );
+}
+
 export class Room {
   readonly id: string;
   readonly isPublic: boolean;
@@ -427,6 +470,9 @@ export class Room {
   /** Authored survivor-orb/warden-interaction barriers from map generation. */
   private readonly swordFields: SwordFieldPlacement[];
 
+  /** Cooperative two- or three-gate obstacle chains spanning either passage axis. */
+  private readonly spikeGateObstacles: SpikeGateObstaclePlacement[];
+
   /** Deterministic 6x6 cells visible to and activatable by wardens. */
   private readonly trapCells: TrapCellPlacement[];
 
@@ -438,6 +484,12 @@ export class Room {
 
   /** Shared lowering/cleared state for every sword barrier. */
   private readonly swordFieldStates: SwordFieldState[];
+
+  /** Shared open/closed state for each colored spike barrier. */
+  private readonly spikeGateStates: SpikeGateState[];
+
+  /** Shared physical occupancy state for each spike-gate plate. */
+  private readonly spikePlateStates: SpikePlateState[];
 
   /** Authored collidable treasure prefabs in south-opening dead ends. */
   private readonly chestDeadEnds: ChestDeadEndPlacement[];
@@ -512,6 +564,7 @@ export class Room {
     this.bridges = layout.bridges;
     this.swamps = layout.swamps;
     this.swordFields = layout.swordFields;
+    this.spikeGateObstacles = layout.spikeGateObstacles;
     this.trapCells = layout.trapCells;
     this.tIntersectionDecorations = layout.tIntersectionDecorations;
     this.decoratedVerticalPassages = layout.decoratedVerticalPassages;
@@ -520,6 +573,19 @@ export class Room {
       loweringStartedTick: null,
       cleared: false,
     }));
+    this.spikeGateStates = this.spikeGateObstacles.flatMap((_, obstacleIndex) =>
+      Array.from({ length: SPIKE_GATES_PER_OBSTACLE }, (_unused, gateIndex) => ({
+        spikeGateIndex: getSpikeGateStateIndex(obstacleIndex, gateIndex),
+        open: false,
+      })),
+    );
+    this.spikePlateStates = this.spikeGateObstacles.flatMap((_, obstacleIndex) =>
+      Array.from({ length: SPIKE_PLATES_PER_OBSTACLE }, (_unused, localIndex) => ({
+        spikePlateIndex:
+          obstacleIndex * SPIKE_PLATES_PER_OBSTACLE + localIndex,
+        pressed: false,
+      })),
+    );
     this.chestDeadEnds = layout.chestDeadEnds;
     this.chestStates = this.chestDeadEnds.map((_, chestIndex) => ({
       chestIndex,
@@ -586,6 +652,8 @@ export class Room {
       bridgeStates: this.bridgeStates,
       chestStates: this.chestStates,
       swordFieldStates: this.swordFieldStates,
+      spikeGateStates: this.spikeGateStates,
+      spikePlateStates: this.spikePlateStates,
       cageStates: this.cageStates,
     };
     console.info(
@@ -598,7 +666,7 @@ export class Room {
       );
     }
     console.info(
-      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Bridges: ${this.bridges.length}, Swamps: ${this.swamps.length}, Sword fields: ${this.swordFields.length}, Trap cells: ${this.trapCells.length}`,
+      `  Gates: ${this.gates.length}, Pressure plates: ${this.pressurePlates.length}, Spike-gate obstacles: ${this.spikeGateObstacles.length}, Bridges: ${this.bridges.length}, Swamps: ${this.swamps.length}, Sword fields: ${this.swordFields.length}, Trap cells: ${this.trapCells.length}`,
     );
     if (this.portalPosition) {
       console.info(
@@ -1867,6 +1935,8 @@ export class Room {
             warden.id,
             this.tIntersectionDecorations,
             this.decoratedVerticalPassages,
+            this.spikeGateObstacles,
+            this.spikeGateStates,
           ),
         );
         if (!destination) continue;
@@ -2111,6 +2181,12 @@ export class Room {
     if (!this.isMatchRunning()) return;
     this.state.tick++;
     this.advanceSwordFields();
+    const spikeGatePreviousPositions = new Map(
+      this.state.players.map((player) => [
+        player.id,
+        { x: player.x, y: player.y },
+      ] as const),
+    );
 
     for (const player of this.state.players) {
       const queue = this.inputQueues.get(player.id);
@@ -2175,6 +2251,8 @@ export class Room {
           player.id,
           this.tIntersectionDecorations,
           this.decoratedVerticalPassages,
+          this.spikeGateObstacles,
+          this.spikeGateStates,
         );
         player.x = result.x;
         player.y = result.y;
@@ -2222,6 +2300,7 @@ export class Room {
 
     // ── Pressure plate / gate logic ──────────────────────────────────────
     this.updateGateStates();
+    this.updateSpikeGateStates(spikeGatePreviousPositions);
 
     const update: TickUpdateMessage = {
       type: MessageType.TickUpdate,
@@ -2818,6 +2897,128 @@ export class Room {
     }
   }
 
+  /** Open each colored spike barrier while either of its two nearest plates is held. */
+  private updateSpikeGateStates(
+    previousPositions: ReadonlyMap<string, { x: number; y: number }> = new Map(),
+  ): void {
+    for (
+      let obstacleIndex = 0;
+      obstacleIndex < this.spikeGateObstacles.length;
+      obstacleIndex++
+    ) {
+      const placement = this.spikeGateObstacles[obstacleIndex];
+      const plates = getSpikeGatePlatePlacements(
+        placement,
+        obstacleIndex,
+        this.map.tileSize,
+      );
+
+      for (const plate of plates) {
+        const pressed = this.state.players.some(
+          (player) => player.connected && isPlayerOnWorldPlate(player.x, player.y, plate),
+        );
+        const state = this.spikePlateStates[plate.spikePlateIndex];
+        if (state) state.pressed = pressed;
+      }
+
+      for (let gateIndex = 0; gateIndex < placement.gateCount; gateIndex++) {
+        const spikeGateIndex = getSpikeGateStateIndex(obstacleIndex, gateIndex);
+        const open = plates.some(
+          (plate) =>
+            plate.gateIndex === gateIndex &&
+            (this.spikePlateStates[plate.spikePlateIndex]?.pressed ?? false),
+        );
+        const state = this.spikeGateStates[spikeGateIndex];
+        if (!state || state.open === open) continue;
+        state.open = open;
+        if (!open) {
+          this.ejectPlayersFromClosingSpikeGate(
+            placement,
+            gateIndex,
+            spikeGateIndex,
+            previousPositions,
+          );
+        }
+        console.info(
+          `[Room:${this.id}] Spike gate ${spikeGateIndex} ${open ? 'OPENED' : 'CLOSED'} by its nearest plate`,
+        );
+      }
+    }
+  }
+
+  /** Move any overlapping player back to the side they approached from. */
+  private ejectPlayersFromClosingSpikeGate(
+    placement: SpikeGateObstaclePlacement,
+    gateIndex: number,
+    spikeGateIndex: number,
+    previousPositions: ReadonlyMap<string, { x: number; y: number }>,
+  ): void {
+    const bounds = getSpikeGateCollisionBounds(placement, gateIndex, this.map.tileSize);
+    const leftEjectionX = bounds.left - FEET_HITBOX_W / 2;
+    const rightEjectionX = bounds.right + 1 + FEET_HITBOX_W / 2;
+    const northEjectionY = bounds.top;
+    const southEjectionY = bounds.bottom + 1 + FEET_HITBOX_H;
+
+    for (const player of this.state.players) {
+      if (!player.connected || player.escaped) continue;
+      if (!isPlayerOverlappingWorldBounds(player.x, player.y, bounds)) continue;
+
+      const previous = previousPositions.get(player.id);
+      const previousLeft = previous ? previous.x - FEET_HITBOX_W / 2 : null;
+      const previousRight =
+        previousLeft === null ? null : previousLeft + FEET_HITBOX_W - 1;
+      const previousTop = previous ? previous.y - FEET_HITBOX_H : null;
+      const previousBottom = previous ? previous.y - 1 : null;
+      const approachedFromLeft =
+        previousRight !== null && previousRight < bounds.left;
+      const approachedFromRight =
+        previousLeft !== null && previousLeft > bounds.right;
+      const approachedFromNorth =
+        previousBottom !== null && previousBottom < bounds.top;
+      const approachedFromSouth =
+        previousTop !== null && previousTop > bounds.bottom;
+
+      if (placement.orientation === 'horizontal') {
+        if (approachedFromLeft || (!approachedFromRight && player.facing === 'right')) {
+          player.x = leftEjectionX;
+        } else if (
+          approachedFromRight ||
+          (!approachedFromLeft && player.facing === 'left')
+        ) {
+          player.x = rightEjectionX;
+        } else {
+          player.x =
+            Math.abs(player.x - leftEjectionX) <=
+            Math.abs(player.x - rightEjectionX)
+              ? leftEjectionX
+              : rightEjectionX;
+        }
+      } else if (
+        approachedFromNorth ||
+        (!approachedFromSouth && player.facing === 'down')
+      ) {
+        player.y = northEjectionY;
+      } else if (
+        approachedFromSouth ||
+        (!approachedFromNorth && player.facing === 'up')
+      ) {
+        player.y = southEjectionY;
+      } else {
+        player.y =
+          Math.abs(player.y - northEjectionY) <=
+          Math.abs(player.y - southEjectionY)
+            ? northEjectionY
+            : southEjectionY;
+      }
+
+      player.isMoving = false;
+      this.clearQueuedInputs(player);
+      console.info(
+        `[Room:${this.id}] Ejected ${player.id} from closing spike gate ${spikeGateIndex}`,
+      );
+    }
+  }
+
   /** Apply one authoritative gate transition to collision, room state, and clients. */
   private setGateOpen(gateIndex: number, open: boolean): void {
     const gate = this.gates[gateIndex];
@@ -2882,6 +3083,8 @@ export class Room {
       bridgeStates: this.bridgeStates.map((bridgeState) => ({ ...bridgeState })),
       chestStates: this.chestStates.map((chestState) => ({ ...chestState })),
       swordFieldStates: this.swordFieldStates.map((state) => ({ ...state })),
+      spikeGateStates: this.spikeGateStates.map((state) => ({ ...state })),
+      spikePlateStates: this.spikePlateStates.map((state) => ({ ...state })),
       cageStates: this.cageStates.map((state) => ({ ...state })),
     };
   }

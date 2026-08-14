@@ -23,6 +23,9 @@ import type {
   SwampPlacement,
   SwordFieldPlacement,
   SwordFieldState,
+  SpikeGateObstaclePlacement,
+  SpikeGateState,
+  SpikePlateState,
   TrapCellPlacement,
   TIntersectionDecorationPlacement,
   DecoratedVerticalPassagePlacement,
@@ -60,6 +63,7 @@ import { addBridgeObstacles, type BridgeObstacleVisual } from './BridgeObstacle'
 import { BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES } from './BridgeObstacleLayout';
 import { addSwampObstacles, type SwampObstacleVisual } from './SwampObstacle';
 import { addSwordFields, type SwordFieldVisual } from './SwordField';
+import { addSpikeGateObstacles, type SpikeGateObstacleVisual } from './SpikeGate';
 import { addChestDeadEnds, type ChestDeadEndVisual } from './ChestDeadEnd';
 import { addTIntersectionDecorations } from './TIntersectionDecoration';
 import { addDecoratedVerticalPassages } from './DecoratedVerticalPassage';
@@ -409,6 +413,10 @@ export class TilemapRenderer {
   readonly swordFieldSprites: Container[];
   /** Stateful sword lowering visuals in generated placement order. */
   readonly swordFieldVisuals: SwordFieldVisual[];
+  /** Colored spike barriers and their paired plates, sorted with players. */
+  readonly spikeGateSprites: Container[];
+  /** Stateful spike-gate visuals in generated obstacle order. */
+  readonly spikeGateVisuals: SpikeGateObstacleVisual[];
   /** Authored tree backing and collidable props in treasure dead ends. */
   readonly chestDeadEndSprites: Container[];
   /** Authored signposts and vegetation that Y-sort around decorated T-junctions. */
@@ -428,6 +436,7 @@ export class TilemapRenderer {
     bridges: BridgePlacement[],
     swamps: SwampPlacement[],
     swordFields: SwordFieldPlacement[],
+    spikeGateObstacles: SpikeGateObstaclePlacement[],
     trapCells: TrapCellPlacement[],
     chestDeadEnds: ChestDeadEndPlacement[],
     tIntersectionDecorations: TIntersectionDecorationPlacement[],
@@ -833,6 +842,14 @@ export class TilemapRenderer {
     );
     this.swordFieldSprites = swordFieldRender.entities;
     this.swordFieldVisuals = swordFieldRender.visuals;
+    const spikeGateRender = addSpikeGateObstacles(
+      spikeGateObstacles,
+      ts,
+      assets.spikeGateTextures,
+      this.groundDetailLayer,
+    );
+    this.spikeGateSprites = spikeGateRender.entities;
+    this.spikeGateVisuals = spikeGateRender.visuals;
     const chestRender = addChestDeadEnds(
       chestDeadEnds,
       ts,
@@ -966,6 +983,7 @@ export class TilemapRenderer {
     for (const bridge of this.bridgeVisuals) bridge.update(dt);
     for (const swamp of this.swampVisuals) swamp.update(dt);
     for (const swordField of this.swordFieldVisuals) swordField.update(dt);
+    for (const spikeGate of this.spikeGateVisuals) spikeGate.update(dt);
     for (const chest of this.chestDeadEndVisuals) chest.update(dt);
   }
 
@@ -985,6 +1003,17 @@ export class TilemapRenderer {
 
   beginSwordFieldLowering(swordFieldIndex: number): void {
     this.swordFieldVisuals[swordFieldIndex]?.playFromStart();
+  }
+
+  /** Apply authoritative physical plate and open/closed state to spike gates. */
+  syncSpikeGateStates(
+    gateStates: readonly SpikeGateState[],
+    plateStates: readonly SpikePlateState[],
+    animate: boolean,
+  ): void {
+    for (const visual of this.spikeGateVisuals) {
+      visual.syncStates(gateStates, plateStates, animate);
+    }
   }
 
   /** Apply authoritative opened state to every deterministic treasure chest. */
@@ -1101,6 +1130,11 @@ export class TilemapRenderer {
       sprite.destroy({ children: true });
     }
 
+    for (const sprite of this.spikeGateSprites) {
+      sprite.parent?.removeChild(sprite);
+      sprite.destroy({ children: true });
+    }
+
     for (const sprite of this.chestDeadEndSprites) {
       sprite.parent?.removeChild(sprite);
       sprite.destroy({ children: true });
@@ -1139,6 +1173,8 @@ export class TilemapRenderer {
     this.swampVisuals.length = 0;
     this.swordFieldSprites.length = 0;
     this.swordFieldVisuals.length = 0;
+    this.spikeGateSprites.length = 0;
+    this.spikeGateVisuals.length = 0;
     this.chestDeadEndSprites.length = 0;
     this.chestDeadEndVisuals.length = 0;
     this.tIntersectionDecorationSprites.length = 0;

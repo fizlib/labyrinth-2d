@@ -18,6 +18,7 @@ import {
   type ChestDeadEndVariant,
   type DecoratedVerticalPassagePlacement,
   type SwampPlacement,
+  type SpikeGateObstaclePlacement,
   type SwordFieldPlacement,
   type TIntersectionDecorationPlacement,
   type TileMapData,
@@ -33,6 +34,11 @@ import { getPlayerSwampTerrain, SWAMP_SPEED_MULTIPLIER } from './swamp.js';
 import { getSwordFieldCollisionBounds, type SwordFieldState } from './sword-field.js';
 import { findActivePlayerCage, getCageCollisionBounds, type CageState } from './cage.js';
 import { getCentralHubCollisionBounds } from './central-hub.js';
+import {
+  getSpikeGateCollisionBounds,
+  getSpikeGateStateIndex,
+  type SpikeGateState,
+} from './spike-gate.js';
 
 /** Optional portal collider for dynamic entity collision. */
 export interface PortalCollider {
@@ -505,6 +511,8 @@ export function isPositionValid(
   movingPlayerId?: string,
   tIntersectionDecorations: readonly TIntersectionDecorationPlacement[] = [],
   decoratedVerticalPassages: readonly DecoratedVerticalPassagePlacement[] = [],
+  spikeGateObstacles: readonly SpikeGateObstaclePlacement[] = [],
+  spikeGateStates: readonly SpikeGateState[] = [],
 ): boolean {
   const ts = map.tileSize;
 
@@ -577,6 +585,32 @@ export function isPositionValid(
     }
   }
 
+  for (
+    let obstacleIndex = 0;
+    obstacleIndex < spikeGateObstacles.length;
+    obstacleIndex++
+  ) {
+    const placement = spikeGateObstacles[obstacleIndex];
+    for (let gateIndex = 0; gateIndex < placement.gateCount; gateIndex++) {
+      const stateIndex = getSpikeGateStateIndex(obstacleIndex, gateIndex);
+      const state = spikeGateStates.find(
+        (candidate) => candidate.spikeGateIndex === stateIndex,
+      );
+      if (state?.open) continue;
+      if (
+        intersectsBounds(
+          left,
+          top,
+          right,
+          bottom,
+          getSpikeGateCollisionBounds(placement, gateIndex, ts),
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+
   for (const cage of cages) {
     // A prisoner occupies the inside of their own cage. Closed cages are handled
     // by applyInputWithCollision; an opened prisoner may pass through its gates.
@@ -637,6 +671,8 @@ export function applyInputWithCollision(
   movingPlayerId?: string,
   tIntersectionDecorations: readonly TIntersectionDecorationPlacement[] = [],
   decoratedVerticalPassages: readonly DecoratedVerticalPassagePlacement[] = [],
+  spikeGateObstacles: readonly SpikeGateObstaclePlacement[] = [],
+  spikeGateStates: readonly SpikeGateState[] = [],
 ): { x: number; y: number } {
   let newX = x;
   let newY = y;
@@ -674,6 +710,8 @@ export function applyInputWithCollision(
         movingPlayerId,
         tIntersectionDecorations,
         decoratedVerticalPassages,
+        spikeGateObstacles,
+        spikeGateStates,
       )
     ) {
       newX = candidateX;
@@ -697,6 +735,8 @@ export function applyInputWithCollision(
         movingPlayerId,
         tIntersectionDecorations,
         decoratedVerticalPassages,
+        spikeGateObstacles,
+        spikeGateStates,
       )
     ) {
       newY = candidateY;

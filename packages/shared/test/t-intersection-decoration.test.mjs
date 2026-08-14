@@ -86,6 +86,8 @@ test('decorative ruins select deterministic unoccupied north- and south-closed T
         first.chestDeadEnds,
         portal,
         seed,
+        T_INTERSECTION_DECORATION_DENSITY,
+        first.spikeGateObstacles,
       ),
     );
 
@@ -103,6 +105,12 @@ test('decorative ruins select deterministic unoccupied north- and south-closed T
     for (const sword of first.swordFields) {
       occupied.add(`${sword.westCellX},${sword.cellY}`);
       occupied.add(`${sword.westCellX + 1},${sword.cellY}`);
+    }
+    for (const spikeGate of first.spikeGateObstacles) {
+      occupied.add(`${spikeGate.cellX},${spikeGate.cellY}`);
+      occupied.add(
+        `${spikeGate.cellX + (spikeGate.orientation === 'horizontal' ? 1 : 0)},${spikeGate.cellY + (spikeGate.orientation === 'vertical' ? 1 : 0)}`,
+      );
     }
     for (const chest of first.chestDeadEnds) {
       occupied.add(`${chest.cellX},${chest.cellY}`);
@@ -200,6 +208,8 @@ test('either expanded prefab is skipped when any neighboring footprint cell is o
         layout.chestDeadEnds,
         portal,
         seed,
+        T_INTERSECTION_DECORATION_DENSITY,
+        layout.spikeGateObstacles,
       );
       assert.equal(
         placements.some(
@@ -238,6 +248,7 @@ test('every maze with a valid candidate contains a supported decorated T-junctio
       portal,
       seed,
       1,
+      layout.spikeGateObstacles,
     );
     if (compatible.length > 0) {
       assert.ok(

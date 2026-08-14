@@ -17,6 +17,12 @@ import {
   getCentralHubRunestonePlacements,
   isCentralHubSuppressedGroundTile,
   getDecoratedVerticalPassageBounds,
+  getSpikeGateCollisionBounds,
+  getSpikeGatePlatePlacements,
+  SPIKE_GATE_COLUMN_STRIDE,
+  SPIKE_GATE_COLORS,
+  SPIKE_GATE_TERRAIN_COLUMNS,
+  SPIKE_GATE_TERRAIN_ROWS,
   getTIntersectionDecorationBounds,
   getPortalBounds,
   getPortalPlatformBounds,
@@ -28,6 +34,7 @@ import {
   type DecoratedVerticalPassagePlacement,
   type PortalBounds,
   type SwampPlacement,
+  type SpikeGateObstaclePlacement,
   type TileMapData,
 } from '@labyrinth/shared';
 import {
@@ -76,6 +83,15 @@ import {
   CENTRAL_HUB_ASSETS,
   CENTRAL_HUB_SPRITE_SPECS,
 } from '../systems/CentralHubLayout.generated';
+import {
+  SPIKE_GATE_BASIC_GRASS_ASSET,
+  SPIKE_GATE_CLOSED_FRAME,
+  SPIKE_GATE_PLATE_DEACTIVATED_PATH,
+  SPIKE_GATE_POST_SPRITES,
+  SPIKE_GATE_TERRAIN_SPRITES,
+  getSpikeGatePillarAssetPath,
+  getSpikeGateTerrainAssetPath,
+} from '../systems/SpikeGateLayout';
 import type {
   EditorCollider,
   EditorElement,
@@ -107,6 +123,8 @@ const BRIDGE_SAMPLE_NORTH_CELL_Y = 11;
 const SWAMP_SAMPLE_WEST_CELL_X = 2;
 const SWAMP_SAMPLE_CELL_Y = 5;
 const SWAMP_SAMPLE_LENGTH_CELLS = 2;
+const SPIKE_GATE_SAMPLE_WEST_CELL_X = 3;
+const SPIKE_GATE_SAMPLE_CELL_Y = 14;
 const CHEST_SAMPLE_CELL_X = 2;
 const CHEST_SAMPLE_CELL_Y = 9;
 const T_INTERSECTION_SAMPLE_CELL_X = 4;
@@ -998,6 +1016,115 @@ function addGateObstacleElements(
   }
 }
 
+function addSpikeGateObstacleElements(
+  elements: EditorElement[],
+  colliders: EditorCollider[],
+): void {
+  const westCellTileX = WALL_WIDTH + SPIKE_GATE_SAMPLE_WEST_CELL_X * CELL_STEP_X;
+  const cellTileY = WALL_HEIGHT + SPIKE_GATE_SAMPLE_CELL_Y * CELL_STEP_Y;
+  const placement: SpikeGateObstaclePlacement = {
+    orientation: 'horizontal',
+    cellX: SPIKE_GATE_SAMPLE_WEST_CELL_X,
+    cellY: SPIKE_GATE_SAMPLE_CELL_Y,
+    tileX: westCellTileX + CELL_SIZE,
+    tileY: cellTileY,
+    gateCount: 3,
+  };
+  const localAnchorX = (placement.tileX - CROP_TILE_X) * TILE;
+  const localAnchorY = (placement.tileY - CROP_TILE_Y) * TILE;
+
+  for (let gateIndex = 0; gateIndex < SPIKE_GATE_COLORS.length; gateIndex++) {
+    const color = SPIKE_GATE_COLORS[gateIndex];
+    const gateOffset = gateIndex * SPIKE_GATE_COLUMN_STRIDE;
+    for (const spec of SPIKE_GATE_TERRAIN_SPRITES) {
+      elements.push(
+        assetElement(
+          `Spike gate · ${color} · terrain ${spec.asset}`,
+          'ground.grass',
+          getSpikeGateTerrainAssetPath(spec.asset),
+          32,
+          32,
+          localAnchorX + gateOffset + spec.x,
+          localAnchorY + spec.y,
+          spec.w,
+          spec.h,
+          0,
+        ),
+      );
+    }
+
+    if (gateIndex >= SPIKE_GATE_COLORS.length - 1) continue;
+    const grassX =
+      localAnchorX + gateOffset + SPIKE_GATE_TERRAIN_COLUMNS * TILE;
+    for (let row = 0; row < SPIKE_GATE_TERRAIN_ROWS; row++) {
+      elements.push(
+        assetElement(
+          `Spike gate · grass gap ${gateIndex + 1} · row ${row + 1}`,
+          'ground.grass',
+          getSpikeGateTerrainAssetPath(SPIKE_GATE_BASIC_GRASS_ASSET),
+          32,
+          32,
+          grassX,
+          localAnchorY + row * TILE,
+          TILE,
+          TILE,
+          0,
+        ),
+      );
+    }
+  }
+
+  for (let gateIndex = 0; gateIndex < SPIKE_GATE_COLORS.length; gateIndex++) {
+    const color = SPIKE_GATE_COLORS[gateIndex];
+    for (const [postIndex, spec] of SPIKE_GATE_POST_SPRITES.entries()) {
+      elements.push(
+        assetElement(
+          `Spike gate · ${color} · pillar ${postIndex + 1}`,
+          'gate',
+          getSpikeGatePillarAssetPath(color, SPIKE_GATE_CLOSED_FRAME),
+          27,
+          70,
+          localAnchorX + gateIndex * SPIKE_GATE_COLUMN_STRIDE + spec.x,
+          localAnchorY + spec.y,
+          spec.w,
+          spec.h,
+          1000 + (placement.tileY + CELL_SIZE) * 1000 + gateIndex,
+        ),
+      );
+    }
+
+    const bounds = getSpikeGateCollisionBounds(placement, gateIndex, TILE);
+    colliders.push(
+      collider(
+        `Spike gate · ${color} · closed barrier`,
+        bounds.left - CROP_TILE_X * TILE,
+        bounds.top - CROP_TILE_Y * TILE,
+        bounds.right - bounds.left + 1,
+        bounds.bottom - bounds.top + 1,
+        'gate',
+      ),
+    );
+  }
+
+  for (const plate of getSpikeGatePlatePlacements(placement, 0, TILE)) {
+    const color = SPIKE_GATE_COLORS[plate.gateIndex];
+    elements.push(
+      assetElement(
+        `Spike gate · ${color} · ${plate.side}-side plate`,
+        'pressure-plate',
+        SPIKE_GATE_PLATE_DEACTIVATED_PATH,
+        32,
+        32,
+        plate.x - CROP_TILE_X * TILE,
+        plate.y - CROP_TILE_Y * TILE,
+        plate.width,
+        plate.height,
+        1000 + Math.round(plate.y) * 1000 + 200,
+      ),
+    );
+  }
+}
+
 function addCentralHubElements(
   map: TileMapData,
   elements: EditorElement[],
@@ -1351,6 +1478,7 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
   addWallElements(map, elements);
   addWallColliders(map, colliders);
   addGateObstacleElements(layout, elements, colliders);
+  addSpikeGateObstacleElements(elements, colliders);
   addCentralHubElements(map, elements, colliders);
   addPortalCellElements(elements, colliders);
   addChestDeadEndElements(layout, elements, colliders);
@@ -1387,6 +1515,8 @@ export function createSampleDocument(): StyleEditorDocumentV1 {
       'The south-closed T-junction composition from style export (19) is pinned at cell (4,5), spans its center, west, east, and north cells, and uses inferred signpost and bush colliders matching the established prefab dimensions.',
       'The decorated vertical passage from style export (22) is pinned between cells (3,7) and (3,8), with its exact 6x12 terrain repaint, foliage, tree assembly, and four authored colliders. Runtime generation requires both logical cells to be otherwise unoccupied.',
       'The southern gate obstacle includes its editable 6×4 front-gate tile assembly, dirt approach tiles, two spawn-side buttons, one hub-side button, and closed-gate collider.',
+      'The spike-gate authoring reference is pinned between seed-44 cells (3,14) and (4,14): each red/blue/yellow barrier repeats the exact exported 4×6 terrain stamp, adjacent stamps have one basic-grass column between them, each gate has two nearest plates at the export-65 offsets, and each closed barrier preserves the exact 13×95 editor collider. Runtime short or branching corridors omit the yellow third gate.',
+      'Vertical runtime spike gates use the export-67 6×3 terrain stamp and staggered twelve-pillar composition, plus the 95×9 collider and farther north/south plate offsets finalized in export 70. They spawn as three-barrier compositions in straight corridor sections, with yellow in the authored upper slot and one basic-grass row between barriers. Every pillar Y-sorts independently at its bottom pixel like the central-hub pillars.',
       'South-east forest corners use the authored ground-detail assembly; its lower edge is positioned at the right seam and layers above adjacent corner faces while remaining below game entities.',
       'South-west forest corners use the authored wider root assembly, with its extra left column included in the solid 11-tile vertical wall band while every walkable cell remains 6×6 tiles.',
       'Each wall sprite name records its authored role, source cell topology, and original map tile. Preserve those names when editing so a later export identifies the rendering rule and location unambiguously.',

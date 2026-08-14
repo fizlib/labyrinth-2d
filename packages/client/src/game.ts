@@ -1987,6 +1987,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       entityLayer.addChild(swordFieldSprite);
     }
 
+    for (const spikeGateSprite of renderer.spikeGateSprites) {
+      entityLayer.addChild(spikeGateSprite);
+    }
+
     for (const chestDeadEndSprite of renderer.chestDeadEndSprites) {
       entityLayer.addChild(chestDeadEndSprite);
     }
@@ -2037,6 +2041,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout.bridges,
         currentLayout.swamps,
         currentLayout.swordFields,
+        currentLayout.spikeGateObstacles,
         currentLayout.trapCells,
         currentLayout.chestDeadEnds,
         currentLayout.tIntersectionDecorations,
@@ -2058,6 +2063,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       replacementRenderer.syncSwordFieldStates(
         latestServerState.swordFieldStates,
         latestServerState.tick,
+        false,
+      );
+      replacementRenderer.syncSpikeGateStates(
+        latestServerState.spikeGateStates,
+        latestServerState.spikePlateStates,
         false,
       );
       replacementRenderer.syncChestStates(latestServerState.chestStates, false);
@@ -2323,6 +2333,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           layout.bridges,
           layout.swamps,
           layout.swordFields,
+          layout.spikeGateObstacles,
           layout.trapCells,
           layout.chestDeadEnds,
           layout.tIntersectionDecorations,
@@ -2345,6 +2356,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       activeTilemapRenderer.syncSwordFieldStates(
         gameState.swordFieldStates,
         gameState.tick,
+        false,
+      );
+      activeTilemapRenderer.syncSpikeGateStates(
+        gameState.spikeGateStates,
+        gameState.spikePlateStates,
         false,
       );
       activeTilemapRenderer.syncChestStates(gameState.chestStates, false);
@@ -2511,6 +2527,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         gameState.tick,
         true,
       );
+      tilemapRenderer?.syncSpikeGateStates(
+        gameState.spikeGateStates,
+        gameState.spikePlateStates,
+        true,
+      );
       tilemapRenderer?.syncChestStates(gameState.chestStates, true);
       syncCageVisuals(gameState.cageStates, true);
 
@@ -2554,6 +2575,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
               localPlayerId ?? undefined,
               currentLayout?.tIntersectionDecorations,
               currentLayout?.decoratedVerticalPassages,
+              currentLayout?.spikeGateObstacles,
+              gameState.spikeGateStates,
             );
             reconciledX = result.x;
             reconciledY = result.y;
@@ -3262,6 +3285,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         net.playerId,
         currentLayout?.tIntersectionDecorations,
         currentLayout?.decoratedVerticalPassages,
+        currentLayout?.spikeGateObstacles,
+        latestServerState?.spikeGateStates,
       );
       localX = result.x;
       localY = result.y;

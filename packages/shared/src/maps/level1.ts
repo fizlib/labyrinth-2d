@@ -105,6 +105,22 @@ export interface SwordFieldPlacement {
   tileY: number;
 }
 
+export type SpikeGateOrientation = 'horizontal' | 'vertical';
+
+/** Two or three colored spike gates spanning one open wall passage. */
+export interface SpikeGateObstaclePlacement {
+  /** Direction in which players relay through the gate chain. */
+  orientation: SpikeGateOrientation;
+  /** West cell for horizontal obstacles; north cell for vertical obstacles. */
+  cellX: number;
+  cellY: number;
+  /** Top-left tile of the wall passage used as the authoring anchor. */
+  tileX: number;
+  tileY: number;
+  /** Horizontal chains may omit yellow; vertical straight-corridor chains use all three. */
+  gateCount: 2 | 3;
+}
+
 /** Authored ruins/signpost decoration centered on a north- or south-closed T-junction. */
 export interface TIntersectionDecorationPlacement {
   cellX: number;
@@ -170,6 +186,8 @@ export interface GeneratedMazeLayout {
   swamps: SwampPlacement[];
   /** Role-interactive sword barriers placed in qualifying horizontal passages. */
   swordFields: SwordFieldPlacement[];
+  /** Cooperative spike obstacles placed in qualifying horizontal or vertical passages. */
+  spikeGateObstacles: SpikeGateObstaclePlacement[];
   /** Visual ruins/signpost prefabs spanning free cells around selected T-junctions. */
   tIntersectionDecorations: TIntersectionDecorationPlacement[];
   /** Visual-only authored compositions spanning free vertical cell pairs. */
@@ -707,6 +725,10 @@ const SWORD_FIELD_RANDOM_SALT = 0x11;
 const SWORD_FIELD_DENSITY = 0.05;
 const MIN_EXTRA_SWORD_FIELDS = 1;
 const MAX_EXTRA_SWORD_FIELDS = 3;
+const SPIKE_GATE_RANDOM_SALT = 0x7f4a7c15;
+export const SPIKE_GATE_OBSTACLE_DENSITY = 0.1;
+export const MIN_SPIKE_GATE_OBSTACLES = 3;
+export const MAX_SPIKE_GATE_OBSTACLES = 6;
 const CHEST_RANDOM_SALT = 0x3c6ef017;
 const CHEST_DEAD_END_SELECTION_SALT = 0x9e3779b9;
 const TRAP_CELL_RANDOM_SALT = 0x6d2b79f5;
@@ -1562,6 +1584,234 @@ export function computeSwordFieldPlacements(
   return placements;
 }
 
+function getSpikeGateObstacleRank(
+  seed: number,
+  cellX: number,
+  cellY: number,
+  orientation: SpikeGateOrientation,
+): number {
+  let value = seed ^ SPIKE_GATE_RANDOM_SALT;
+  value = Math.imul(value ^ (cellX + 1), 0x45d9f3b);
+  value = Math.imul(value ^ (cellY + 1), 0x119de1f3);
+  value ^= orientation === 'vertical' ? 0x6d2b79f5 : 0;
+  value = Math.imul(value ^ (value >>> 16), 0x85ebca6b);
+  value ^= value >>> 16;
+  return value >>> 0;
+}
+
+function getSpikeGateCountForPassage(
+  data: number[],
+  cellX: number,
+  cellY: number,
+  orientation: SpikeGateOrientation,
+): 2 | 3 {
+  const secondCellX = cellX + (orientation === 'horizontal' ? 1 : 0);
+  const secondCellY = cellY + (orientation === 'vertical' ? 1 : 0);
+  if (orientation === 'horizontal') {
+    const continuesEast =
+      secondCellX < GRID_CELLS - 1 &&
+      areCellsConnected(
+        data,
+        secondCellX,
+        secondCellY,
+        secondCellX + 1,
+        secondCellY,
+      );
+    const opensNorth =
+      secondCellY > 0 &&
+      areCellsConnected(
+        data,
+        secondCellX,
+        secondCellY,
+        secondCellX,
+        secondCellY - 1,
+      );
+    const opensSouth =
+      secondCellY < GRID_CELLS - 1 &&
+      areCellsConnected(
+        data,
+        secondCellX,
+        secondCellY,
+        secondCellX,
+        secondCellY + 1,
+      );
+    return continuesEast && !opensNorth && !opensSouth ? 3 : 2;
+  }
+
+  // The vertical export is centered in the wall between these two cells, with
+  // the yellow barrier occupying the free slot above red rather than below blue.
+  return 3;
+}
+
+function cellHasHorizontalConnection(data: number[], cellX: number, cellY: number): boolean {
+  return (
+    (cellX > 0 && areCellsConnected(data, cellX, cellY, cellX - 1, cellY)) ||
+    (cellX < GRID_CELLS - 1 &&
+      areCellsConnected(data, cellX, cellY, cellX + 1, cellY))
+  );
+}
+
+function getSpikeGateOccupiedCellKeys(
+  placement: Pick<SpikeGateObstaclePlacement, 'orientation' | 'cellX' | 'cellY'>,
+): [string, string] {
+  return placement.orientation === 'horizontal'
+    ? [`${placement.cellX},${placement.cellY}`, `${placement.cellX + 1},${placement.cellY}`]
+    : [`${placement.cellX},${placement.cellY}`, `${placement.cellX},${placement.cellY + 1}`];
+}
+
+function occupySpikeGateCells(
+  occupiedCells: Set<string>,
+  placement: Pick<SpikeGateObstaclePlacement, 'orientation' | 'cellX' | 'cellY'>,
+): void {
+  for (const key of getSpikeGateOccupiedCellKeys(placement)) occupiedCells.add(key);
+}
+
+/** Select deterministic, non-overlapping horizontal and vertical spike-gate chains. */
+export function computeSpikeGateObstaclePlacements(
+  data: number[],
+  spawnPoints: readonly SpawnPoint[],
+  gates: readonly GatePlacement[],
+  bridges: readonly BridgePlacement[],
+  swamps: readonly SwampPlacement[],
+  swordFields: readonly SwordFieldPlacement[],
+  chestDeadEnds: readonly ChestDeadEndPlacement[],
+  portalPosition: SpawnPoint | null,
+  seed: number,
+  density: number = SPIKE_GATE_OBSTACLE_DENSITY,
+): SpikeGateObstaclePlacement[] {
+  const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
+  const occupiedCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
+
+  for (const spawnPoint of spawnPoints) {
+    const { cx, cy } = spawnPointToCell(spawnPoint);
+    occupiedCells.add(`${cx},${cy}`);
+  }
+  for (const gate of gates) occupiedCells.add(`${gate.cellX},${gate.cellY}`);
+  for (const bridge of bridges) {
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY}`);
+    occupiedCells.add(`${bridge.cellX},${bridge.northCellY + 1}`);
+  }
+  for (const swamp of swamps) {
+    for (let offset = 0; offset < swamp.lengthCells; offset++) {
+      occupiedCells.add(`${swamp.westCellX + offset},${swamp.cellY}`);
+    }
+  }
+  for (const swordField of swordFields) occupySwordFieldCells(occupiedCells, swordField);
+  for (const chest of chestDeadEnds) occupiedCells.add(`${chest.cellX},${chest.cellY}`);
+  if (portalPosition) {
+    const portalCellX = Math.round(
+      (portalPosition.x - CELL_SIZE / 2 - WALL_WIDTH) / CELL_STEP_X,
+    );
+    const portalCellY = Math.round((portalPosition.y + 0.75 - WALL_HEIGHT) / CELL_STEP_Y);
+    occupiedCells.add(`${portalCellX},${portalCellY}`);
+    occupiedCells.add(`${portalCellX},${portalCellY - 1}`);
+  }
+
+  const candidates: Array<SpikeGateObstaclePlacement & { rank: number }> = [];
+  for (let cellY = 0; cellY < GRID_CELLS; cellY++) {
+    for (let cellX = 0; cellX < GRID_CELLS - 1; cellX++) {
+      const westKey = `${cellX},${cellY}`;
+      const eastKey = `${cellX + 1},${cellY}`;
+      if (occupiedCells.has(westKey) || occupiedCells.has(eastKey)) continue;
+      if (!isEmptyObstacleCell(data, cellX, cellY)) continue;
+      if (!isEmptyObstacleCell(data, cellX + 1, cellY)) continue;
+      if (!areCellsConnected(data, cellX, cellY, cellX + 1, cellY)) continue;
+
+      const { tx, ty } = cellToTile(cellX, cellY);
+      candidates.push({
+        orientation: 'horizontal',
+        cellX,
+        cellY,
+        tileX: tx + CELL_SIZE,
+        tileY: ty,
+        gateCount: getSpikeGateCountForPassage(data, cellX, cellY, 'horizontal'),
+        rank: getSpikeGateObstacleRank(seed, cellX, cellY, 'horizontal'),
+      });
+    }
+  }
+
+  for (let cellY = 0; cellY < GRID_CELLS - 1; cellY++) {
+    for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
+      const northKey = `${cellX},${cellY}`;
+      const southKey = `${cellX},${cellY + 1}`;
+      if (occupiedCells.has(northKey) || occupiedCells.has(southKey)) continue;
+      if (!isEmptyObstacleCell(data, cellX, cellY)) continue;
+      if (!isEmptyObstacleCell(data, cellX, cellY + 1)) continue;
+      if (!areCellsConnected(data, cellX, cellY, cellX, cellY + 1)) continue;
+      // Keep the full three-barrier composition in straight north-south
+      // corridors. Lateral branches are intersections where a barrier can be
+      // walked around and were the reason vertical gates clustered there.
+      if (cellHasHorizontalConnection(data, cellX, cellY)) continue;
+      if (cellHasHorizontalConnection(data, cellX, cellY + 1)) continue;
+
+      const { tx, ty } = cellToTile(cellX, cellY);
+      candidates.push({
+        orientation: 'vertical',
+        cellX,
+        cellY,
+        tileX: tx,
+        // The authored red barrier sits five tiles into the ten-tile wall.
+        tileY: ty + CELL_SIZE + 5,
+        gateCount: getSpikeGateCountForPassage(data, cellX, cellY, 'vertical'),
+        rank: getSpikeGateObstacleRank(seed, cellX, cellY, 'vertical'),
+      });
+    }
+  }
+
+  candidates.sort(
+    (a, b) =>
+      a.rank - b.rank ||
+      a.cellY - b.cellY ||
+      a.cellX - b.cellX ||
+      a.orientation.localeCompare(b.orientation),
+  );
+  const clampedDensity = Math.max(0, Math.min(1, density));
+  const desiredCount = Math.min(
+    MAX_SPIKE_GATE_OBSTACLES,
+    candidates.length,
+    Math.max(
+      Math.min(MIN_SPIKE_GATE_OBSTACLES, candidates.length),
+      Math.round(candidates.length * clampedDensity),
+    ),
+  );
+  const selected: SpikeGateObstaclePlacement[] = [];
+  const firstVerticalCandidate = candidates.find(
+    (candidate) => candidate.orientation === 'vertical',
+  );
+  // Combined ranking naturally favors the more numerous horizontal passages.
+  // Give one valid straight vertical passage first consideration so this
+  // authored orientation remains visible without increasing the total cap.
+  const orderedCandidates = firstVerticalCandidate
+    ? [
+        firstVerticalCandidate,
+        ...candidates.filter((candidate) => candidate !== firstVerticalCandidate),
+      ]
+    : candidates;
+
+  for (const rankedCandidate of orderedCandidates) {
+    if (selected.length >= desiredCount) break;
+    const candidate: SpikeGateObstaclePlacement = {
+      orientation: rankedCandidate.orientation,
+      cellX: rankedCandidate.cellX,
+      cellY: rankedCandidate.cellY,
+      tileX: rankedCandidate.tileX,
+      tileY: rankedCandidate.tileY,
+      gateCount: rankedCandidate.gateCount,
+    };
+    const candidateCells = getSpikeGateOccupiedCellKeys(candidate);
+    if (candidateCells.some((key) => occupiedCells.has(key))) continue;
+    selected.push(candidate);
+    occupySpikeGateCells(occupiedCells, candidate);
+  }
+
+  return selected.sort(
+    (a, b) =>
+      a.cellY - b.cellY ||
+      a.cellX - b.cellX ||
+      a.orientation.localeCompare(b.orientation),
+  );
+}
+
 function getTrapCellRank(seed: number, cellX: number, cellY: number): number {
   let value = seed ^ TRAP_CELL_RANDOM_SALT;
   value = Math.imul(value ^ (cellX + 1), 0x45d9f3b);
@@ -1584,6 +1834,7 @@ export function computeTrapCellPlacements(
   chestDeadEnds: readonly ChestDeadEndPlacement[],
   portalPosition: SpawnPoint | null,
   seed: number,
+  spikeGateObstacles: readonly SpikeGateObstaclePlacement[] = [],
 ): TrapCellPlacement[] {
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const occupiedCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
@@ -1603,6 +1854,8 @@ export function computeTrapCellPlacements(
     }
   }
   for (const swordField of swordFields) occupySwordFieldCells(occupiedCells, swordField);
+  for (const spikeGate of spikeGateObstacles)
+    occupySpikeGateCells(occupiedCells, spikeGate);
   for (const chest of chestDeadEnds) occupiedCells.add(`${chest.cellX},${chest.cellY}`);
 
   if (portalPosition) {
@@ -1697,6 +1950,7 @@ export function computeTIntersectionDecorationPlacements(
   portalPosition: SpawnPoint | null,
   seed: number,
   density: number = T_INTERSECTION_DECORATION_DENSITY,
+  spikeGateObstacles: readonly SpikeGateObstaclePlacement[] = [],
 ): TIntersectionDecorationPlacement[] {
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const occupiedCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
@@ -1716,6 +1970,8 @@ export function computeTIntersectionDecorationPlacements(
     }
   }
   for (const swordField of swordFields) occupySwordFieldCells(occupiedCells, swordField);
+  for (const spikeGate of spikeGateObstacles)
+    occupySpikeGateCells(occupiedCells, spikeGate);
   for (const chest of chestDeadEnds) occupiedCells.add(`${chest.cellX},${chest.cellY}`);
 
   if (portalPosition) {
@@ -1841,6 +2097,7 @@ export function computeDecoratedVerticalPassagePlacements(
   portalPosition: SpawnPoint | null,
   seed: number,
   density: number = DECORATED_VERTICAL_PASSAGE_DENSITY,
+  spikeGateObstacles: readonly SpikeGateObstaclePlacement[] = [],
 ): DecoratedVerticalPassagePlacement[] {
   const hubBounds = getHubTileBounds(MAP_WIDTH, MAP_HEIGHT);
   const occupiedCells = getHubCells(hubBounds.left, hubBounds.top, HUB_SIZE);
@@ -1860,6 +2117,8 @@ export function computeDecoratedVerticalPassagePlacements(
     }
   }
   for (const swordField of swordFields) occupySwordFieldCells(occupiedCells, swordField);
+  for (const spikeGate of spikeGateObstacles)
+    occupySpikeGateCells(occupiedCells, spikeGate);
   for (const trapCell of trapCells)
     occupiedCells.add(`${trapCell.cellX},${trapCell.cellY}`);
   for (const chest of chestDeadEnds) occupiedCells.add(`${chest.cellX},${chest.cellY}`);
@@ -2043,6 +2302,17 @@ export function generateMazeLayout(
     seed,
     requiredSwordFields,
   );
+  const spikeGateObstacles = computeSpikeGateObstaclePlacements(
+    gatedData,
+    safeSpawnPoints,
+    gates,
+    bridges,
+    swamps,
+    swordFields,
+    chestDeadEnds,
+    portalPosition,
+    seed,
+  );
   const trapCells = computeTrapCellPlacements(
     gatedData,
     safeSpawnPoints,
@@ -2053,6 +2323,7 @@ export function generateMazeLayout(
     chestDeadEnds,
     portalPosition,
     seed,
+    spikeGateObstacles,
   );
   const tIntersectionDecorations = computeTIntersectionDecorationPlacements(
     gatedData,
@@ -2064,6 +2335,8 @@ export function generateMazeLayout(
     chestDeadEnds,
     portalPosition,
     seed,
+    T_INTERSECTION_DECORATION_DENSITY,
+    spikeGateObstacles,
   );
   const decoratedVerticalPassages = computeDecoratedVerticalPassagePlacements(
     gatedData,
@@ -2077,6 +2350,8 @@ export function generateMazeLayout(
     tIntersectionDecorations,
     portalPosition,
     seed,
+    DECORATED_VERTICAL_PASSAGE_DENSITY,
+    spikeGateObstacles,
   );
 
   return {
@@ -2092,6 +2367,7 @@ export function generateMazeLayout(
     bridges,
     swamps,
     swordFields,
+    spikeGateObstacles,
     tIntersectionDecorations,
     decoratedVerticalPassages,
     trapCells,
