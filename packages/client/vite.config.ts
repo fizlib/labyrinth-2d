@@ -19,12 +19,6 @@ interface CatalogAsset {
 }
 
 const naturalSort = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-const centralHubRuntimeAssets = new Set<string>(
-  JSON.parse(
-    fs.readFileSync(path.resolve(__dirname, 'central-hub-runtime-assets.json'), 'utf8'),
-  ) as string[],
-);
-
 function classifyAsset(name: string, relativePath: string): string {
   const value = `${relativePath}/${name}`.toLowerCase();
   if (/shadow/.test(value)) return 'Shadows';
@@ -93,12 +87,7 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
   const shouldIncludePublicPath = (candidate: string): boolean => {
     if (characterFrameSourceRoots.some((root) => isWithin(root, candidate))) return false;
     if (!isWithin(styleLibraryRoot, candidate)) return true;
-    if (includeFullStyleLibrary) return true;
-
-    const relativePath = path.relative(styleLibraryRoot, candidate).split(path.sep).join('/');
-    return [...centralHubRuntimeAssets].some(
-      (assetPath) => relativePath === '' || assetPath === relativePath || assetPath.startsWith(`${relativePath}/`),
-    );
+    return includeFullStyleLibrary;
   };
 
   const scan = async (): Promise<CatalogAsset[]> => {
@@ -369,7 +358,7 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
 
 export default defineConfig(({ command, mode }) => {
   // Development keeps the complete searchable library. Normal production
-  // builds include only the Fiorwoods assets used at runtime; opt into the
+  // builds exclude the gitignored source library; opt into the
   // complete editor library with `npm run build:full-assets`.
   const includeFullStyleLibrary = command === 'serve' || mode === 'full-assets';
 

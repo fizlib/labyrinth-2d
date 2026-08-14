@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "build:full-assets": "tsc && vite build --mode full-assets",
+    "build": "npm run verify:runtime-assets && tsc && vite build",
+    "build:full-assets": "npm run verify:runtime-assets && tsc && vite build --mode full-assets",
     "sync:character-atlas": "python scripts/build-character-atlas.py",
     "sync:runtime-assets": "node scripts/sync-runtime-assets.mjs",
+    "verify:runtime-assets": "node scripts/verify-runtime-assets.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },

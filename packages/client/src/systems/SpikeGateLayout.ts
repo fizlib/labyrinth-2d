@@ -1,4 +1,5 @@
 import { SPIKE_GATE_COLORS, type SpikeGateColor } from '@labyrinth/shared';
+import { getRuntimeStyleAssetPath } from '../assets/runtimeAssetPaths';
 
 export interface SpikeGatePostSpriteSpec {
   x: number;
@@ -108,20 +109,20 @@ export const SPIKE_GATE_TERRAIN_SPRITES = SPIKE_GATE_HORIZONTAL_TERRAIN_SPRITES;
 
 export const SPIKE_GATE_BASIC_GRASS_ASSET = 102;
 
-const ASSET_ROOT = '/assets/chained-echoes-assets-sorted';
-
-export const SPIKE_GATE_PLATE_DEACTIVATED_PATH = `${ASSET_ROOT}/plateDeactivated.png`;
-export const SPIKE_GATE_PLATE_ACTIVATED_PATH = `${ASSET_ROOT}/plateActivated.png`;
+export const SPIKE_GATE_PLATE_DEACTIVATED_PATH =
+  getRuntimeStyleAssetPath('plateDeactivated.png');
+export const SPIKE_GATE_PLATE_ACTIVATED_PATH =
+  getRuntimeStyleAssetPath('plateActivated.png');
 
 export function getSpikeGatePillarAssetPath(
   color: SpikeGateColor,
   frame: number,
 ): string {
-  return `${ASSET_ROOT}/statuePillars_${color} ${frame}.png`;
+  return getRuntimeStyleAssetPath(`statuePillars_${color} ${frame}.png`);
 }
 
 export function getSpikeGateTerrainAssetPath(asset: number): string {
-  return `${ASSET_ROOT}/Assets/Maps/Fiorwoods/Sprite_Fiorwoods_${asset}.png`;
+  return getRuntimeStyleAssetPath(`Assets/Maps/Fiorwoods/Sprite_Fiorwoods_${asset}.png`);
 }
 
 const SPIKE_GATE_TERRAIN_ASSETS = [
