@@ -422,6 +422,7 @@ export enum MessageType {
   AdminKickPlayer = 'ADMIN_KICK_PLAYER',
   ReconnectRoom = 'RECONNECT_ROOM',
   LeaveRoom = 'LEAVE_ROOM',
+  SnapshotApplied = 'SNAPSHOT_APPLIED',
 
   // ── Server → Client ──
   RoomJoined = 'ROOM_JOINED',
@@ -457,16 +458,26 @@ export interface JoinRoomMessage {
   reconnectToken: string;
   /** Supabase access token used by the game server to verify admin status. */
   accessToken?: string;
+  /** Enables bounded server-to-client snapshot flow control for this connection. */
+  supportsSnapshotFlowControl?: boolean;
 }
 
 export interface ReconnectRoomMessage {
   type: MessageType.ReconnectRoom;
   roomId: string;
   reconnectToken: string;
+  /** Enables bounded server-to-client snapshot flow control for this connection. */
+  supportsSnapshotFlowControl?: boolean;
 }
 
 export interface LeaveRoomMessage {
   type: MessageType.LeaveRoom;
+}
+
+/** Confirms that the client finished applying an authoritative world snapshot. */
+export interface SnapshotAppliedMessage {
+  type: MessageType.SnapshotApplied;
+  snapshotId: number;
 }
 
 export interface VoteToStartMessage {
@@ -679,6 +690,8 @@ export interface LobbyKickedMessage {
 
 export interface TickUpdateMessage {
   type: MessageType.TickUpdate;
+  /** Monotonic room-local ID used for application-level flow control. */
+  snapshotId: number;
   gameState: GameState;
 }
 
@@ -901,6 +914,7 @@ export type ClientToServerMessage =
   | JoinRoomMessage
   | ReconnectRoomMessage
   | LeaveRoomMessage
+  | SnapshotAppliedMessage
   | VoteToStartMessage
   | SendLobbyChatMessage
   | AdminStartGameMessage

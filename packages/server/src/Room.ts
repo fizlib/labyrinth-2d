@@ -116,6 +116,7 @@ import {
   type PlayerRole,
   type RunestoneInfo,
   type PlayerInputMessage,
+  type SnapshotAppliedMessage,
   type ActivateRunestoneMessage,
   type OpenChestMessage,
   type PressPressurePlateMessage,
@@ -163,6 +164,7 @@ export interface SocketData {
   roomId: string | null;
   connected: boolean;
   joinPending: boolean;
+  supportsSnapshotFlowControl: boolean;
   isAdmin: boolean;
   /** Verified Supabase profile id, or null for a guest/unverified session. */
   userId: string | null;
@@ -183,6 +185,8 @@ interface QueuedInput {
 
 const DEBUG_MAX_MATCH_TIME_MS = 24 * 60 * 60 * 1_000;
 const MOVEMENT_INTENT_GRACE_MS = 120;
+/** Keeps throughput across normal RTT while strictly bounding stale snapshots. */
+const MAX_IN_FLIGHT_SNAPSHOTS = 2;
 
 interface BridgeTraversalState {
   bridgeIndex: number;
@@ -409,6 +413,8 @@ export class Room {
   private readonly seats = new Map<string, RoomSeat>();
   private sockets: Map<string, PlayerSocket> = new Map();
   private inputQueues: Map<string, QueuedInput[]> = new Map();
+  private readonly inFlightSnapshotIds = new Map<string, number[]>();
+  private nextSnapshotId = 1;
   private readonly lastMovementInputAt = new Map<string, number>();
   private readonly lastChatSentAt = new Map<string, number>();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
@@ -763,6 +769,7 @@ export class Room {
     seat.reservationHandle = null;
     this.sockets.set(seat.id, ws);
     this.inputQueues.set(seat.id, []);
+    this.inFlightSnapshotIds.delete(seat.id);
 
     const data = ws.getUserData();
     data.id = seat.id;
@@ -797,6 +804,7 @@ export class Room {
     if (!seat) return false;
 
     this.sockets.delete(playerId);
+    this.inFlightSnapshotIds.delete(playerId);
     this.lobbyVotes.delete(playerId);
     this.clearPlayerTransientActivity(playerId);
 
@@ -833,6 +841,7 @@ export class Room {
     this.sockets.delete(playerId);
     this.seats.delete(playerId);
     this.inputQueues.delete(playerId);
+    this.inFlightSnapshotIds.delete(playerId);
     this.lastMovementInputAt.delete(playerId);
     this.lastChatSentAt.delete(playerId);
     this.bridgeTraversals.delete(playerId);
@@ -1021,6 +1030,18 @@ export class Room {
         dt: msg.dt,
       });
     }
+  }
+
+  /** Release snapshots cumulatively once the client has actually applied one. */
+  handleSnapshotApplied(playerId: string, msg: SnapshotAppliedMessage): void {
+    if (!Number.isSafeInteger(msg.snapshotId) || msg.snapshotId < 1) return;
+    const inFlight = this.inFlightSnapshotIds.get(playerId);
+    if (!inFlight) return;
+
+    const acknowledgedIndex = inFlight.indexOf(msg.snapshotId);
+    if (acknowledgedIndex === -1) return;
+    inFlight.splice(0, acknowledgedIndex + 1);
+    if (inFlight.length === 0) this.inFlightSnapshotIds.delete(playerId);
   }
 
   /** Validate and deliver one transient message to players near the sender. */
@@ -1475,6 +1496,7 @@ export class Room {
     this.state.match.finalRoster = null;
     this.state.match.remainingMs = MATCH_DURATION_MS;
     this.syncMatchCounts();
+    this.inFlightSnapshotIds.clear();
 
     for (const player of this.state.players) {
       const socket = this.sockets.get(player.id);
@@ -1563,6 +1585,7 @@ export class Room {
 
     const finalUpdate: TickUpdateMessage = {
       type: MessageType.TickUpdate,
+      snapshotId: this.nextSnapshotId++,
       gameState: this.cloneState(),
     };
     this.broadcast(finalUpdate);
@@ -2384,8 +2407,8 @@ export class Room {
     this.updateGateStates();
     this.updateSpikeGateStates(spikeGatePreviousPositions);
 
-    // Fast clients receive the full 20 Hz stream. broadcastSnapshot drops
-    // disposable updates per connection when server-side backpressure appears.
+    // Fast clients receive the full 20 Hz stream. Slow clients pause at a tiny
+    // bounded in-flight window and later resume from the newest full state.
     if (this.state.tick % SERVER_TICKS_PER_SNAPSHOT === 0) {
       this.broadcastSnapshot();
     }
@@ -3226,16 +3249,25 @@ export class Room {
     if (this.state.match.status === 'waiting') return;
     const message: TickUpdateMessage = {
       type: MessageType.TickUpdate,
+      snapshotId: this.nextSnapshotId++,
       gameState: this.cloneState(),
     };
     const payload = JSON.stringify(message);
-    for (const ws of this.sockets.values()) {
+    for (const [playerId, ws] of this.sockets) {
+      const usesFlowControl = ws.getUserData().supportsSnapshotFlowControl;
+      const inFlight = this.inFlightSnapshotIds.get(playerId) ?? [];
+      if (usesFlowControl && inFlight.length >= MAX_IN_FLIGHT_SNAPSHOTS) continue;
+
       // Tick updates are disposable. If this connection has not flushed its
       // previous data yet, queueing another full snapshot would make every
       // later acknowledgement and chat message wait behind stale game states.
       // The next periodic snapshot contains the complete authoritative state.
       if (ws.getBufferedAmount() > 0) continue;
-      ws.send(payload, false);
+      const sendStatus = ws.send(payload, false);
+      if (usesFlowControl && sendStatus !== 2) {
+        inFlight.push(message.snapshotId);
+        this.inFlightSnapshotIds.set(playerId, inFlight);
+      }
     }
   }
 
@@ -3274,6 +3306,7 @@ export class Room {
     this.seats.clear();
     this.sockets.clear();
     this.inputQueues.clear();
+    this.inFlightSnapshotIds.clear();
     this.lastMovementInputAt.clear();
     this.lastChatSentAt.clear();
     this.bridgeTraversals.clear();

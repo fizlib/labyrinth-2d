@@ -14,6 +14,7 @@ class FakeSocket {
       roomId: null,
       connected: true,
       joinPending: false,
+      supportsSnapshotFlowControl: false,
       isAdmin: false,
       userId: null,
       rating: 1200,
@@ -93,6 +94,44 @@ test('drops disposable snapshots for a backpressured client', (t) => {
   );
   assert.ok(recoveredSnapshot);
   assert.equal(recoveredSnapshot.gameState.tick, 4);
+});
+
+test('bounds unprocessed snapshots and resumes from the newest state after an ACK', (t) => {
+  const { room, sockets } = createRoom(1);
+  t.after(() => room.destroy());
+  room.stopLoop();
+  sockets[0].sent.length = 0;
+  sockets[0].data.supportsSnapshotFlowControl = true;
+
+  for (let index = 0; index < 5; index++) room.tick();
+  const initialSnapshots = sockets[0].sent.filter(
+    (message) => message.type === 'TICK_UPDATE',
+  );
+  assert.equal(initialSnapshots.length, 2, 'only two snapshots may remain unprocessed');
+
+  room.handleSnapshotApplied('player-0', {
+    type: 'SNAPSHOT_APPLIED',
+    snapshotId: Number.MAX_SAFE_INTEGER,
+  });
+  room.tick();
+  assert.equal(
+    sockets[0].sent.filter((message) => message.type === 'TICK_UPDATE').length,
+    2,
+    'an unknown ACK cannot open the send window',
+  );
+
+  room.handleSnapshotApplied('player-0', {
+    type: 'SNAPSHOT_APPLIED',
+    snapshotId: initialSnapshots[1].snapshotId,
+  });
+  room.tick();
+
+  const resumedSnapshots = sockets[0].sent.filter(
+    (message) => message.type === 'TICK_UPDATE',
+  );
+  assert.equal(resumedSnapshots.length, 3);
+  assert.equal(resumedSnapshots[2].gameState.tick, 7);
+  assert.ok(resumedSnapshots[2].snapshotId > initialSnapshots[1].snapshotId);
 });
 
 test('brief input gaps do not flicker remote walk animations', (t) => {

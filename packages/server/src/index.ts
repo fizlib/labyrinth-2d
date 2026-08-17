@@ -138,6 +138,7 @@ async function handleJoinRoom(
   msg: JoinRoomMessage,
 ): Promise<void> {
   const data = ws.getUserData();
+  data.supportsSnapshotFlowControl = msg.supportsSnapshotFlowControl === true;
   if (data.roomId || data.joinPending) {
     sendError(ws, 'ALREADY_IN_ROOM', 'You have already joined or are joining a lobby.');
     return;
@@ -272,8 +273,10 @@ function handleReconnectRoom(
   ws: uWS.WebSocket<SocketData>,
   roomIdValue: unknown,
   reconnectToken: unknown,
+  supportsSnapshotFlowControl: unknown,
 ): void {
   const data = ws.getUserData();
+  data.supportsSnapshotFlowControl = supportsSnapshotFlowControl === true;
   if (data.roomId || data.joinPending) {
     sendError(ws, 'ALREADY_IN_ROOM', 'You have already joined or are joining a room.');
     return;
@@ -327,6 +330,7 @@ uWS
           roomId: null,
           connected: true,
           joinPending: false,
+          supportsSnapshotFlowControl: false,
           isAdmin: false,
           userId: null,
           rating: 1200,
@@ -358,7 +362,12 @@ uWS
           }
 
           case MessageType.ReconnectRoom: {
-            handleReconnectRoom(ws, msg.roomId, msg.reconnectToken);
+            handleReconnectRoom(
+              ws,
+              msg.roomId,
+              msg.reconnectToken,
+              msg.supportsSnapshotFlowControl,
+            );
             break;
           }
 
@@ -395,6 +404,13 @@ uWS
               if (room) {
                 room.handleInput(data.id, msg);
               }
+            }
+            break;
+          }
+
+          case MessageType.SnapshotApplied: {
+            if (data.roomId) {
+              rooms.get(data.roomId)?.handleSnapshotApplied(data.id, msg);
             }
             break;
           }

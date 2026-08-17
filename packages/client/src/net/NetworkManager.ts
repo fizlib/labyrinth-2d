@@ -17,6 +17,7 @@ import {
   type JoinRoomMessage,
   type ReconnectRoomMessage,
   type LeaveRoomMessage,
+  type SnapshotAppliedMessage,
   type VoteToStartMessage,
   type SendLobbyChatMessage,
   type AdminStartGameMessage,
@@ -36,6 +37,7 @@ import {
   type DebugSetNetworkStatsMessage,
   type DebugPlayerAction,
   type DebugPlayerActionMessage,
+  type TickUpdateMessage,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 import {
@@ -133,7 +135,7 @@ export class NetworkManager {
   private shouldReconnect = false;
   private recovering = false;
   private readonly diagnosticsTracker = new NetworkDiagnosticsTracker();
-  private readonly snapshotScheduler: LatestSnapshotScheduler<GameState>;
+  private readonly snapshotScheduler: LatestSnapshotScheduler<TickUpdateMessage>;
 
   /** The latest game state received from the server. */
   private _gameState: GameState | null = null;
@@ -143,11 +145,22 @@ export class NetworkManager {
 
   constructor(callbacks: NetworkCallbacks) {
     this.callbacks = callbacks;
-    this.snapshotScheduler = new LatestSnapshotScheduler<GameState>({
-      apply: (gameState) => {
-        this.diagnosticsTracker.recordSnapshotApplied(performance.now());
+    this.snapshotScheduler = new LatestSnapshotScheduler<TickUpdateMessage>({
+      apply: (message) => {
+        const { gameState } = message;
         this._gameState = gameState;
         this.callbacks.onTickUpdate(gameState);
+        this.diagnosticsTracker.recordSnapshotApplied(performance.now());
+
+        // ACK only after the expensive game-state callback has completed. The
+        // server uses this as proof that it can safely send another snapshot.
+        if (Number.isSafeInteger(message.snapshotId)) {
+          const acknowledgement: SnapshotAppliedMessage = {
+            type: MessageType.SnapshotApplied,
+            snapshotId: message.snapshotId,
+          };
+          this.send(acknowledgement);
+        }
       },
     });
     window.addEventListener('pagehide', () => {
@@ -223,6 +236,7 @@ export class NetworkManager {
           type: MessageType.ReconnectRoom,
           roomId: session.roomId,
           reconnectToken: session.reconnectToken,
+          supportsSnapshotFlowControl: true,
         };
         this.send(reconnectMsg);
       } else {
@@ -234,6 +248,7 @@ export class NetworkManager {
           mode: session.joinMode,
           reconnectToken: session.reconnectToken,
           accessToken: this.accessToken,
+          supportsSnapshotFlowControl: true,
         };
         this.send(joinMsg);
       }
@@ -422,7 +437,7 @@ export class NetworkManager {
         {
           const receivedAt = performance.now();
           this.diagnosticsTracker.recordSnapshotReceived(receivedAt);
-          if (this.snapshotScheduler.enqueue(msg.gameState)) {
+          if (this.snapshotScheduler.enqueue(msg)) {
             this.diagnosticsTracker.recordSnapshotCoalesced(receivedAt);
           }
         }
