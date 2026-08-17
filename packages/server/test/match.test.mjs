@@ -46,7 +46,7 @@ function createRoom(playerCount = 9) {
   return { room, sockets };
 }
 
-test('simulates at 20 Hz while broadcasting periodic snapshots at 10 Hz', (t) => {
+test('simulates and broadcasts snapshots at 20 Hz for a healthy client', (t) => {
   const { room, sockets } = createRoom(1);
   t.after(() => room.destroy());
   room.stopLoop();
@@ -55,15 +55,15 @@ test('simulates at 20 Hz while broadcasting periodic snapshots at 10 Hz', (t) =>
   room.tick();
   assert.equal(
     sockets[0].sent.filter((message) => message.type === 'TICK_UPDATE').length,
-    0,
+    1,
   );
 
   room.tick();
   const snapshots = sockets[0].sent.filter(
     (message) => message.type === 'TICK_UPDATE',
   );
-  assert.equal(snapshots.length, 1);
-  assert.equal(snapshots[0].gameState.tick, 2);
+  assert.equal(snapshots.length, 2);
+  assert.equal(snapshots[1].gameState.tick, 2);
 });
 
 test('drops disposable snapshots for a backpressured client', (t) => {
@@ -82,7 +82,7 @@ test('drops disposable snapshots for a backpressured client', (t) => {
   );
   assert.equal(
     sockets[1].sent.filter((message) => message.type === 'TICK_UPDATE').length,
-    1,
+    2,
   );
 
   sockets[0].bufferedAmount = 0;
@@ -93,6 +93,32 @@ test('drops disposable snapshots for a backpressured client', (t) => {
   );
   assert.ok(recoveredSnapshot);
   assert.equal(recoveredSnapshot.gameState.tick, 4);
+});
+
+test('brief input gaps do not flicker remote walk animations', (t) => {
+  const { room } = createRoom(1);
+  t.after(() => room.destroy());
+  room.stopLoop();
+  const player = room.state.players[0];
+
+  room.handleInput(player.id, {
+    type: 'PLAYER_INPUT',
+    sequenceNumber: 1,
+    up: false,
+    down: false,
+    left: false,
+    right: true,
+    dt: 0.04,
+  });
+  room.tick();
+  assert.equal(player.isMoving, true);
+
+  room.tick();
+  assert.equal(player.isMoving, true, 'one empty input tick retains walk intent');
+
+  room.lastMovementInputAt.set(player.id, Date.now() - 1_000);
+  room.tick();
+  assert.equal(player.isMoving, false, 'expired movement intent returns to idle');
 });
 
 function activatePortal(room) {

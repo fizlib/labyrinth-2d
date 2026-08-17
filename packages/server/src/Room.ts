@@ -182,6 +182,7 @@ interface QueuedInput {
 }
 
 const DEBUG_MAX_MATCH_TIME_MS = 24 * 60 * 60 * 1_000;
+const MOVEMENT_INTENT_GRACE_MS = 120;
 
 interface BridgeTraversalState {
   bridgeIndex: number;
@@ -408,6 +409,7 @@ export class Room {
   private readonly seats = new Map<string, RoomSeat>();
   private sockets: Map<string, PlayerSocket> = new Map();
   private inputQueues: Map<string, QueuedInput[]> = new Map();
+  private readonly lastMovementInputAt = new Map<string, number>();
   private readonly lastChatSentAt = new Map<string, number>();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
   private countdownHandle: ReturnType<typeof setTimeout> | null = null;
@@ -831,6 +833,7 @@ export class Room {
     this.sockets.delete(playerId);
     this.seats.delete(playerId);
     this.inputQueues.delete(playerId);
+    this.lastMovementInputAt.delete(playerId);
     this.lastChatSentAt.delete(playerId);
     this.bridgeTraversals.delete(playerId);
     this.bridgeRepairOccupancy.delete(playerId);
@@ -1006,6 +1009,9 @@ export class Room {
     if (!this.canPlayerAct(playerId)) return;
     const queue = this.inputQueues.get(playerId);
     if (queue) {
+      const hasMovement = msg.up || msg.down || msg.left || msg.right;
+      if (hasMovement) this.lastMovementInputAt.set(playerId, Date.now());
+      else this.lastMovementInputAt.delete(playerId);
       queue.push({
         sequenceNumber: msg.sequenceNumber,
         up: msg.up,
@@ -1263,7 +1269,14 @@ export class Room {
       }
       queue.length = 0;
     }
+    this.lastMovementInputAt.delete(player.id);
     player.isMoving = false;
+  }
+
+  /** Hide brief packet-arrival gaps from remote walk animations. */
+  private hasRecentMovementIntent(playerId: string, now = Date.now()): boolean {
+    const lastInputAt = this.lastMovementInputAt.get(playerId);
+    return lastInputAt !== undefined && now - lastInputAt <= MOVEMENT_INTENT_GRACE_MS;
   }
 
   private isAdmin(playerId: string): boolean {
@@ -2270,7 +2283,7 @@ export class Room {
       const activeCage = findActivePlayerCage(this.cageStates, player.id);
       if (activeCage && !activeCage.opened) {
         if (!queue || queue.length === 0) {
-          player.isMoving = false;
+          player.isMoving = this.hasRecentMovementIntent(player.id);
           continue;
         }
 
@@ -2291,7 +2304,7 @@ export class Room {
         continue;
       }
       if (!queue || queue.length === 0) {
-        player.isMoving = false;
+        player.isMoving = this.hasRecentMovementIntent(player.id);
         continue;
       }
 
@@ -2371,9 +2384,8 @@ export class Room {
     this.updateGateStates();
     this.updateSpikeGateStates(spikeGatePreviousPositions);
 
-    // Physics remains authoritative at 20 Hz, while clients receive the latest
-    // state at 10 Hz. This halves snapshot parsing/render-sync work and prevents
-    // slower mobile main threads from accumulating an ever-growing FIFO queue.
+    // Fast clients receive the full 20 Hz stream. broadcastSnapshot drops
+    // disposable updates per connection when server-side backpressure appears.
     if (this.state.tick % SERVER_TICKS_PER_SNAPSHOT === 0) {
       this.broadcastSnapshot();
     }
@@ -3262,6 +3274,7 @@ export class Room {
     this.seats.clear();
     this.sockets.clear();
     this.inputQueues.clear();
+    this.lastMovementInputAt.clear();
     this.lastChatSentAt.clear();
     this.bridgeTraversals.clear();
     this.revealedWisdomBridges.clear();
