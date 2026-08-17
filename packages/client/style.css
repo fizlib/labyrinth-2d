@@ -63,11 +63,8 @@ body {
   min-height: 100%;
   place-items: center;
   overflow: auto;
-  padding:
-    max(32px, env(safe-area-inset-top))
-    max(22px, env(safe-area-inset-right))
-    max(32px, env(safe-area-inset-bottom))
-    max(22px, env(safe-area-inset-left));
+  padding: max(32px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right))
+    max(32px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left));
   background: #64b8df;
   isolation: isolate;
   font-family: 'PixelOperator8', 'Courier New', Courier, monospace;
@@ -120,18 +117,30 @@ body {
 }
 
 @keyframes home-cloud-drift {
-  from { transform: translate3d(-2.4%, -0.35%, 0) scale(1.045); }
-  to { transform: translate3d(2.4%, 0.35%, 0) scale(1.045); }
+  from {
+    transform: translate3d(-2.4%, -0.35%, 0) scale(1.045);
+  }
+  to {
+    transform: translate3d(2.4%, 0.35%, 0) scale(1.045);
+  }
 }
 
 @keyframes home-hill-drift {
-  from { transform: translate3d(-1.1%, 0.2%, 0) scale(1.03); }
-  to { transform: translate3d(1.1%, -0.2%, 0) scale(1.03); }
+  from {
+    transform: translate3d(-1.1%, 0.2%, 0) scale(1.03);
+  }
+  to {
+    transform: translate3d(1.1%, -0.2%, 0) scale(1.03);
+  }
 }
 
 @keyframes home-field-drift {
-  from { transform: translate3d(1.4%, 0.35%, 0) scale(1.035); }
-  to { transform: translate3d(-1.4%, -0.35%, 0) scale(1.035); }
+  from {
+    transform: translate3d(1.4%, 0.35%, 0) scale(1.035);
+  }
+  to {
+    transform: translate3d(-1.4%, -0.35%, 0) scale(1.035);
+  }
 }
 
 .app-panel {
@@ -140,8 +149,7 @@ body {
   padding: clamp(28px, 6vw, 44px);
   border: 3px solid #8b7d52;
   background:
-    linear-gradient(rgba(17, 32, 24, 0.96), rgba(8, 16, 13, 0.98)),
-    var(--shell-panel);
+    linear-gradient(rgba(17, 32, 24, 0.96), rgba(8, 16, 13, 0.98)), var(--shell-panel);
   color: #dfe8da;
   box-shadow:
     8px 8px 0 var(--shell-shadow),
@@ -190,11 +198,8 @@ body {
 }
 
 .app-screen--auth {
-  padding:
-    max(18px, env(safe-area-inset-top))
-    max(18px, env(safe-area-inset-right))
-    max(18px, env(safe-area-inset-bottom))
-    max(18px, env(safe-area-inset-left));
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
 }
 
 .app-panel--auth {
@@ -202,7 +207,11 @@ body {
   padding: 0 clamp(26px, 4.5vw, 62px) clamp(32px, 4.2vh, 42px);
   border: 3px solid rgba(250, 255, 252, 0.78);
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(243, 250, 250, 0.4), rgba(218, 243, 209, 0.32));
+  background: linear-gradient(
+    180deg,
+    rgba(243, 250, 250, 0.4),
+    rgba(218, 243, 209, 0.32)
+  );
   box-shadow:
     0 14px 28px rgba(24, 81, 72, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
@@ -274,7 +283,9 @@ body {
   left: 50%;
   color: #8edb87;
   font-size: 11px;
-  text-shadow: 0 0 5px #6ee780, 0 0 14px #47b86d;
+  text-shadow:
+    0 0 5px #6ee780,
+    0 0 14px #47b86d;
   transform: translateX(-50%);
   animation: loading-rune 1.5s steps(4, end) infinite;
 }
@@ -343,7 +354,10 @@ body {
   font-size: 0.9rem;
   line-height: 1.2;
   text-shadow: 2px 2px 0 #05070a;
-  transition: background-color 90ms steps(2, end), border-color 90ms steps(2, end), transform 70ms;
+  transition:
+    background-color 90ms steps(2, end),
+    border-color 90ms steps(2, end),
+    transform 70ms;
 }
 
 .pixel-button:hover:not(:disabled) {
@@ -387,7 +401,14 @@ body {
   padding: 10px clamp(14px, 3vw, 28px);
   border-radius: 10px;
   box-shadow: 0 5px 8px rgba(35, 66, 61, 0.35);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: clamp(0.95rem, 1.6vw, 1.4rem);
   font-weight: 500;
   letter-spacing: -0.02em;
@@ -469,7 +490,14 @@ body {
   max-width: 30rem;
   margin: clamp(11px, 1.7vh, 16px) auto 0;
   color: #294f43;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: clamp(0.72rem, 1.1vw, 0.95rem);
   line-height: 1.35;
 }
@@ -530,8 +558,16 @@ body {
 }
 
 @keyframes pixel-pulse {
-  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-5px); }
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-5px);
+  }
 }
 
 .menu-profile,
@@ -543,11 +579,8 @@ body {
 }
 
 .app-screen--menu {
-  padding:
-    max(18px, env(safe-area-inset-top))
-    max(18px, env(safe-area-inset-right))
-    max(18px, env(safe-area-inset-bottom))
-    max(18px, env(safe-area-inset-left));
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
 }
 
 .app-menu-shell {
@@ -571,7 +604,11 @@ body {
   padding: 18px clamp(36px, 5vw, 52px) 18px;
   border: 3px solid rgba(250, 255, 252, 0.82);
   border-radius: 24px;
-  background: linear-gradient(180deg, rgba(244, 251, 251, 0.48), rgba(221, 243, 207, 0.4));
+  background: linear-gradient(
+    180deg,
+    rgba(244, 251, 251, 0.48),
+    rgba(221, 243, 207, 0.4)
+  );
   box-shadow:
     0 14px 28px rgba(24, 81, 72, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.76);
@@ -598,7 +635,14 @@ body {
   align-self: center;
   margin-top: 0;
   color: #4d5e5d;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 0.95rem;
   font-weight: 600;
   white-space: nowrap;
@@ -633,7 +677,9 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   font-size: 1.65rem;
   text-shadow: none;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .menu-profile__avatar:hover .profile-avatar--small {
@@ -654,7 +700,14 @@ body {
   min-width: 0;
   overflow: hidden;
   color: #1d3334;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: clamp(1.35rem, 2.1vw, 1.75rem);
   font-weight: 700;
   line-height: 1.12;
@@ -668,7 +721,14 @@ body {
   flex: none;
   margin-top: 0;
   color: #51605f;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: clamp(0.88rem, 1.35vw, 1.05rem);
 }
 
@@ -713,7 +773,9 @@ body {
   border: 3px solid #8b7d52;
   background: #1d3828;
   color: var(--shell-ink);
-  box-shadow: 4px 4px 0 var(--shell-shadow), inset 0 0 0 2px #315d3d;
+  box-shadow:
+    4px 4px 0 var(--shell-shadow),
+    inset 0 0 0 2px #315d3d;
   text-shadow: 2px 2px 0 #05070a;
 }
 
@@ -800,7 +862,14 @@ body {
   box-shadow:
     0 4px 7px rgba(50, 72, 65, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: clamp(1rem, 1.55vw, 1.25rem);
   font-weight: 600;
   letter-spacing: -0.015em;
@@ -851,7 +920,14 @@ body {
   background: transparent;
   color: #536866;
   cursor: pointer;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: clamp(0.84rem, 1.3vw, 1rem);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -903,11 +979,8 @@ body {
 }
 
 .app-screen--profile {
-  padding:
-    max(18px, env(safe-area-inset-top))
-    max(18px, env(safe-area-inset-right))
-    max(18px, env(safe-area-inset-bottom))
-    max(18px, env(safe-area-inset-left));
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
 }
 
 .app-panel--profile {
@@ -915,7 +988,11 @@ body {
   padding: 28px clamp(30px, 5vw, 42px);
   border: 3px solid rgba(250, 255, 252, 0.82);
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(244, 251, 251, 0.5), rgba(221, 243, 207, 0.42));
+  background: linear-gradient(
+    180deg,
+    rgba(244, 251, 251, 0.5),
+    rgba(221, 243, 207, 0.42)
+  );
   box-shadow:
     0 14px 28px rgba(24, 81, 72, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.76);
@@ -960,7 +1037,14 @@ body {
 
 .app-panel--profile .profile-header h1 {
   color: #1d3334;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 1.6rem;
   font-weight: 700;
   line-height: 1.1;
@@ -969,14 +1053,28 @@ body {
 .app-panel--profile .profile-header > div > span {
   margin-top: 5px;
   color: #51605f;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 0.92rem;
 }
 
 .app-panel--profile .profile-form label {
   margin: 0 0 8px;
   color: #203a3b;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 1rem;
   font-weight: 650;
 }
@@ -991,7 +1089,14 @@ body {
   box-shadow:
     0 4px 7px rgba(50, 72, 65, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.86);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 1rem;
   text-shadow: none;
 }
@@ -1047,7 +1152,14 @@ body {
   box-shadow:
     0 4px 7px rgba(50, 72, 65, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 1rem;
   font-weight: 650;
   text-shadow: none;
@@ -1122,11 +1234,8 @@ body {
 }
 
 .app-screen--join {
-  padding:
-    max(18px, env(safe-area-inset-top))
-    max(18px, env(safe-area-inset-right))
-    max(18px, env(safe-area-inset-bottom))
-    max(18px, env(safe-area-inset-left));
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
 }
 
 .app-panel--join {
@@ -1134,7 +1243,11 @@ body {
   padding: 30px clamp(30px, 5vw, 44px);
   border: 3px solid rgba(250, 255, 252, 0.82);
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(244, 251, 251, 0.5), rgba(221, 243, 207, 0.42));
+  background: linear-gradient(
+    180deg,
+    rgba(244, 251, 251, 0.5),
+    rgba(221, 243, 207, 0.42)
+  );
   box-shadow:
     0 14px 28px rgba(24, 81, 72, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.76);
@@ -1154,7 +1267,14 @@ body {
 
 .app-panel--join .join-room-form label {
   color: #203a3b;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 1.1rem;
   font-weight: 650;
   text-align: center;
@@ -1170,7 +1290,14 @@ body {
   box-shadow:
     0 4px 7px rgba(50, 72, 65, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.86);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 1.65rem;
   font-weight: 650;
   letter-spacing: 0.22em;
@@ -1206,7 +1333,14 @@ body {
   box-shadow:
     0 4px 7px rgba(50, 72, 65, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 1rem;
   font-weight: 650;
   text-shadow: none;
@@ -1291,7 +1425,9 @@ body {
 @media (max-width: 520px) {
   .app-panel {
     padding: 28px 22px;
-    box-shadow: 5px 5px 0 var(--shell-shadow), inset 0 0 0 2px #2f3528;
+    box-shadow:
+      5px 5px 0 var(--shell-shadow),
+      inset 0 0 0 2px #2f3528;
   }
 
   .profile-timestamps,
@@ -1305,7 +1441,8 @@ body {
   }
 
   .app-screen--auth {
-    padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
+    padding: max(18px, env(safe-area-inset-top)) 14px
+      max(18px, env(safe-area-inset-bottom));
   }
 
   .app-panel--auth {
@@ -1313,7 +1450,9 @@ body {
     padding: 0 16px 32px;
     border-width: 3px;
     border-radius: 16px;
-    box-shadow: 0 10px 20px rgba(24, 81, 72, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    box-shadow:
+      0 10px 20px rgba(24, 81, 72, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7);
   }
 
   .app-brand__logo {
@@ -1331,7 +1470,8 @@ body {
   }
 
   .app-screen--menu {
-    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+    padding: max(14px, env(safe-area-inset-top)) 14px
+      max(14px, env(safe-area-inset-bottom));
   }
 
   .app-menu-shell {
@@ -1346,7 +1486,9 @@ body {
   .app-panel--menu {
     padding: 15px 16px 16px;
     border-radius: 18px;
-    box-shadow: 0 10px 20px rgba(24, 81, 72, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+    box-shadow:
+      0 10px 20px rgba(24, 81, 72, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.74);
   }
 
   .app-panel--menu .menu-profile {
@@ -1398,14 +1540,17 @@ body {
   }
 
   .app-screen--join {
-    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+    padding: max(14px, env(safe-area-inset-top)) 14px
+      max(14px, env(safe-area-inset-bottom));
   }
 
   .app-panel--join {
     width: min(330px, 100%);
     padding: 24px 18px;
     border-radius: 18px;
-    box-shadow: 0 10px 20px rgba(24, 81, 72, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+    box-shadow:
+      0 10px 20px rgba(24, 81, 72, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.74);
   }
 
   .app-panel--join .join-room-form label {
@@ -1432,14 +1577,17 @@ body {
   }
 
   .app-screen--profile {
-    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+    padding: max(14px, env(safe-area-inset-top)) 14px
+      max(14px, env(safe-area-inset-bottom));
   }
 
   .app-panel--profile {
     width: min(330px, 100%);
     padding: 22px 18px;
     border-radius: 18px;
-    box-shadow: 0 10px 20px rgba(24, 81, 72, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+    box-shadow:
+      0 10px 20px rgba(24, 81, 72, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.74);
   }
 
   .app-panel--profile .profile-header {
@@ -1483,11 +1631,8 @@ body {
 
 @media (max-height: 620px) {
   .app-screen--auth {
-    padding:
-      max(10px, env(safe-area-inset-top))
-      max(14px, env(safe-area-inset-right))
-      max(10px, env(safe-area-inset-bottom))
-      max(14px, env(safe-area-inset-left));
+    padding: max(10px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
   }
 
   .app-panel--auth {
@@ -1525,11 +1670,8 @@ body {
   }
 
   .app-screen--menu {
-    padding:
-      max(8px, env(safe-area-inset-top))
-      max(14px, env(safe-area-inset-right))
-      max(8px, env(safe-area-inset-bottom))
-      max(14px, env(safe-area-inset-left));
+    padding: max(8px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
   }
 
   .app-menu-shell {
@@ -1675,14 +1817,18 @@ body {
   place-items: center;
   overflow-x: hidden;
   overflow-y: auto;
-  padding:
-    max(18px, env(safe-area-inset-top))
-    max(18px, env(safe-area-inset-right))
-    max(18px, env(safe-area-inset-bottom))
-    max(18px, env(safe-area-inset-left));
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
   background: #64b8df;
   color: #1d3538;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
 }
 
 .lobby-overlay__landscape {
@@ -1697,7 +1843,11 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(23, 100, 65, 0.055));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.025),
+    rgba(23, 100, 65, 0.055)
+  );
 }
 
 .lobby-panel {
@@ -1710,7 +1860,11 @@ body {
   padding: clamp(16px, 1.7vw, 24px);
   border: 3px solid rgba(252, 255, 255, 0.9);
   border-radius: 24px;
-  background: linear-gradient(180deg, rgba(239, 250, 252, 0.47), rgba(217, 243, 207, 0.43));
+  background: linear-gradient(
+    180deg,
+    rgba(239, 250, 252, 0.47),
+    rgba(217, 243, 207, 0.43)
+  );
   box-shadow:
     0 16px 34px rgba(23, 78, 73, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
@@ -1915,7 +2069,10 @@ body {
   background: transparent;
   color: #a54b45;
   cursor: pointer;
-  font: 700 1rem/1 Arial, Helvetica, sans-serif;
+  font:
+    700 1rem/1 Arial,
+    Helvetica,
+    sans-serif;
 }
 
 .lobby-player__kick:hover {
@@ -1970,7 +2127,9 @@ body {
   padding: clamp(1.25rem, 4vw, 2rem);
   border: 2px solid rgba(239, 201, 123, 0.75);
   background: linear-gradient(180deg, rgba(30, 27, 34, 0.98), rgba(12, 15, 23, 0.98));
-  box-shadow: 0 1rem 4rem rgba(0, 0, 0, 0.55), inset 0 0 0 2px rgba(255, 255, 255, 0.04);
+  box-shadow:
+    0 1rem 4rem rgba(0, 0, 0, 0.55),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.04);
   color: #f8edcf;
   text-align: center;
 }
@@ -2277,7 +2436,6 @@ body {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
 }
 
 @media (max-height: 700px) and (min-width: 761px) {
@@ -2383,9 +2541,7 @@ body {
 }
 
 .game-menu-toggle {
-  right: calc(
-    var(--fullscreen-toggle-right) + var(--fullscreen-toggle-size) + 8px
-  );
+  right: calc(var(--fullscreen-toggle-right) + var(--fullscreen-toggle-size) + 8px);
 }
 
 .fullscreen-toggle:hover,
@@ -2447,11 +2603,8 @@ body {
   z-index: 4000;
   display: grid;
   place-items: center;
-  padding:
-    max(24px, env(safe-area-inset-top))
-    max(20px, env(safe-area-inset-right))
-    max(24px, env(safe-area-inset-bottom))
-    max(20px, env(safe-area-inset-left));
+  padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
   background: rgba(3, 6, 6, 0.78);
 }
 
@@ -2571,7 +2724,9 @@ body {
   overflow: hidden;
   background: #64b8df;
   opacity: 1;
-  transition: opacity 480ms ease, visibility 480ms;
+  transition:
+    opacity 480ms ease,
+    visibility 480ms;
 }
 
 .loading-screen--complete {
@@ -2591,7 +2746,11 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(16, 91, 54, 0.035));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.025),
+    rgba(16, 91, 54, 0.035)
+  );
 }
 
 .loading-screen__content {
@@ -2972,7 +3131,9 @@ canvas {
   gap: 6px;
   flex-wrap: wrap;
   text-align: left;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .debug-player-row:hover,
@@ -3145,7 +3306,9 @@ canvas {
   font-size: 0.72rem;
   color: #c8d6e5;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
   pointer-events: auto;
 }
 
@@ -3154,7 +3317,7 @@ canvas {
   border-color: #3a3a6a;
 }
 
-.debug-toggle input[type="checkbox"] {
+.debug-toggle input[type='checkbox'] {
   appearance: none;
   -webkit-appearance: none;
   width: 14px;
@@ -3167,12 +3330,12 @@ canvas {
   flex-shrink: 0;
 }
 
-.debug-toggle input[type="checkbox"]:checked {
+.debug-toggle input[type='checkbox']:checked {
   background: #6a5acd;
   border-color: #7b6bde;
 }
 
-.debug-toggle input[type="checkbox"]:checked::after {
+.debug-toggle input[type='checkbox']:checked::after {
   content: '✓';
   position: absolute;
   top: -1px;
@@ -3198,11 +3361,8 @@ canvas {
   inset: 0;
   display: grid;
   place-items: center;
-  padding:
-    max(18px, env(safe-area-inset-top))
-    max(18px, env(safe-area-inset-right))
-    max(18px, env(safe-area-inset-bottom))
-    max(18px, env(safe-area-inset-left));
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
   background: rgba(5, 7, 10, 0.72);
   pointer-events: auto;
 }
@@ -3508,8 +3668,9 @@ canvas {
   z-index: 3000;
   top: max(12px, env(safe-area-inset-top));
   left: max(12px, env(safe-area-inset-left));
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, max-content);
+  gap: 5px 12px;
   padding: 7px 9px;
   border: 2px solid #907a55;
   background: rgba(17, 26, 32, 0.9);
@@ -3538,8 +3699,7 @@ canvas {
   }
 
   .debug-stats-hud {
-    flex-direction: column;
-    gap: 5px;
+    grid-template-columns: repeat(2, max-content);
   }
 }
 
@@ -3649,9 +3809,8 @@ canvas {
   top: max(
     calc(var(--mobile-canvas-top, 0px) + var(--mobile-frame-padding)),
     calc(
-      var(--fullscreen-toggle-top) +
-      var(--fullscreen-toggle-size) +
-      var(--mobile-frame-padding)
+      var(--fullscreen-toggle-top) + var(--fullscreen-toggle-size) +
+        var(--mobile-frame-padding)
     )
   );
   left: calc(var(--mobile-canvas-right, 100%) + var(--mobile-frame-padding));
@@ -3687,7 +3846,12 @@ canvas {
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
   opacity: 0.5;
-  transition: transform 0.08s ease, background 0.08s ease, border-color 0.08s ease, box-shadow 0.08s ease, opacity 0.08s ease;
+  transition:
+    transform 0.08s ease,
+    background 0.08s ease,
+    border-color 0.08s ease,
+    box-shadow 0.08s ease,
+    opacity 0.08s ease;
 }
 
 .mobile-controls__button[hidden] {

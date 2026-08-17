@@ -38,65 +38,64 @@ function hasMovement(input: MovementInputState): boolean {
 }
 
 /**
- * Keeps local prediction frame-rate smooth while limiting movement traffic to
- * a stable 25 Hz. Direction transitions bypass the cadence so quick taps and
- * releases are never hidden inside an input interval.
+ * Keeps local prediction frame-rate smooth while limiting all movement traffic
+ * to a stable 25 Hz. Turns inside one interval are coalesced into one command;
+ * their original segments remain available for local reconciliation.
  */
 export class MovementInputScheduler {
   private currentInput: MovementInputState = copyInput(IDLE_INPUT);
-  private unsentDt = 0;
-  private sendClock = 0;
+  private unsentInputs: ScheduledMovementInput[] = [];
+  private sendClock = MOVEMENT_INPUT_SEND_INTERVAL_S;
 
   update(nextInput: MovementInputState, dt: number): ScheduledMovementInput[] {
     const safeDt = Number.isFinite(dt) ? Math.max(0, dt) : 0;
-    const inputChanged = !inputsEqual(nextInput, this.currentInput);
-    const commands: ScheduledMovementInput[] = [];
-
-    if (inputChanged) {
-      // Preserve any fractional movement that belongs to the old direction.
-      this.flushCurrentMovement(commands);
+    if (!inputsEqual(nextInput, this.currentInput)) {
       this.currentInput = copyInput(nextInput);
-      this.sendClock = 0;
     }
 
-    if (hasMovement(this.currentInput)) this.unsentDt += safeDt;
-
-    if (inputChanged) {
-      // Send starts/turns/stops immediately instead of waiting up to 40 ms.
-      commands.push(this.takeCurrentCommand());
-    } else if (hasMovement(this.currentInput)) {
-      this.sendClock += safeDt;
-      if (this.sendClock >= MOVEMENT_INPUT_SEND_INTERVAL_S) {
-        this.flushCurrentMovement(commands);
-        this.sendClock %= MOVEMENT_INPUT_SEND_INTERVAL_S;
+    if (safeDt > 0 && hasMovement(this.currentInput)) {
+      const lastInput = this.unsentInputs[this.unsentInputs.length - 1];
+      if (lastInput && inputsEqual(lastInput, this.currentInput)) {
+        lastInput.dt += safeDt;
+      } else {
+        this.unsentInputs.push({ ...this.currentInput, dt: safeDt });
       }
-    } else {
-      this.sendClock = 0;
     }
 
-    return commands;
+    this.sendClock += safeDt;
+    if (
+      this.unsentInputs.length > 0 &&
+      this.sendClock >= MOVEMENT_INPUT_SEND_INTERVAL_S
+    ) {
+      const command = this.takeCoalescedCommand();
+      this.sendClock %= MOVEMENT_INPUT_SEND_INTERVAL_S;
+      return [command];
+    }
+
+    // Once completely idle, retain a full send credit so the next movement
+    // starts without an artificial 40 ms wait.
+    if (this.unsentInputs.length === 0 && !hasMovement(this.currentInput)) {
+      this.sendClock = Math.min(this.sendClock, MOVEMENT_INPUT_SEND_INTERVAL_S);
+    }
+    return [];
   }
 
-  /** Movement predicted locally but not yet represented by a sent command. */
-  getUnsentInput(): ScheduledMovementInput | null {
-    if (this.unsentDt <= 0 || !hasMovement(this.currentInput)) return null;
-    return { ...this.currentInput, dt: this.unsentDt };
+  /** Movement segments predicted locally but not yet represented by a sent command. */
+  getUnsentInputs(): ScheduledMovementInput[] {
+    return this.unsentInputs.map((input) => ({ ...input }));
   }
 
   reset(): void {
     this.currentInput = copyInput(IDLE_INPUT);
-    this.unsentDt = 0;
-    this.sendClock = 0;
+    this.unsentInputs = [];
+    this.sendClock = MOVEMENT_INPUT_SEND_INTERVAL_S;
   }
 
-  private flushCurrentMovement(commands: ScheduledMovementInput[]): void {
-    if (this.unsentDt <= 0 || !hasMovement(this.currentInput)) return;
-    commands.push(this.takeCurrentCommand());
-  }
-
-  private takeCurrentCommand(): ScheduledMovementInput {
-    const command = { ...this.currentInput, dt: this.unsentDt };
-    this.unsentDt = 0;
+  private takeCoalescedCommand(): ScheduledMovementInput {
+    const latestInput = this.unsentInputs[this.unsentInputs.length - 1];
+    const dt = this.unsentInputs.reduce((total, input) => total + input.dt, 0);
+    const command = { ...latestInput, dt };
+    this.unsentInputs = [];
     return command;
   }
 }

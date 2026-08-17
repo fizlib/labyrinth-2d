@@ -59,6 +59,8 @@ import type {
   SpikePlateState,
 } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
+import type { NetworkDiagnostics } from './net/NetworkDiagnosticsTracker';
+import { getReconciliationInputs } from './net/ReconciliationPolicy';
 import {
   clearReconnectSession,
   RELEASE_ROOM_EVENT,
@@ -244,6 +246,7 @@ interface PendingInput {
   left: boolean;
   right: boolean;
   dt: number;
+  sentAt: number;
 }
 
 let pendingInputs: PendingInput[] = [];
@@ -805,6 +808,11 @@ interface NetworkStatsHudDom {
   tick: HTMLElement;
   pending: HTMLElement;
   snapshot: HTMLElement;
+  txRate: HTMLElement;
+  ackAge: HTMLElement;
+  rxRate: HTMLElement;
+  snapshotAge: HTMLElement;
+  bufferedAmount: HTMLElement;
 }
 
 interface DebugUiDom {
@@ -864,6 +872,11 @@ function createNetworkStatsHud(): NetworkStatsHudDom {
   root.innerHTML = `
     <span>Tick <strong id="tick-counter">—</strong></span>
     <span>Pending <strong id="pending-count">0</strong></span>
+    <span>Tx <strong id="tx-rate">0/s</strong></span>
+    <span>Ack <strong id="ack-age">—</strong></span>
+    <span>Rx <strong id="rx-rate">0/s</strong></span>
+    <span>Age <strong id="snapshot-age">—</strong></span>
+    <span>WS <strong id="buffered-amount">0 B</strong></span>
     <span>Snaps <strong id="snapshot-count">0</strong></span>
   `;
   document.body.appendChild(root);
@@ -871,12 +884,47 @@ function createNetworkStatsHud(): NetworkStatsHudDom {
   const tick = root.querySelector<HTMLElement>('#tick-counter');
   const pending = root.querySelector<HTMLElement>('#pending-count');
   const snapshot = root.querySelector<HTMLElement>('#snapshot-count');
-  if (!tick || !pending || !snapshot) {
+  const txRate = root.querySelector<HTMLElement>('#tx-rate');
+  const ackAge = root.querySelector<HTMLElement>('#ack-age');
+  const rxRate = root.querySelector<HTMLElement>('#rx-rate');
+  const snapshotAge = root.querySelector<HTMLElement>('#snapshot-age');
+  const bufferedAmount = root.querySelector<HTMLElement>('#buffered-amount');
+  if (
+    !tick ||
+    !pending ||
+    !snapshot ||
+    !txRate ||
+    !ackAge ||
+    !rxRate ||
+    !snapshotAge ||
+    !bufferedAmount
+  ) {
     throw new Error('Failed to initialize network statistics HUD');
   }
 
   lastNetworkStatsUpdateAt = -Infinity;
-  return { root, tick, pending, snapshot };
+  return {
+    root,
+    tick,
+    pending,
+    snapshot,
+    txRate,
+    ackAge,
+    rxRate,
+    snapshotAge,
+    bufferedAmount,
+  };
+}
+
+function formatNetworkDuration(durationMs: number | null): string {
+  if (durationMs === null) return '—';
+  if (durationMs < 1_000) return `${Math.round(durationMs)} ms`;
+  return `${(durationMs / 1_000).toFixed(1)} s`;
+}
+
+function formatBufferedAmount(bytes: number): string {
+  if (bytes < 1_024) return `${Math.round(bytes)} B`;
+  return `${(bytes / 1_024).toFixed(1)} KiB`;
 }
 
 function syncNetworkStatsVisibility(statsHud: NetworkStatsHudDom): void {
@@ -884,8 +932,7 @@ function syncNetworkStatsVisibility(statsHud: NetworkStatsHudDom): void {
   const roomEnabled = statsHud.root.dataset.roomEnabled === 'true';
   const adminDebugToolsEnabled =
     DebugSettings.sessionEnabled && DebugSettings.getFlags().debugToolsEnabled;
-  statsHud.root.hidden =
-    !gameActive || (!roomEnabled && !adminDebugToolsEnabled);
+  statsHud.root.hidden = !gameActive || (!roomEnabled && !adminDebugToolsEnabled);
 }
 
 function setNetworkStatsState(
@@ -901,6 +948,7 @@ function setNetworkStatsState(
 function updateNetworkStatsHud(
   statsHud: NetworkStatsHudDom,
   state: GameState,
+  diagnostics: NetworkDiagnostics,
   force = false,
 ): void {
   setNetworkStatsState(
@@ -918,12 +966,32 @@ function updateNetworkStatsHud(
   const tickText = state.tick.toString();
   const pendingText = pendingInputs.length.toString();
   const snapshotText = snapshotBuffer.length.toString();
+  const oldestPending = pendingInputs[0];
+  const ackAgeText = formatNetworkDuration(
+    oldestPending ? Math.max(0, now - oldestPending.sentAt) : null,
+  );
+  const txRateText = `${diagnostics.movementMessagesPerSecond}/s`;
+  const rxRateText = `${diagnostics.snapshotMessagesPerSecond}/s`;
+  const snapshotAgeText = formatNetworkDuration(diagnostics.snapshotAgeMs);
+  const bufferedAmountText = formatBufferedAmount(diagnostics.bufferedAmount);
   if (statsHud.tick.textContent !== tickText) statsHud.tick.textContent = tickText;
   if (statsHud.pending.textContent !== pendingText) {
     statsHud.pending.textContent = pendingText;
   }
   if (statsHud.snapshot.textContent !== snapshotText) {
     statsHud.snapshot.textContent = snapshotText;
+  }
+  if (statsHud.txRate.textContent !== txRateText)
+    statsHud.txRate.textContent = txRateText;
+  if (statsHud.ackAge.textContent !== ackAgeText)
+    statsHud.ackAge.textContent = ackAgeText;
+  if (statsHud.rxRate.textContent !== rxRateText)
+    statsHud.rxRate.textContent = rxRateText;
+  if (statsHud.snapshotAge.textContent !== snapshotAgeText) {
+    statsHud.snapshotAge.textContent = snapshotAgeText;
+  }
+  if (statsHud.bufferedAmount.textContent !== bufferedAmountText) {
+    statsHud.bufferedAmount.textContent = bufferedAmountText;
   }
 }
 
@@ -2667,7 +2735,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
         latestServerState = gameState;
         updatePlayerNameTagScreenPositions();
-        updateNetworkStatsHud(networkStatsHud, gameState, true);
+        updateNetworkStatsHud(
+          networkStatsHud,
+          gameState,
+          net.getNetworkDiagnostics(),
+          true,
+        );
         if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
         window.requestAnimationFrame(dismissLoadingScreen);
       });
@@ -2706,58 +2779,55 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         if (localPlayerData.escaped && !localEscapeAnimating) {
           data.container.visible = false;
         } else if (!localEscapeAnimating && !debugTeleportActive) {
-          // Compute reconciled position from the server state, sent-but-unacknowledged
-          // commands, and the small movement fraction waiting for the next 25 Hz send.
-          let reconciledX = localPlayerData.x;
-          let reconciledY = localPlayerData.y;
-
           pendingInputs = pendingInputs.filter(
             (input) => input.sequenceNumber > localPlayerData.lastProcessedInput,
           );
 
-          const unsentInput = movementInputScheduler.getUnsentInput();
-          const replayInputs = unsentInput
-            ? [...pendingInputs, unsentInput]
-            : pendingInputs;
+          const replayInputs = getReconciliationInputs(
+            pendingInputs,
+            movementInputScheduler.getUnsentInputs(),
+          );
 
-          for (const input of replayInputs) {
-            const result = applyInputWithCollision(
-              reconciledX,
-              reconciledY,
-              input,
-              input.dt,
-              currentMap!,
-              latestServerState?.portal,
-              currentLayout?.bridges,
-              gameState.bridgeStates,
-              currentLayout?.swamps,
-              currentLayout?.chestDeadEnds,
-              currentLayout?.swordFields,
-              gameState.swordFieldStates,
-              gameState.cageStates,
-              localPlayerId ?? undefined,
-              currentLayout?.tIntersectionDecorations,
-              currentLayout?.decoratedVerticalPassages,
-              currentLayout?.spikeGateObstacles,
-              gameState.spikeGateStates,
-            );
-            reconciledX = result.x;
-            reconciledY = result.y;
-          }
+          // A large acknowledgement backlog pauses reconciliation until it
+          // recovers, avoiding dozens of collision passes per 20 Hz snapshot.
+          if (replayInputs !== null) {
+            let reconciledX = localPlayerData.x;
+            let reconciledY = localPlayerData.y;
+            for (const input of replayInputs) {
+              const result = applyInputWithCollision(
+                reconciledX,
+                reconciledY,
+                input,
+                input.dt,
+                currentMap!,
+                latestServerState?.portal,
+                currentLayout?.bridges,
+                gameState.bridgeStates,
+                currentLayout?.swamps,
+                currentLayout?.chestDeadEnds,
+                currentLayout?.swordFields,
+                gameState.swordFieldStates,
+                gameState.cageStates,
+                localPlayerId ?? undefined,
+                currentLayout?.tIntersectionDecorations,
+                currentLayout?.decoratedVerticalPassages,
+                currentLayout?.spikeGateObstacles,
+                gameState.spikeGateStates,
+              );
+              reconciledX = result.x;
+              reconciledY = result.y;
+            }
 
-          // Smooth the correction to hide jitter
-          const cdx = reconciledX - localX;
-          const cdy = reconciledY - localY;
-          const correctionDistSq = cdx * cdx + cdy * cdy;
-
-          // Hard snap if correction is large (teleport/respawn), smooth otherwise
-          if (correctionDistSq > 25) {
-            // > 5 pixels
-            localX = reconciledX;
-            localY = reconciledY;
-          } else {
-            localX = localX + cdx * 0.3;
-            localY = localY + cdy * 0.3;
+            const cdx = reconciledX - localX;
+            const cdy = reconciledY - localY;
+            const correctionDistSq = cdx * cdx + cdy * cdy;
+            if (correctionDistSq > 25) {
+              localX = reconciledX;
+              localY = reconciledY;
+            } else {
+              localX = localX + cdx * 0.3;
+              localY = localY + cdy * 0.3;
+            }
           }
         }
 
@@ -2807,7 +2877,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
       chatHud?.setCanSend(canLocalPlayerAct);
       syncLocalInputAvailability();
-      updateNetworkStatsHud(networkStatsHud, gameState);
+      updateNetworkStatsHud(networkStatsHud, gameState, net.getNetworkDiagnostics());
       if (debugUi) updateDebugUI(debugUi, gameState, localPlayerId);
     },
 
@@ -3431,6 +3501,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     // Cap dt to prevent massive physics jumps when mobile browsers drop frames
     const dtSeconds = Math.min(ticker.deltaMS / 1000, 0.1);
     const now = performance.now();
+    if (latestServerState) {
+      updateNetworkStatsHud(
+        networkStatsHud,
+        latestServerState,
+        net.getNetworkDiagnostics(),
+      );
+    }
 
     // ── 1. Local player prediction ────────────────────────────────
     const localPlayerState = latestServerState?.players.find(
@@ -3494,9 +3571,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       const input: PendingInput = {
         sequenceNumber: inputSequenceNumber,
         ...scheduledInput,
+        sentAt: performance.now(),
       };
-      pendingInputs.push(input);
-      net.sendInput(
+      const sent = net.sendInput(
         input.sequenceNumber,
         input.up,
         input.down,
@@ -3504,6 +3581,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         input.right,
         input.dt,
       );
+      if (sent) pendingInputs.push(input);
     }
 
     const localData = playerSprites.get(net.playerId);

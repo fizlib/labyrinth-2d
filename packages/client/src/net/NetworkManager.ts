@@ -44,6 +44,10 @@ import {
   markReconnectDisconnected,
   type ReconnectSession,
 } from './ReconnectSession';
+import {
+  NetworkDiagnosticsTracker,
+  type NetworkDiagnostics,
+} from './NetworkDiagnosticsTracker';
 
 export type NetworkConnectionState =
   | { status: 'connected' }
@@ -127,6 +131,7 @@ export class NetworkManager {
   private reconnectAttempt = 0;
   private shouldReconnect = false;
   private recovering = false;
+  private readonly diagnosticsTracker = new NetworkDiagnosticsTracker();
 
   /** The latest game state received from the server. */
   private _gameState: GameState | null = null;
@@ -157,6 +162,13 @@ export class NetworkManager {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
+  getNetworkDiagnostics(): NetworkDiagnostics {
+    return this.diagnosticsTracker.getDiagnostics(
+      performance.now(),
+      this.ws?.bufferedAmount ?? 0,
+    );
+  }
+
   // ── Connection ──────────────────────────────────────────────────────────
 
   connect(
@@ -172,7 +184,8 @@ export class NetworkManager {
 
     this.connectionUrl = url;
     this.reconnectSession = reconnectSession;
-    this.recovering = reconnectSession.roomId !== null || reconnectSession.disconnectDeadline !== null;
+    this.recovering =
+      reconnectSession.roomId !== null || reconnectSession.disconnectDeadline !== null;
     this.displayName = displayName;
     this.accessToken = accessToken;
     this.shouldReconnect = true;
@@ -184,6 +197,7 @@ export class NetworkManager {
   private openConnection(): void {
     if (!this.connectionUrl || this.ws) return;
 
+    this.diagnosticsTracker.reset();
     const url = this.connectionUrl;
     console.info(`[Net] Connecting to ${url}...`);
     const ws = new WebSocket(url);
@@ -275,7 +289,8 @@ export class NetworkManager {
   }
 
   private scheduleReconnect(): void {
-    if (!this.shouldReconnect || this.reconnectTimer !== null || !this.reconnectSession) return;
+    if (!this.shouldReconnect || this.reconnectTimer !== null || !this.reconnectSession)
+      return;
 
     const deadline = this.reconnectSession.disconnectDeadline;
     if (deadline !== null && Date.now() >= deadline) {
@@ -391,6 +406,7 @@ export class NetworkManager {
         break;
 
       case MessageType.TickUpdate:
+        this.diagnosticsTracker.recordSnapshotReceived(performance.now());
         this._gameState = msg.gameState;
         this.callbacks.onTickUpdate(msg.gameState);
         break;
@@ -525,7 +541,7 @@ export class NetworkManager {
     left: boolean,
     right: boolean,
     dt: number,
-  ): void {
+  ): boolean {
     const msg: PlayerInputMessage = {
       type: MessageType.PlayerInput,
       sequenceNumber,
@@ -535,7 +551,9 @@ export class NetworkManager {
       right,
       dt,
     };
-    this.send(msg);
+    const sent = this.send(msg);
+    if (sent) this.diagnosticsTracker.recordMovementSent(performance.now());
+    return sent;
   }
 
   /** Send a runestone activation request to the server. */
@@ -665,11 +683,12 @@ export class NetworkManager {
   }
 
   /** Send a JSON message to the server. */
-  private send(msg: object): void {
+  private send(msg: object): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn('[Net] Cannot send — not connected');
-      return;
+      return false;
     }
     this.ws.send(JSON.stringify(msg));
+    return true;
   }
 }
