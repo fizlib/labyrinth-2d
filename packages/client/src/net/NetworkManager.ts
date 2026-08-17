@@ -25,6 +25,7 @@ import {
   type ActivateRunestoneMessage,
   type OpenChestMessage,
   type PressPressurePlateMessage,
+  type PressSpikePlateMessage,
   type ActivateTrapCellMessage,
   type OpenCageMessage,
   type UseWisdomOrbMessage,
@@ -559,6 +560,15 @@ export class NetworkManager {
     const msg: PressPressurePlateMessage = {
       type: MessageType.PressPressurePlate,
       plateId,
+    };
+    this.send(msg);
+  }
+
+  /** Ask the server to latch one nearby spike-gate plate as a warden. */
+  sendPressSpikePlate(spikePlateIndex: number): void {
+    const msg: PressSpikePlateMessage = {
+      type: MessageType.PressSpikePlate,
+      spikePlateIndex,
     };
     this.send(msg);
   }

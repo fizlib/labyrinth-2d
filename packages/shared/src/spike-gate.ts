@@ -43,6 +43,8 @@ export interface SpikePlateState {
   /** Flattened obstacle-local plate index. */
   spikePlateIndex: number;
   pressed: boolean;
+  /** Whether a warden explicitly latched this plate with the interaction key. */
+  latched: boolean;
 }
 
 export interface SpikePlatePlacement {

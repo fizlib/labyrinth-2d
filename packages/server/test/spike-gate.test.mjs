@@ -67,6 +67,46 @@ test('a spike plate opens only its nearest colored gate', () => {
   }
 });
 
+test('a nearby warden can latch a spike plate for one timed gate cycle', () => {
+  const room = new Room(`spike-warden-latch-${Math.random()}`);
+  try {
+    const placement = room.spikeGateObstacles[0];
+    assert.ok(placement);
+    const plate = getSpikeGatePlatePlacements(placement, 0, room.map.tileSize)[0];
+    assert.ok(plate);
+
+    const warden = testPlayer(
+      'warden',
+      plate.x + plate.width / 2,
+      plate.y + plate.height / 2,
+    );
+    warden.role = 'warden';
+    room.state.players = [warden];
+    room.state.match.status = 'running';
+    room.sockets.set(warden.id, { send() {} });
+
+    room.handlePressSpikePlate(warden.id, {
+      type: 'PRESS_SPIKE_PLATE',
+      spikePlateIndex: plate.spikePlateIndex,
+    });
+    assert.equal(room.spikePlateStates[plate.spikePlateIndex].latched, true);
+    assert.equal(room.spikePlateStates[plate.spikePlateIndex].pressed, true);
+
+    const spikeGateIndex = getSpikeGateStateIndex(0, plate.gateIndex);
+    room.updateSpikeGateStates();
+    assert.equal(room.spikeGateStates[spikeGateIndex].open, true);
+    assert.ok(room.spikeGateCloseDeadlines[spikeGateIndex] > Date.now());
+
+    room.spikeGateCloseDeadlines[spikeGateIndex] = Date.now() - 1;
+    room.updateSpikeGateStates();
+    assert.equal(room.spikeGateStates[spikeGateIndex].open, false);
+    assert.equal(room.spikePlateStates[plate.spikePlateIndex].latched, false);
+    assert.equal(room.spikePlateStates[plate.spikePlateIndex].pressed, false);
+  } finally {
+    room.destroy();
+  }
+});
+
 test('a closing spike gate immediately ejects overlapping players backwards', () => {
   const room = new Room(`spike-ejection-${Math.random()}`);
   try {

@@ -42,6 +42,7 @@ import {
   findActivePlayerCage,
   findOpenableCage,
   getCageInteractionPoint,
+  getSpikeGatePlatePlacements,
   deriveFacingDirection,
   isWithinPortalInteractionRange,
 } from '@labyrinth/shared';
@@ -54,6 +55,8 @@ import type {
   PlayerRole,
   SwampTerrain,
   CageState,
+  SpikePlatePlacement,
+  SpikePlateState,
 } from '@labyrinth/shared';
 import { NetworkManager } from './net/NetworkManager';
 import {
@@ -113,6 +116,50 @@ const WARDEN_SPAWN_DIALOGUE_PAGES = [
 const SWORD_FIELD_WISDOM_REQUIRED_DIALOGUE_PAGES = [
   'You need to find a Wisdom Orb to pass this sword field. Search the Maze, then return and press Q.',
 ];
+
+function findNearbyUnlatchedSpikePlate(
+  layout: GeneratedMazeLayout,
+  plateStates: readonly SpikePlateState[],
+  playerX: number,
+  playerY: number,
+): SpikePlatePlacement | null {
+  const latchedPlateIndices = new Set(
+    plateStates
+      .filter((plateState) => plateState.latched)
+      .map((plateState) => plateState.spikePlateIndex),
+  );
+  const interactionRangeSquared =
+    PRESSURE_PLATE_INTERACTION_RANGE * PRESSURE_PLATE_INTERACTION_RANGE;
+  let nearestPlate: SpikePlatePlacement | null = null;
+  let nearestDistanceSquared = Infinity;
+
+  for (
+    let obstacleIndex = 0;
+    obstacleIndex < layout.spikeGateObstacles.length;
+    obstacleIndex++
+  ) {
+    const placement = layout.spikeGateObstacles[obstacleIndex];
+    for (const plate of getSpikeGatePlatePlacements(
+      placement,
+      obstacleIndex,
+      TILE_SIZE,
+    )) {
+      if (latchedPlateIndices.has(plate.spikePlateIndex)) continue;
+      const dx = playerX - (plate.x + plate.width / 2);
+      const dy = playerY - (plate.y + plate.height / 2);
+      const distanceSquared = dx * dx + dy * dy;
+      if (
+        distanceSquared <= interactionRangeSquared &&
+        distanceSquared < nearestDistanceSquared
+      ) {
+        nearestPlate = plate;
+        nearestDistanceSquared = distanceSquared;
+      }
+    }
+  }
+
+  return nearestPlate;
+}
 
 // ── Input State ─────────────────────────────────────────────────────────────
 
@@ -3098,6 +3145,19 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         net.sendPressPressurePlate(nearestPlateId);
         return;
       }
+
+      if (currentLayout) {
+        const spikePlate = findNearbyUnlatchedSpikePlate(
+          currentLayout,
+          latestServerState.spikePlateStates,
+          localX,
+          localY,
+        );
+        if (spikePlate) {
+          net.sendPressSpikePlate(spikePlate.spikePlateIndex);
+          return;
+        }
+      }
     }
 
     if (!canLocalPlayerOpenChest()) return;
@@ -3214,6 +3274,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         bridges: currentLayout.bridges,
         swamps: currentLayout.swamps,
         swordFields: currentLayout.swordFields,
+        spikeGates: currentLayout.spikeGateObstacles,
         chestDeadEnds: currentLayout.chestDeadEnds,
         trapCells: currentLayout.trapCells,
         expandButtonTexture: assets.expandMapButtonTexture,
@@ -3661,6 +3722,25 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
               distSq,
               plate.sprite.x + plate.sprite.width / 2,
               plate.sprite.y - 3,
+            );
+          }
+        }
+
+        if (currentLayout) {
+          const spikePlate = findNearbyUnlatchedSpikePlate(
+            currentLayout,
+            latestServerState.spikePlateStates,
+            localX,
+            localY,
+          );
+          if (spikePlate) {
+            const dx = localX - (spikePlate.x + spikePlate.width / 2);
+            const dy = localY - (spikePlate.y + spikePlate.height / 2);
+            considerPrompt(
+              4,
+              dx * dx + dy * dy,
+              spikePlate.x + spikePlate.width / 2,
+              spikePlate.y - 3,
             );
           }
         }

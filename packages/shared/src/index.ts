@@ -400,6 +400,7 @@ export enum MessageType {
   ActivateRunestone = 'ACTIVATE_RUNESTONE',
   OpenChest = 'OPEN_CHEST',
   PressPressurePlate = 'PRESS_PRESSURE_PLATE',
+  PressSpikePlate = 'PRESS_SPIKE_PLATE',
   ActivateTrapCell = 'ACTIVATE_TRAP_CELL',
   OpenCage = 'OPEN_CAGE',
   UseWisdomOrb = 'USE_WISDOM_ORB',
@@ -507,6 +508,12 @@ export interface PressPressurePlateMessage {
   type: MessageType.PressPressurePlate;
   /** Unique deterministic pressure-plate ID from the generated layout. */
   plateId: number;
+}
+
+export interface PressSpikePlateMessage {
+  type: MessageType.PressSpikePlate;
+  /** Flattened deterministic plate index from the generated spike-gate layout. */
+  spikePlateIndex: number;
 }
 
 export interface ActivateTrapCellMessage {
@@ -867,7 +874,7 @@ export interface GameState {
   swordFieldStates: SwordFieldState[];
   /** Per-barrier open/closed state for every generated spike-gate chain. */
   spikeGateStates: SpikeGateState[];
-  /** Physical occupancy state for each of the spike gates' paired plates. */
+  /** Physical/manual activation state for each of the spike gates' paired plates. */
   spikePlateStates: SpikePlateState[];
   /** Spawned survivor cages, including vacated cages that remain solid forever. */
   cageStates: CageState[];
@@ -887,6 +894,7 @@ export type ClientToServerMessage =
   | ActivateRunestoneMessage
   | OpenChestMessage
   | PressPressurePlateMessage
+  | PressSpikePlateMessage
   | ActivateTrapCellMessage
   | OpenCageMessage
   | UseWisdomOrbMessage

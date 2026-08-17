@@ -14,6 +14,7 @@ import { Container, Sprite, Texture, Graphics, Rectangle } from 'pixi.js';
 import type {
   BridgePlacement,
   ChestDeadEndPlacement,
+  SpikeGateObstaclePlacement,
   SwordFieldPlacement,
   SwampPlacement,
   TrapCellPlacement,
@@ -21,6 +22,7 @@ import type {
 } from '@labyrinth/shared';
 import {
   getSwampAuthoringWidth,
+  getSpikeGateCollisionBounds,
   getHubTileBounds,
   CELL_SIZE,
   TILE_FLOOR,
@@ -93,6 +95,9 @@ const COL_SWORD_GRIP: readonly number[] = [139, 48, 52, 255]; // red leather han
 const COL_SWORD_GUARD: readonly number[] = [235, 177, 61, 255]; // warm gold crossguards
 const COL_SWORD_BLADE: readonly number[] = [190, 205, 216, 255]; // cool steel
 const COL_SWORD_HIGHLIGHT: readonly number[] = [244, 249, 250, 255]; // blade shine/tip
+const COL_SPIKE_BASE: readonly number[] = [66, 70, 73, 255]; // dark iron spine
+const COL_SPIKE_BLADE: readonly number[] = [184, 195, 201, 255]; // cold steel teeth
+const COL_SPIKE_TIP: readonly number[] = [247, 251, 252, 255]; // bright sharpened tips
 const COL_FOG: readonly number[] = [29, 33, 25, 255]; // deep foliage/parchment tone (uncharted)
 const COL_PORTAL: readonly number[] = [0, 242, 255, 255]; // neon cyan (high contrast)
 const COL_PORTAL_GLOW: readonly number[] = [255, 255, 255, 255]; // white hot center
@@ -114,6 +119,7 @@ export interface MinimapOptions {
   bridges?: readonly BridgePlacement[];
   swamps?: readonly SwampPlacement[];
   swordFields?: readonly SwordFieldPlacement[];
+  spikeGates?: readonly SpikeGateObstaclePlacement[];
   chestDeadEnds?: readonly ChestDeadEndPlacement[];
   trapCells?: readonly TrapCellPlacement[];
   expandButtonTexture?: Texture | null;
@@ -163,6 +169,7 @@ export class Minimap {
   private swampMask: Uint8Array;
   private centralHubMask: Uint8Array;
   private swordFieldMask: Uint8Array;
+  private spikeGateMask: Uint8Array;
   private chestMask: Uint8Array;
   private trapCellMask: Uint8Array;
   private fog: Uint8Array;
@@ -199,6 +206,7 @@ export class Minimap {
     this.swampMask = this.createSwampMask(options.swamps ?? []);
     this.centralHubMask = this.createCentralHubMask();
     this.swordFieldMask = this.createSwordFieldMask(options.swordFields ?? []);
+    this.spikeGateMask = this.createSpikeGateMask(options.spikeGates ?? []);
     this.chestMask = this.createChestMask(options.chestDeadEnds ?? []);
     this.trapCellMask = this.createTrapCellMask(options.trapCells ?? []);
     this.isWarden = options.isWarden ?? false;
@@ -605,6 +613,59 @@ export class Minimap {
             tileY < this.mapData.height
           ) {
             mask[tileY * this.mapData.width + tileX] = value;
+          }
+        }
+      }
+    }
+
+    return mask;
+  }
+
+  /** Stamp each barrier as an alternating steel strip with outward-facing teeth. */
+  private createSpikeGateMask(
+    spikeGates: readonly SpikeGateObstaclePlacement[],
+  ): Uint8Array {
+    const mask = new Uint8Array(this.mapData.width * this.mapData.height);
+    const stamp = (tileX: number, tileY: number, value: number): void => {
+      if (
+        tileX < 0 ||
+        tileX >= this.mapData.width ||
+        tileY < 0 ||
+        tileY >= this.mapData.height
+      ) {
+        return;
+      }
+      mask[tileY * this.mapData.width + tileX] = value;
+    };
+
+    for (const placement of spikeGates) {
+      for (let gateIndex = 0; gateIndex < placement.gateCount; gateIndex++) {
+        const bounds = getSpikeGateCollisionBounds(
+          placement,
+          gateIndex,
+          this.mapData.tileSize,
+        );
+        if (placement.orientation === 'horizontal') {
+          const centerX = Math.floor(
+            (bounds.left + bounds.right) / 2 / this.mapData.tileSize,
+          );
+          const startY = Math.floor(bounds.top / this.mapData.tileSize);
+          const endY = Math.floor(bounds.bottom / this.mapData.tileSize);
+          for (let tileY = startY; tileY <= endY; tileY++) {
+            const offset = (tileY - startY) % 2 === 0 ? -1 : 1;
+            stamp(centerX, tileY, (tileY - startY) % 2 === 0 ? 1 : 2);
+            stamp(centerX + offset, tileY, 3);
+          }
+        } else {
+          const centerY = Math.floor(
+            (bounds.top + bounds.bottom) / 2 / this.mapData.tileSize,
+          );
+          const startX = Math.floor(bounds.left / this.mapData.tileSize);
+          const endX = Math.floor(bounds.right / this.mapData.tileSize);
+          for (let tileX = startX; tileX <= endX; tileX++) {
+            const offset = (tileX - startX) % 2 === 0 ? -1 : 1;
+            stamp(tileX, centerY, (tileX - startX) % 2 === 0 ? 1 : 2);
+            stamp(tileX, centerY + offset, 3);
           }
         }
       }
@@ -1139,6 +1200,9 @@ export class Minimap {
   /** Get the minimap colour for a given tile ID. */
   private tileColor(tileIndex: number, id: number): readonly number[] {
     if (this.isWarden && this.trapCellMask[tileIndex] === 1) return COL_TRAP;
+    if (this.spikeGateMask[tileIndex] === 3) return COL_SPIKE_TIP;
+    if (this.spikeGateMask[tileIndex] === 2) return COL_SPIKE_BLADE;
+    if (this.spikeGateMask[tileIndex] === 1) return COL_SPIKE_BASE;
     if (this.swordFieldMask[tileIndex] === 4) return COL_SWORD_HIGHLIGHT;
     if (this.swordFieldMask[tileIndex] === 3) return COL_SWORD_BLADE;
     if (this.swordFieldMask[tileIndex] === 2) return COL_SWORD_GUARD;

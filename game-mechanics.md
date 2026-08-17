@@ -117,6 +117,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 
 - Some horizontal and vertical routes contain spike-gate chains. Horizontal routes use red and blue, plus yellow when the route continues through a bounded straight corridor; short or branching horizontal corridors omit yellow so players cannot walk around it. Vertical chains spawn only in straight north-south corridor sections and use all three barriers, with yellow in the authored slot above red. Horizontal gates use the exported 4x6 terrain patch with a grass column between barriers; vertical gates use the export-67 6x3 patch with a grass row between barriers.
 - Each colored gate has two plates, one on either side. Standing on either plate opens only that nearest gate; stepping off closes it again.
+- A Warden near either plate can press `[ E ]` to latch it, opening that colored gate for five seconds before both plates reset. A held plate must be released after the reset before it can open the gate again.
 - Players must relay through the chain: one player holds a plate while the other crosses, then the second player holds the plate on the far side so the first can follow.
 - A pressed plate uses `plateActivated`. Each gate sinks through its color-matched pillar frames `10` through `13` when opening and reverses back to pillar frame `6` when closing.
 - Stepping off the last held plate restores that gate's collider immediately. Anyone overlapping the closing barrier is pushed back outside instead of becoming trapped inside it.
@@ -138,6 +139,7 @@ Each warden has a private map that shows:
 
 - The complete labyrinth layout.
 - Trap cells, marked in **red**.
+- Spike-gate chains, marked as steel spike strips.
 - Escape-door locations from the beginning of the match.
 
 The warden map does **not** show:

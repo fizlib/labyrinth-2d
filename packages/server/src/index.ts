@@ -429,6 +429,16 @@ uWS
             break;
           }
 
+          case MessageType.PressSpikePlate: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) {
+                room.handlePressSpikePlate(data.id, msg);
+              }
+            }
+            break;
+          }
+
           case MessageType.ActivateTrapCell: {
             if (data.roomId) {
               const room = rooms.get(data.roomId);

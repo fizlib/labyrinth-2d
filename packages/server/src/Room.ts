@@ -100,6 +100,7 @@ import {
   type SpikeGateObstaclePlacement,
   type SpikeGateBounds,
   type SpikeGateState,
+  type SpikePlatePlacement,
   type SpikePlateState,
   type TIntersectionDecorationPlacement,
   type DecoratedVerticalPassagePlacement,
@@ -117,6 +118,7 @@ import {
   type ActivateRunestoneMessage,
   type OpenChestMessage,
   type PressPressurePlateMessage,
+  type PressSpikePlateMessage,
   type ActivateTrapCellMessage,
   type OpenCageMessage,
   type SendChatMessage,
@@ -486,8 +488,17 @@ export class Room {
   /** Shared open/closed state for each colored spike barrier. */
   private readonly spikeGateStates: SpikeGateState[];
 
-  /** Shared physical occupancy state for each spike-gate plate. */
+  /** Shared physical/manual activation state for each spike-gate plate. */
   private readonly spikePlateStates: SpikePlateState[];
+
+  /** Spike-gate plates latched by wardens until that colored gate resets. */
+  private readonly manuallyPressedSpikePlateIndices = new Set<number>();
+
+  /** Server time at which each manually opened spike gate must close. */
+  private readonly spikeGateCloseDeadlines: Array<number | null>;
+
+  /** Require held plates to be released after a timed spike-gate reset. */
+  private readonly spikeGateNeedsRelease: boolean[];
 
   /** Authored collidable treasure prefabs in south-opening dead ends. */
   private readonly chestDeadEnds: ChestDeadEndPlacement[];
@@ -582,8 +593,13 @@ export class Room {
         spikePlateIndex:
           obstacleIndex * SPIKE_PLATES_PER_OBSTACLE + localIndex,
         pressed: false,
+        latched: false,
       })),
     );
+    this.spikeGateCloseDeadlines = new Array<number | null>(
+      this.spikeGateStates.length,
+    ).fill(null);
+    this.spikeGateNeedsRelease = new Array(this.spikeGateStates.length).fill(false);
     this.chestDeadEnds = layout.chestDeadEnds;
     this.chestStates = this.chestDeadEnds.map((_, chestIndex) => ({
       chestIndex,
@@ -1817,6 +1833,50 @@ export class Room {
     );
   }
 
+  /** Latch one nearby spike-gate plate when requested by a warden. */
+  handlePressSpikePlate(playerId: string, msg: PressSpikePlateMessage): void {
+    if (!this.canPlayerAct(playerId)) return;
+    if (!Number.isInteger(msg.spikePlateIndex)) return;
+
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    const obstacleIndex = Math.floor(msg.spikePlateIndex / SPIKE_PLATES_PER_OBSTACLE);
+    const placement = this.spikeGateObstacles[obstacleIndex];
+    const plate: SpikePlatePlacement | undefined = placement
+      ? getSpikeGatePlatePlacements(placement, obstacleIndex, this.map.tileSize).find(
+          (candidate) => candidate.spikePlateIndex === msg.spikePlateIndex,
+        )
+      : undefined;
+    if (!player || player.role !== 'warden' || !plate) return;
+
+    const spikeGateIndex = getSpikeGateStateIndex(obstacleIndex, plate.gateIndex);
+    if (
+      this.spikeGateCloseDeadlines[spikeGateIndex] !== null ||
+      this.spikeGateNeedsRelease[spikeGateIndex] ||
+      this.manuallyPressedSpikePlateIndices.has(plate.spikePlateIndex)
+    ) {
+      return;
+    }
+
+    const plateCenterX = plate.x + plate.width / 2;
+    const plateCenterY = plate.y + plate.height / 2;
+    const dx = player.x - plateCenterX;
+    const dy = player.y - plateCenterY;
+    const interactionRangeSq =
+      PRESSURE_PLATE_INTERACTION_RANGE * PRESSURE_PLATE_INTERACTION_RANGE;
+    if (dx * dx + dy * dy > interactionRangeSq) return;
+
+    this.manuallyPressedSpikePlateIndices.add(plate.spikePlateIndex);
+    const plateState = this.spikePlateStates[plate.spikePlateIndex];
+    if (plateState) {
+      plateState.pressed = true;
+      plateState.latched = true;
+    }
+
+    console.info(
+      `[Room:${this.id}] Warden ${playerId} latched spike plate ${plate.spikePlateIndex} for spike gate ${spikeGateIndex}`,
+    );
+  }
+
   /** Fire the shared trap network from one nearby trap cell as a warden. */
   handleActivateTrapCell(playerId: string, msg: ActivateTrapCellMessage): void {
     if (!this.canPlayerAct(playerId)) return;
@@ -2891,10 +2951,12 @@ export class Room {
     }
   }
 
-  /** Open each colored spike barrier while either of its two nearest plates is held. */
+  /** Open each colored spike barrier from physical occupancy or a timed warden latch. */
   private updateSpikeGateStates(
     previousPositions: ReadonlyMap<string, { x: number; y: number }> = new Map(),
   ): void {
+    const now = Date.now();
+
     for (
       let obstacleIndex = 0;
       obstacleIndex < this.spikeGateObstacles.length;
@@ -2906,38 +2968,121 @@ export class Room {
         obstacleIndex,
         this.map.tileSize,
       );
+      const physicallyPressedPlateIndices = new Set<number>();
 
       for (const plate of plates) {
-        const pressed = this.state.players.some(
+        const physicallyPressed = this.state.players.some(
           (player) => player.connected && isPlayerOnWorldPlate(player.x, player.y, plate),
         );
-        const state = this.spikePlateStates[plate.spikePlateIndex];
-        if (state) state.pressed = pressed;
+        if (physicallyPressed) {
+          physicallyPressedPlateIndices.add(plate.spikePlateIndex);
+        }
       }
 
       for (let gateIndex = 0; gateIndex < placement.gateCount; gateIndex++) {
         const spikeGateIndex = getSpikeGateStateIndex(obstacleIndex, gateIndex);
-        const open = plates.some(
-          (plate) =>
-            plate.gateIndex === gateIndex &&
-            (this.spikePlateStates[plate.spikePlateIndex]?.pressed ?? false),
+        const gatePlates = plates.filter((plate) => plate.gateIndex === gateIndex);
+        const hasPhysicalPress = gatePlates.some((plate) =>
+          physicallyPressedPlateIndices.has(plate.spikePlateIndex),
         );
-        const state = this.spikeGateStates[spikeGateIndex];
-        if (!state || state.open === open) continue;
-        state.open = open;
-        if (!open) {
-          this.ejectPlayersFromClosingSpikeGate(
-            placement,
-            gateIndex,
-            spikeGateIndex,
-            previousPositions,
-          );
+
+        const closeDeadline = this.spikeGateCloseDeadlines[spikeGateIndex];
+        if (closeDeadline !== null) {
+          if (now >= closeDeadline) {
+            for (const plate of gatePlates) {
+              this.manuallyPressedSpikePlateIndices.delete(plate.spikePlateIndex);
+              const state = this.spikePlateStates[plate.spikePlateIndex];
+              if (state) {
+                state.pressed = false;
+                state.latched = false;
+              }
+            }
+            this.spikeGateCloseDeadlines[spikeGateIndex] = null;
+            this.spikeGateNeedsRelease[spikeGateIndex] = hasPhysicalPress;
+            this.setSpikeGateOpen(
+              placement,
+              gateIndex,
+              spikeGateIndex,
+              false,
+              previousPositions,
+            );
+            console.info(
+              `[Room:${this.id}] Spike gate ${spikeGateIndex} CLOSED after ${GATE_OPEN_DURATION_MS}ms; plates reset`,
+            );
+          } else {
+            for (const plate of gatePlates) {
+              const latched = this.manuallyPressedSpikePlateIndices.has(
+                plate.spikePlateIndex,
+              );
+              const state = this.spikePlateStates[plate.spikePlateIndex];
+              if (state) {
+                state.pressed =
+                  latched || physicallyPressedPlateIndices.has(plate.spikePlateIndex);
+                state.latched = latched;
+              }
+            }
+          }
+          continue;
         }
-        console.info(
-          `[Room:${this.id}] Spike gate ${spikeGateIndex} ${open ? 'OPENED' : 'CLOSED'} by its nearest plate`,
+
+        if (this.spikeGateNeedsRelease[spikeGateIndex]) {
+          if (!hasPhysicalPress) this.spikeGateNeedsRelease[spikeGateIndex] = false;
+          continue;
+        }
+
+        let manuallyActivated = false;
+        let open = false;
+        for (const plate of gatePlates) {
+          const latched = this.manuallyPressedSpikePlateIndices.has(
+            plate.spikePlateIndex,
+          );
+          const pressed =
+            latched || physicallyPressedPlateIndices.has(plate.spikePlateIndex);
+          const state = this.spikePlateStates[plate.spikePlateIndex];
+          if (state) {
+            state.pressed = pressed;
+            state.latched = latched;
+          }
+          manuallyActivated ||= latched;
+          open ||= pressed;
+        }
+
+        if (manuallyActivated) {
+          this.spikeGateCloseDeadlines[spikeGateIndex] = now + GATE_OPEN_DURATION_MS;
+        }
+        this.setSpikeGateOpen(
+          placement,
+          gateIndex,
+          spikeGateIndex,
+          open,
+          previousPositions,
         );
       }
     }
+  }
+
+  /** Apply one spike-gate transition and eject overlaps when it becomes solid. */
+  private setSpikeGateOpen(
+    placement: SpikeGateObstaclePlacement,
+    gateIndex: number,
+    spikeGateIndex: number,
+    open: boolean,
+    previousPositions: ReadonlyMap<string, { x: number; y: number }>,
+  ): void {
+    const state = this.spikeGateStates[spikeGateIndex];
+    if (!state || state.open === open) return;
+    state.open = open;
+    if (!open) {
+      this.ejectPlayersFromClosingSpikeGate(
+        placement,
+        gateIndex,
+        spikeGateIndex,
+        previousPositions,
+      );
+    }
+    console.info(
+      `[Room:${this.id}] Spike gate ${spikeGateIndex} ${open ? 'OPENED' : 'CLOSED'} by its nearest plate`,
+    );
   }
 
   /** Move any overlapping player back to the side they approached from. */

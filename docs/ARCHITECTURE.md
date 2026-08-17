@@ -86,6 +86,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `ACTIVATE_RUNESTONE` | Request activation of a nearby runestone |
 | `OPEN_CHEST` | Request opening a nearby unopened treasure chest |
 | `PRESS_PRESSURE_PLATE` | Warden-only request to latch a nearby gate button |
+| `PRESS_SPIKE_PLATE` | Warden-only request to latch a nearby spike-gate plate |
 | `ACTIVATE_TRAP_CELL` | Warden-only request to fire the shared trap network from a nearby 6x6 trap cell |
 | `OPEN_CAGE` | Outside-player request to open a nearby prisoner's cage |
 | `USE_WISDOM_ORB` | Survivors spend an orb on a nearby reveal/clear or request direction; wardens may use the same proximity request only to clear sword fields |
@@ -172,7 +173,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 | `gateStates` | `GateState[]` | Authoritative open/closed state for every generated gate |
 | `pressurePlateStates` | `PressurePlateState[]` | Authoritative physical-press and warden-latch state for every gate button |
 | `spikeGateStates` | `SpikeGateState[]` | Authoritative open/closed state for every active colored barrier in each spike-gate obstacle |
-| `spikePlateStates` | `SpikePlateState[]` | Authoritative physical occupancy for each spike gate's two nearest plates |
+| `spikePlateStates` | `SpikePlateState[]` | Authoritative physical-press and warden-latch state for each spike gate's two nearest plates |
 | `cageStates` | `CageState[]` | Authoritative spawned, opened, and permanently vacated cage state |
 
 ## Shared Gameplay Systems
@@ -185,7 +186,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - Closed gate tiles are solid map obstacles, so both client prediction and server simulation block on them automatically.
 - Physical button occupancy treats wardens and survivors identically: two distinct players on the spawn-side buttons or one player on the hub-side button hold the gate open only while that physical requirement remains satisfied.
 - Wardens can separately latch nearby buttons with `E`; when a latch completes one side's button requirement, the gate opens for five seconds, resets every associated button, and requires occupied buttons to be released before another activation cycle.
-- Spike-gate obstacles use exact `13x95` vertical barriers in east-west passages and export-70 `95x9` horizontal barriers in north-south passages. Vertical compositions are limited to straight corridor sections and place the third yellow barrier in the authored slot above red. Each collider is removed independently while either of that colored gate's two nearest plates is occupied, with identical checks in client prediction and server simulation.
+- Spike-gate obstacles use exact `13x95` vertical barriers in east-west passages and export-70 `95x9` horizontal barriers in north-south passages. Vertical compositions are limited to straight corridor sections and place the third yellow barrier in the authored slot above red. Each collider is removed independently while either of that colored gate's two nearest plates is occupied or manually latched by a Warden, with identical checks in client prediction and server simulation.
 - Bridge obstacles use the same six authored rectangle/right-triangle bank colliders on the client and server. Their two-tile-wide spans also share dynamic collision masks so fallen stones expose impassable water consistently during prediction and authoritative simulation.
 - Directional treasure dead ends use the same authored rectangle colliders on the client and server for their tree backing, rock, and every count-specific chest position.
 - Decorated north- and south-closed T-junctions use orientation-specific style-editor rectangles for their bushes, rock, and signpost on both the predicting client and authoritative server. The south-closed variant's inferred prop colliders reuse the established object hitbox dimensions.
@@ -275,7 +276,7 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 
 - Each deterministic spike-gate obstacle spans one otherwise-unoccupied horizontal or vertical two-cell route. Short or branching horizontal routes use red and blue barriers; yellow is included when the second cell continues straight without a perpendicular bypass. Vertical gates are selected only in straight north-south sections, use all three barriers, and place yellow above red. Horizontal barriers repeat the exported 4x6 Fiorwoods stamp with an explicit 16px grass column between stamps. Vertical barriers repeat the export-67 6x3 stamp with an explicit 16px grass row between stamps.
 - Every colored gate has exactly two physical plates, one on each side. A plate affects only its nearest gate; either plate holds that gate open, enabling two players to relay one another through the chain.
-- Plate occupancy is role-agnostic and server-authoritative. Pressed plates replicate with `plateActivated`; disconnected players are inert and do not hold a gate open.
+- Plate occupancy is role-agnostic and server-authoritative. Wardens can also press `E` near an unlatched plate to open that colored gate for the shared five-second timed cycle. Pressed and latched state replicates with `plateActivated`; disconnected players are inert and do not hold a gate open.
 - Each barrier repeats the exact half-scale `statuePillars_* 6` editor composition. Opening plays the color-matched `10, 11, 12, 13` sinking frames and closing reverses through the sequence back to frame `6`.
 - Pillar sprites participate individually in entity Y-sorting at their bottom pixel, matching the central-hub pillars. Players below a pillar draw in front of it, while players above it draw behind it.
 - Releasing the last plate restores the authoritative collider immediately, independently of the closing animation. A player overlapping that collider is ejected to their recorded approach side; a player already stuck inside is pushed opposite their facing direction.
@@ -455,6 +456,7 @@ The client currently has multiple UI subsystems, not just the minimap:
   - renders the local player as one yellow pixel and other connected players as contrasting cyan pixels in both compact and expanded views
   - renders each revealed treasure dead end as a small chest glyph; wardens see every chest on the expanded whole-maze view
   - renders every revealed sword field as three downward-pointing sword glyphs; wardens see every field on the expanded whole-maze view
+  - renders every revealed spike-gate barrier as an alternating steel spike strip aligned with the corridor; wardens see every barrier on the expanded whole-maze view
   - wardens receive a solid red frame with no fog-of-war and a wooden corner expand button; the fixed whole-maze view is scaled to fit the internal screen, marks the portal and the local warden's position, and provides a matching contract button
 - `WisdomOrbHud`
   - screen-space HUD in the top-left corner
@@ -486,7 +488,7 @@ The client currently has multiple UI subsystems, not just the minimap:
   - retain a fixed crisp screen size through camera zoom so scenery cannot cover or distort them
   - use the replicated `PlayerInfo.displayName`; the local player's own label is hidden
 - Runestone/chest interaction prompt
-  - world-space `[E]` prompt shown above nearby eligible inactive runestones, unopened treasure chests, or unlatched gate buttons for wardens
+  - world-space `[E]` prompt shown above nearby eligible inactive runestones, unopened treasure chests, or unlatched normal/spike gate buttons for wardens
   - switches to `[ Q ]` at either entrance of a blocking sword field for survivors carrying an orb
   - wardens see a red `[ E ]` at blocking sword-field entrances and can clear them without an orb
   - the prompt is white for survivors and red for wardens across all supported interactions
@@ -502,7 +504,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Intro dialogue skip: `E`, the clickable arrow button, or the mobile `E` button while the current page is still typing
 - Runestone interaction: `E` or the mobile `E` button after the intro dialogue is dismissed
 - Chest interaction: `E` or the mobile `E` button while near an unopened chest; survivors must carry fewer than three wisdom orbs, while wardens destroy the chest without a reward
-- Gate-button interaction: wardens can press `E` or the mobile `E` button near an unlatched button to latch it until that gate's next timed reset
+- Gate-button interaction: wardens can press `E` or the mobile `E` button near an unlatched normal-gate button or spike-gate plate to latch it until that gate's next timed reset
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
 - Sword-field clear: survivors use the wisdom-orb controls while `[ Q ]` is visible; wardens use `E` or the mobile `E` button while their red `[ E ]` is visible
 - Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.

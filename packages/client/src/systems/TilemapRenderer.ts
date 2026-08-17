@@ -1005,7 +1005,7 @@ export class TilemapRenderer {
     this.swordFieldVisuals[swordFieldIndex]?.playFromStart();
   }
 
-  /** Apply authoritative physical plate and open/closed state to spike gates. */
+  /** Apply authoritative physical/manual plate and open/closed state to spike gates. */
   syncSpikeGateStates(
     gateStates: readonly SpikeGateState[],
     plateStates: readonly SpikePlateState[],
