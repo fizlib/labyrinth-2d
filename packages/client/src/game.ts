@@ -3118,6 +3118,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     onUseWisdom: () => {
       triggerUseWisdomOrb('MobileQ');
     },
+    onShortTap: (clientX, clientY) => {
+      teleportFromScreenPoint(clientX, clientY);
+    },
   });
   setMobileInputEnabled = (enabled) => mobileControls.setInputEnabled(enabled);
   mobileControls.setWisdomAvailable(false);
@@ -3737,8 +3740,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
   });
 
-  // ── Click-to-Teleport (debug) ─────────────────────────────────────────
-  app.canvas.addEventListener('click', (e: MouseEvent) => {
+  function teleportFromScreenPoint(clientX: number, clientY: number): void {
     if (gameMenuOpen) return;
     if (minimap?.shouldBlockCanvasClick()) return;
     if (!DebugSettings.isEnabled('clickTeleport')) return;
@@ -3749,8 +3751,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     const scaleX = INTERNAL_WIDTH / rect.width;
     const scaleY = INTERNAL_HEIGHT / rect.height;
 
-    const screenX = (e.clientX - rect.left) * scaleX;
-    const screenY = (e.clientY - rect.top) * scaleY;
+    const screenX = (clientX - rect.left) * scaleX;
+    const screenY = (clientY - rect.top) * scaleY;
 
     // Invert camera transform: worldPos = (screenPos - container.position) / zoom
     const worldX = (screenX - worldContainer.x) / zoomLevel;
@@ -3781,6 +3783,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     console.info(
       `[Debug] Teleported to (${Math.round(clampedX)}, ${Math.round(clampedY)})`,
     );
+  }
+
+  // ── Click-to-Teleport (debug) ─────────────────────────────────────────
+  app.canvas.addEventListener('click', (e: MouseEvent) => {
+    teleportFromScreenPoint(e.clientX, e.clientY);
   });
 
   // ── Keyboard Input ────────────────────────────────────────────────────

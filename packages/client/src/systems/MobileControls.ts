@@ -20,6 +20,7 @@ interface MobileControlsOptions {
   onDirectionChange: MobileControlHandler;
   onInteract: () => void;
   onUseWisdom: () => void;
+  onShortTap?: (clientX: number, clientY: number) => void;
   joystick?: FloatingJoystickConfig;
 }
 
@@ -34,6 +35,7 @@ const MOBILE_CONTROLS_QUERY = '(hover: none) and (pointer: coarse)';
 const MOVE_DIRECTIONS: readonly MobileControlDirection[] = ['up', 'down', 'left', 'right'];
 const DEFAULT_DEAD_ZONE = 14;
 const DEFAULT_HYSTERESIS_DEGREES = 7.5;
+const SHORT_TAP_MAX_DURATION_MS = 300;
 const JOYSTICK_EXCLUSION_PADDING = 6;
 const MIN_ACTION_FRAME_GUTTER = 12;
 const MAX_ACTION_FRAME_GUTTER = 16;
@@ -86,6 +88,8 @@ export class MobileControls {
   private activeJoystickPointerId: number | null = null;
   private joystickCenterX = 0;
   private joystickCenterY = 0;
+  private joystickStartedAt = 0;
+  private joystickMaxTravel = 0;
   private joystickSector: number | null = null;
   private activeJoystickCaptureTarget: HTMLElement | null = null;
   private wisdomAvailable = true;
@@ -523,6 +527,8 @@ export class MobileControls {
     this.activeJoystickCaptureTarget = captureTarget;
     this.joystickCenterX = event.clientX;
     this.joystickCenterY = event.clientY;
+    this.joystickStartedAt = performance.now();
+    this.joystickMaxTravel = 0;
     this.joystickSector = null;
 
     const regionRect = this.joystickRegion.getBoundingClientRect();
@@ -545,6 +551,7 @@ export class MobileControls {
     const offsetX = event.clientX - this.joystickCenterX;
     const offsetY = event.clientY - this.joystickCenterY;
     const distance = Math.hypot(offsetX, offsetY);
+    this.joystickMaxTravel = Math.max(this.joystickMaxTravel, distance);
     const maxRadius = this.getJoystickMaxRadius();
     const visualScale = distance > maxRadius ? maxRadius / distance : 1;
     const knobX = offsetX * visualScale;
@@ -567,7 +574,18 @@ export class MobileControls {
 
   private handlePointerRelease = (event: PointerEvent): void => {
     if (event.pointerId === this.activeJoystickPointerId) {
+      const releaseTravel = Math.hypot(
+        event.clientX - this.joystickCenterX,
+        event.clientY - this.joystickCenterY,
+      );
+      const isShortTap =
+        event.type === 'pointerup' &&
+        performance.now() - this.joystickStartedAt <= SHORT_TAP_MAX_DURATION_MS &&
+        Math.max(this.joystickMaxTravel, releaseTravel) <= this.getJoystickDeadZone();
+      const tapX = this.joystickCenterX;
+      const tapY = this.joystickCenterY;
       this.releaseJoystick();
+      if (isShortTap) this.options.onShortTap?.(tapX, tapY);
     }
     this.releaseActionPointer(this.interactPointers, this.interactButton, event.pointerId);
     this.releaseActionPointer(this.wisdomPointers, this.wisdomButton, event.pointerId);
