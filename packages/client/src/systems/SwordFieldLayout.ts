@@ -1,16 +1,18 @@
+import swordFieldRuntimeAssets from '../assets/swordFieldRuntimeAssets.json';
+import { getRuntimeStyleAssetPath } from '../assets/runtimeAssetPaths';
+
+export type SwordFieldAssetId = keyof typeof swordFieldRuntimeAssets;
+
 export interface SwordFieldSpriteSpec {
-  asset: string;
+  asset: SwordFieldAssetId;
   x: number;
   y: number;
   w: number;
   h: number;
 }
 
-const FIORWOODS_ROOT = '/assets/chained-echoes-assets-sorted/Assets/Maps/Fiorwoods';
-const VILLAGE_ROOT = '/assets/chained-echoes-assets-sorted/Assets/Maps/Village';
-
 /** Exact 12×6 ground repaint from the supplied style-editor layout. */
-const TERRAIN_GRID: readonly (readonly string[])[] = [
+const TERRAIN_GRID: readonly (readonly SwordFieldAssetId[])[] = [
   [
     'Sprite_Fiorwoods_1109',
     'Sprite_Fiorwoods_1110',
@@ -183,13 +185,8 @@ export const SWORD_FIELD_SWORD_SPRITES = [
   { asset: 'sword05', x: 112, y: 67, w: 5, h: 22 },
 ] as const satisfies readonly SwordFieldSpriteSpec[];
 
-export function getSwordFieldAssetPath(asset: string): string {
-  if (asset.startsWith('Sprite_Fiorwoods_')) return `${FIORWOODS_ROOT}/${asset}.png`;
-  if (asset.startsWith('Sprite_Village_')) return `${VILLAGE_ROOT}/${asset}.png`;
-  if (asset === 'grave1') {
-    return '/assets/chained-echoes-assets-sorted/Assets/Prefabs/World/Natural Decoration/grave1.png';
-  }
-  return `/assets/chained-echoes-assets-sorted/${asset}.png`;
+export function getSwordFieldAssetPath(asset: SwordFieldAssetId): string {
+  return getRuntimeStyleAssetPath(swordFieldRuntimeAssets[asset]);
 }
 
 export const SWORD_FIELD_ASSET_PATHS = [

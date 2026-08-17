@@ -37,12 +37,14 @@ const runtimeStyleDirectory = path.join(
 const runtimeStyleManifestPaths = [
   path.join(clientDirectory, 'central-hub-runtime-assets.json'),
   path.join(clientDirectory, 'spike-gate-runtime-assets.json'),
+  path.join(clientDirectory, 'src', 'assets', 'swordFieldRuntimeAssets.json'),
 ];
 const runtimeStyleAssets = (
   await Promise.all(
-    runtimeStyleManifestPaths.map(async (manifestPath) =>
-      JSON.parse(await fs.readFile(manifestPath, 'utf8')),
-    ),
+    runtimeStyleManifestPaths.map(async (manifestPath) => {
+      const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+      return Array.isArray(manifest) ? manifest : Object.values(manifest);
+    }),
   )
 ).flat();
 

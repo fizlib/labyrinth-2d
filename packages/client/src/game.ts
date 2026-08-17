@@ -93,6 +93,17 @@ const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
 const WARDSTONES_ACTIVATED_CHAT_MESSAGE =
   'All wardstones have been activated. The escape portal is now open!';
 
+function getWardstoneActivatedChatMessage(
+  runestoneIndex: number,
+  activatedCount: number,
+): string | null {
+  const color = SQUAD_COLORS[runestoneIndex];
+  if (!color) return null;
+
+  const displayColor = color.charAt(0).toUpperCase() + color.slice(1);
+  return `${displayColor} wardstone activated. Wardstones active: ${activatedCount}/${SQUAD_COLORS.length}.`;
+}
+
 const WARDEN_SPAWN_DIALOGUE_PAGES = [
   'You are a Warden. Keep your role hidden from the survivors.',
   'Your goal is to delay and misdirect the survivors until time runs out. Use your complete map to lead them astray.',
@@ -1933,6 +1944,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   // ── Network Manager ───────────────────────────────────────────────────
 
   let latestServerState: GameState | null = null;
+  const activatedWardstoneIndexes = new Set<number>();
+
+  function syncActivatedWardstoneIndexes(gameState: GameState): void {
+    activatedWardstoneIndexes.clear();
+    for (const runestone of gameState.runestones) {
+      if (runestone.activated) activatedWardstoneIndexes.add(runestone.index);
+    }
+  }
 
   function updatePlayerNameTagScreenPositions(): void {
     const scaleX = worldContainer.scale.x;
@@ -2261,6 +2280,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       isAdmin,
       resumed,
     ) => {
+      syncActivatedWardstoneIndexes(gameState);
       showLoadingScreen(0.92, 'Carving your path through the maze…');
       runAfterLoadingScreenPaint(() => {
       DebugSettings.setAdminAccess(isAdmin);
@@ -2518,6 +2538,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onTickUpdate: (gameState) => {
+      syncActivatedWardstoneIndexes(gameState);
       const localPlayerId = net.playerId;
       matchHud.sync(gameState.match);
       snapshotBuffer.push(gameState);
@@ -2654,12 +2675,22 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onRunestoneActivated: (runestoneIndex) => {
       console.info(`[Main] Runestone ${runestoneIndex} activated!`);
+      const wasAlreadyActivated = activatedWardstoneIndexes.has(runestoneIndex);
+      activatedWardstoneIndexes.add(runestoneIndex);
       const rsData = tilemapRenderer?.runestoneSprites.find(
         (r) => r.index === runestoneIndex,
       );
       if (rsData && !rsData.activated) {
         rsData.activated = true;
         rsData.sprite.texture = assets.runestoneTextures[runestoneIndex][1];
+      }
+
+      if (!wasAlreadyActivated) {
+        const message = getWardstoneActivatedChatMessage(
+          runestoneIndex,
+          activatedWardstoneIndexes.size,
+        );
+        if (message) chatHud?.addSystemMessage(message);
       }
     },
 

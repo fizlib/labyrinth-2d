@@ -25,6 +25,12 @@ const manifests = [
     target: path.join(publicAssetsDirectory, 'runtime-style'),
     toRelativePaths: (relativePaths) => relativePaths,
   },
+  {
+    name: 'sword fields',
+    file: path.join(clientDirectory, 'src', 'assets', 'swordFieldRuntimeAssets.json'),
+    target: path.join(publicAssetsDirectory, 'runtime-style'),
+    toRelativePaths: (assetMap) => Object.values(assetMap),
+  },
 ];
 
 const missing = [];

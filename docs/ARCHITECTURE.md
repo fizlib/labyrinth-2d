@@ -201,6 +201,7 @@ Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and 
 - The server uses current authoritative player positions to deliver each message to the sender and every player within `160` world pixels (10 tiles). Walls do not block chat.
 - Chat events are transient: they are not stored in `GameState` and are not replayed to late joiners.
 - The client keeps only the latest four locally received messages. They fade after ten inactive seconds and return when the player reopens chat.
+- Each room-wide `RUNESTONE_ACTIVATED` event adds a gold system message naming the wardstone color and showing the activated total (for example, `Blue wardstone activated. Wardstones active: 1/3.`).
 - The room-wide `ALL_RUNESTONES_ACTIVATED` event adds a gold system message to every connected player's chat announcing that the escape portal is open.
 - `PLAYER_ESCAPED` is also room-wide and adds a gold system message with the survivor's name and the remaining escape target. Escaped spectators receive these system events but are excluded from normal proximity-chat sending and delivery.
 
