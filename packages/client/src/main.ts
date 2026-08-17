@@ -32,6 +32,10 @@ import {
 } from './net/ReconnectSession';
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
+const DEPLOYMENT_RELOAD_STORAGE_KEY = 'labyrinth-deployment-reload-at';
+const DEPLOYMENT_RELOAD_COOLDOWN_MS = 60_000;
+
+let deploymentReloadScheduled = false;
 
 type AppView =
   | 'restoring'
@@ -55,6 +59,79 @@ function getAppRoot(): HTMLDivElement {
 }
 
 const root = getAppRoot();
+
+function clearDeploymentReloadAttempt(): void {
+  try {
+    window.sessionStorage.removeItem(DEPLOYMENT_RELOAD_STORAGE_KEY);
+  } catch {
+    // Storage can be unavailable in hardened browser modes.
+  }
+}
+
+/** Reload once when an open tab references chunks removed by a newer deployment. */
+function reloadLatestDeployment(): boolean {
+  if (deploymentReloadScheduled) return true;
+
+  try {
+    const previousAttempt = Number(
+      window.sessionStorage.getItem(DEPLOYMENT_RELOAD_STORAGE_KEY),
+    );
+    const elapsed = Date.now() - previousAttempt;
+    if (
+      Number.isFinite(previousAttempt) &&
+      elapsed >= 0 &&
+      elapsed < DEPLOYMENT_RELOAD_COOLDOWN_MS
+    ) {
+      return false;
+    }
+    window.sessionStorage.setItem(DEPLOYMENT_RELOAD_STORAGE_KEY, Date.now().toString());
+  } catch {
+    // Without a per-tab guard, an automatic reload could loop indefinitely.
+    return false;
+  }
+
+  deploymentReloadScheduled = true;
+  window.location.reload();
+  return true;
+}
+
+function showGameModuleLoadError(): void {
+  const screen = document.getElementById('loading-screen');
+  if (!screen) return;
+
+  screen.classList.add('loading-screen--error');
+  screen.setAttribute('aria-busy', 'false');
+  screen.style.setProperty('--loading-progress', '1');
+
+  const progressBar = document.getElementById('loading-progress');
+  const statusText = document.getElementById('loading-status');
+  const percentText = document.getElementById('loading-percent');
+  progressBar?.setAttribute('aria-valuenow', '100');
+  if (statusText) {
+    statusText.textContent = 'A newer game version is ready. Reload to continue.';
+  }
+  if (percentText) percentText.textContent = 'UPDATE';
+
+  const content = screen.querySelector<HTMLElement>('.loading-screen__content');
+  if (content && !content.querySelector('.loading-screen__error-action')) {
+    const reloadButton = document.createElement('button');
+    reloadButton.className =
+      'pixel-button pixel-button--quiet loading-screen__error-action';
+    reloadButton.type = 'button';
+    reloadButton.textContent = 'Reload Latest Version';
+    reloadButton.addEventListener('click', () => {
+      clearDeploymentReloadAttempt();
+      window.location.reload();
+    });
+    content.appendChild(reloadButton);
+  }
+}
+
+window.addEventListener('vite:preloadError', (event) => {
+  // Vite emits this when a code-split import points at a removed deployment chunk.
+  event.preventDefault();
+  if (!reloadLatestDeployment()) showGameModuleLoadError();
+});
 
 function escapeHtml(value: string): string {
   return value
@@ -933,12 +1010,21 @@ class AppController {
     this.view = 'launching-game';
     root.innerHTML = gameMarkup();
 
+    let gameModule: typeof import('./game');
     try {
-      const { startGame } = await import('./game');
+      gameModule = await import('./game');
+      clearDeploymentReloadAttempt();
+    } catch (error) {
+      console.error('[App] Failed to load the game module:', error);
+      if (!reloadLatestDeployment()) showGameModuleLoadError();
+      return;
+    }
+
+    try {
       const reconnectSession =
         existingReconnectSession ??
         createReconnectSession(this.profile.id, joinMode, roomId);
-      await startGame({
+      await gameModule.startGame({
         displayName: this.profile.display_name,
         reconnectSession,
         accessToken: this.session?.access_token,
