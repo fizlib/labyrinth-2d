@@ -58,7 +58,7 @@ import type {
   SpikePlatePlacement,
   SpikePlateState,
 } from '@labyrinth/shared';
-import { NetworkManager } from './net/NetworkManager';
+import { NetworkManager, type NetworkCallbacks } from './net/NetworkManager';
 import type { NetworkDiagnostics } from './net/NetworkDiagnosticsTracker';
 import { getReconciliationInputs } from './net/ReconciliationPolicy';
 import {
@@ -1804,8 +1804,15 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   setupFullscreenToggle(app);
   window.addEventListener('resize', () => resizeCanvas(app));
 
-  const assets: GameAssets = await loadAssets(updateLoadingProgress);
-  updateLoadingProgress(0.98, 'Finding your place in the maze…');
+  let latestAssetProgress = 0.06;
+  let latestAssetStatus = 'Lighting the first torch…';
+  let assets!: GameAssets;
+  let assetsReady = false;
+  const assetLoadPromise = loadAssets((progress, status) => {
+    latestAssetProgress = progress;
+    latestAssetStatus = status;
+    updateLoadingProgress(progress, status);
+  });
 
   // ── World Container ───────────────────────────────────────────────────
   const worldContainer = new Container();
@@ -2410,9 +2417,24 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let setMobileInputEnabled: (enabled: boolean) => void = () => {};
   let setGameMenuAvailable: (available: boolean) => void = () => {};
   let syncLocalInputAvailability: () => void = () => {};
+  let matchRuntimeReady = false;
+  let deferredRoomAdmission: Parameters<NetworkCallbacks['onRoomJoined']> | null =
+    null;
+  let deferredTickUpdate: GameState | null = null;
+  const deferredMatchEvents: Array<() => void> = [];
 
-  const net = new NetworkManager({
+  const deferMatchEvent = (event: () => void): boolean => {
+    if (matchRuntimeReady) return false;
+    deferredMatchEvents.push(event);
+    return true;
+  };
+  const getDeferredRoomAdmission = (): Parameters<
+    NetworkCallbacks['onRoomJoined']
+  > | null => deferredRoomAdmission;
+
+  const networkCallbacks: NetworkCallbacks = {
     onLobbyJoined: (playerId, lobby, isAdmin, resumed) => {
+      matchRuntimeReady = false;
       DebugSettings.setAdminAccess(isAdmin);
       isAdminSession = isAdmin;
       setNetworkStatsState(networkStatsHud, false, false);
@@ -2491,6 +2513,28 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       isAdmin,
       resumed,
     ) => {
+      const isResumingDeferredAdmission = deferredRoomAdmission !== null;
+      matchRuntimeReady = false;
+      if (!isResumingDeferredAdmission) {
+        deferredTickUpdate = null;
+        deferredMatchEvents.length = 0;
+      }
+
+      if (!assetsReady) {
+        deferredRoomAdmission = [
+          roomId,
+          playerId,
+          mapSeed,
+          role,
+          wisdomOrbs,
+          gameState,
+          isAdmin,
+          resumed,
+        ];
+        showLoadingScreen(latestAssetProgress, latestAssetStatus);
+        return;
+      }
+
       syncActivatedWardstoneIndexes(gameState);
       showLoadingScreen(0.92, 'Carving your path through the maze…');
       runAfterLoadingScreenPaint(() => {
@@ -2764,11 +2808,21 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           true,
         );
         if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
+        matchRuntimeReady = true;
+        const queuedMatchEvents = deferredMatchEvents.splice(0);
+        for (const event of queuedMatchEvents) event();
+        const queuedTickUpdate = deferredTickUpdate;
+        deferredTickUpdate = null;
+        if (queuedTickUpdate) networkCallbacks.onTickUpdate(queuedTickUpdate);
         window.requestAnimationFrame(dismissLoadingScreen);
       });
     },
 
     onTickUpdate: (gameState) => {
+      if (!matchRuntimeReady) {
+        deferredTickUpdate = gameState;
+        return;
+      }
       syncActivatedWardstoneIndexes(gameState);
       const localPlayerId = net.playerId;
       matchHud.sync(gameState.match);
@@ -2904,6 +2958,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onPlayerLeft: (playerId) => {
+      if (deferMatchEvent(() => networkCallbacks.onPlayerLeft(playerId))) return;
       console.info(`[Main] Player left: ${playerId}`);
       removePlayerSprite(playerId);
       knownRemotePlayers.delete(playerId);
@@ -2911,6 +2966,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onRunestoneActivated: (runestoneIndex) => {
+      if (
+        deferMatchEvent(() => networkCallbacks.onRunestoneActivated(runestoneIndex))
+      )
+        return;
       console.info(`[Main] Runestone ${runestoneIndex} activated!`);
       const wasAlreadyActivated = activatedWardstoneIndexes.has(runestoneIndex);
       activatedWardstoneIndexes.add(runestoneIndex);
@@ -2932,6 +2991,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onChestOpened: (chestIndex, playerId) => {
+      if (
+        deferMatchEvent(() => networkCallbacks.onChestOpened(chestIndex, playerId))
+      )
+        return;
       console.info(`[Main] Chest ${chestIndex} opened by ${playerId}`);
       tilemapRenderer?.chestDeadEndVisuals
         .find((visual) => visual.index === chestIndex)
@@ -2939,6 +3002,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onWisdomOrbGranted: (chestIndex, wisdomOrbs) => {
+      if (
+        deferMatchEvent(() =>
+          networkCallbacks.onWisdomOrbGranted(chestIndex, wisdomOrbs),
+        )
+      )
+        return;
       localWisdomOrbs = wisdomOrbs;
       wisdomOrbHud?.setRemaining(wisdomOrbs);
       console.info(
@@ -2947,6 +3016,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onAllRunestonesActivated: (portalX, portalY) => {
+      if (
+        deferMatchEvent(() =>
+          networkCallbacks.onAllRunestonesActivated(portalX, portalY),
+        )
+      )
+        return;
       console.info(
         `[Main] All runestones activated! Portal at (${Math.round(portalX)}, ${Math.round(portalY)})`,
       );
@@ -2957,6 +3032,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onWisdomOrbUsed: (hint, remainingWisdomOrbs) => {
+      if (
+        deferMatchEvent(() =>
+          networkCallbacks.onWisdomOrbUsed(hint, remainingWisdomOrbs),
+        )
+      )
+        return;
       localWisdomOrbs = remainingWisdomOrbs;
       wisdomOrbHud?.setRemaining(remainingWisdomOrbs);
       if (hint.kind === 'bridge') {
@@ -2990,12 +3071,22 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onPlayerRoleChanged: (role, wisdomOrbs) => {
+      if (
+        deferMatchEvent(() =>
+          networkCallbacks.onPlayerRoleChanged(role, wisdomOrbs),
+        )
+      )
+        return;
       console.info(`[Main] Debug role changed to ${role}`);
       if (net.playerId) debugPlayerRoles.set(net.playerId, role);
       applyLocalRoleUi(role, wisdomOrbs, false);
     },
 
     onDebugPlayerRole: (playerId, role) => {
+      if (
+        deferMatchEvent(() => networkCallbacks.onDebugPlayerRole(playerId, role))
+      )
+        return;
       debugPlayerRoles.set(playerId, role);
       if (debugUi && latestServerState) {
         updateDebugUI(debugUi, latestServerState, net.playerId, true);
@@ -3013,6 +3104,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onGateStateChanged: (gateIndex, open) => {
+      if (
+        deferMatchEvent(() => networkCallbacks.onGateStateChanged(gateIndex, open))
+      )
+        return;
       console.info(`[Main] Gate ${gateIndex} ${open ? 'OPENED' : 'CLOSED'}`);
       if (currentLayout && currentMap && tilemapRenderer) {
         applyGateState(
@@ -3027,6 +3122,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onTrapActivationResult: (trapCellIndex, capturedCount) => {
+      if (
+        deferMatchEvent(() =>
+          networkCallbacks.onTrapActivationResult(trapCellIndex, capturedCount),
+        )
+      )
+        return;
       if (capturedCount > 0) return;
       console.info(`[Main] Trap cell ${trapCellIndex} found no free survivors`);
       emptyTrapPromptShakeRemaining = EMPTY_TRAP_PROMPT_SHAKE_DURATION;
@@ -3034,6 +3135,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onChatMessage: (playerId, displayName, teamId, text) => {
+      if (
+        deferMatchEvent(() =>
+          networkCallbacks.onChatMessage(playerId, displayName, teamId, text),
+        )
+      )
+        return;
       chatHud?.addMessage({ playerId, displayName, teamId, text });
     },
 
@@ -3046,6 +3153,20 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       escapeThreshold,
       remainingToEscape,
     ) => {
+      if (
+        deferMatchEvent(() =>
+          networkCallbacks.onPlayerEscaped(
+            playerId,
+            displayName,
+            portalX,
+            portalY,
+            escapedCount,
+            escapeThreshold,
+            remainingToEscape,
+          ),
+        )
+      )
+        return;
       const noun = remainingToEscape === 1 ? 'survivor' : 'survivors';
       chatHud?.addSystemMessage(
         `${displayName} has escaped the maze via portal. ${remainingToEscape} more ${noun} need to escape.`,
@@ -3063,6 +3184,18 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onMatchEnded: (winner, escapedCount, escapeThreshold, remainingMs, finalRoster) => {
+      if (
+        deferMatchEvent(() =>
+          networkCallbacks.onMatchEnded(
+            winner,
+            escapedCount,
+            escapeThreshold,
+            remainingMs,
+            finalRoster,
+          ),
+        )
+      )
+        return;
       resetAllInput();
       clearPendingMovementInputs();
       minimap?.closeExpanded();
@@ -3112,7 +3245,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         statusEl.classList.toggle('error', state.status === 'failed');
       }
     },
-  });
+  };
+  const net = new NetworkManager(networkCallbacks);
 
   reconnectOverlay = new ReconnectOverlay({
     parent: container,
@@ -4167,6 +4301,40 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const displayName = options.displayName;
 
   net.connect(wsUrl, options.reconnectSession, displayName, options.accessToken);
+
+  try {
+    assets = await assetLoadPromise;
+    assetsReady = true;
+    updateLoadingProgress(0.98, 'Finding your place in the maze…');
+  } catch (error) {
+    net.leaveRoom();
+    throw error;
+  }
+
+  const pendingAdmission = getDeferredRoomAdmission();
+  if (pendingAdmission) {
+    const [
+      roomId,
+      playerId,
+      mapSeed,
+      role,
+      wisdomOrbs,
+      gameState,
+      isAdmin,
+      resumed,
+    ] = pendingAdmission;
+    networkCallbacks.onRoomJoined(
+      roomId,
+      playerId,
+      mapSeed,
+      role,
+      wisdomOrbs,
+      net.gameState ?? gameState,
+      isAdmin,
+      resumed,
+    );
+    deferredRoomAdmission = null;
+  }
 
   console.info('─────────────────────────────────────────────────');
   console.info('  🏹 False Arrow Client');

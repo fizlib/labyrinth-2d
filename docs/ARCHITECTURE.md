@@ -375,10 +375,12 @@ The client first runs a lightweight DOM app shell with these states:
 4. load or create the signed-in user's `public.profiles` row and require a new
    account to choose its display name once;
 5. show Main Menu, Join by Code, or Profile;
-6. dynamically import PixiJS and preload runtime assets after Quick Play, Create Private Game, or Join Room is selected;
-7. connect to the authoritative waiting room and show its DOM lobby overlay; and
+6. dynamically import PixiJS after Quick Play, Create Private Game, or Join Room is selected;
+7. start runtime-asset loading and the authoritative waiting-room connection in
+   parallel, showing the DOM lobby overlay as soon as admission succeeds; and
 8. restore the loading screen when the match starts, then build the maze only
-   after the server sends `ROOM_JOINED` at countdown completion.
+   after the server sends `ROOM_JOINED` at countdown completion and the runtime
+   assets are ready.
 
 Guest profiles are created only after the naming form is submitted, use
 `sessionStorage`, never call Supabase, and are discarded
@@ -391,7 +393,11 @@ empty naming form before the menu or an invited lobby can open.
 Auth, Main Menu, Profile, and Join by Code do not initialize Pixi, load runtime
 game assets, construct `NetworkManager`, or open a WebSocket. The selected
 Quick Play/private-room connection begins inside `startGame()` and uses the
-profile display name. Each occupied seat has a private 256-bit bearer token in
+profile display name. Asset progress continues in the background while the
+player can vote, chat, and inspect the lobby. If a countdown completes first,
+the client restores the loading screen, retains the latest authoritative match
+snapshot and match events, and applies them after asset loading finishes. Each
+occupied seat has a private 256-bit bearer token in
 the current tab's `sessionStorage`, scoped to the current profile ID. After
 identity restoration, a reload automatically resumes that seat; a different
 explicit `?room=CODE` invitation clears the stored seat and connects directly
