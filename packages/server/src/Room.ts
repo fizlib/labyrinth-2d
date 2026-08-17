@@ -63,6 +63,7 @@ import {
   normalizeChatMessageText,
   isWithinChatProximity,
   LOBBY_COUNTDOWN_MS,
+  MATCH_LOADING_TIMEOUT_MS,
   LOBBY_MAX_PLAYERS,
   LOBBY_MIN_PLAYERS,
   LOBBY_VOTE_DELAY_MS,
@@ -127,12 +128,14 @@ import {
   type SendLobbyChatMessage,
   type VoteToStartMessage,
   type AdminKickPlayerMessage,
+  type GameReadyMessage,
   type EscapePortalMessage,
   type DebugTeleportMessage,
   type DebugSetMatchTimeMessage,
   type DebugSetNetworkStatsMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
+  type MatchStartedMessage,
   type LobbyJoinedMessage,
   type LobbyUpdatedMessage,
   type LobbyChatMessage,
@@ -228,6 +231,7 @@ interface RoomSeat {
 
 export interface RoomOptions {
   reconnectGraceMs?: number;
+  matchLoadingTimeoutMs?: number;
   matchRecordingEnabled?: boolean;
   onSeatReleased?: (
     reconnectToken: string,
@@ -419,11 +423,14 @@ export class Room {
   private readonly lastChatSentAt = new Map<string, number>();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
   private countdownHandle: ReturnType<typeof setTimeout> | null = null;
+  private matchLoadingTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  private readonly matchReadyPlayerIds = new Set<string>();
   private lobbyCountdownEndsAtMs: number | null = null;
   private lobbyStartReason: LobbyStartReason = null;
   private lobbyVoteAvailableAtMs = 0;
   private readonly lobbyVotes = new Set<string>();
   private readonly reconnectGraceMs: number;
+  private readonly matchLoadingTimeoutMs: number;
   private readonly onSeatReleased: (
     reconnectToken: string,
     userId: string | null,
@@ -441,7 +448,7 @@ export class Room {
   private rankedDisabled = false;
   private matchResultEmitted = false;
 
-  /** Server wall-clock deadline, initialized when the lobby countdown completes. */
+  /** Server wall-clock deadline, initialized only after every client is ready. */
   private matchEndsAtMs: number | null = null;
 
   /** Hidden role assigned to every seat in the room. */
@@ -567,6 +574,8 @@ export class Room {
     this.id = id;
     this.isPublic = isPublic;
     this.reconnectGraceMs = options.reconnectGraceMs ?? RECONNECT_GRACE_MS;
+    this.matchLoadingTimeoutMs =
+      options.matchLoadingTimeoutMs ?? MATCH_LOADING_TIMEOUT_MS;
     this.onSeatReleased = options.onSeatReleased ?? (() => {});
     this.onEmpty = options.onEmpty ?? (() => {});
     this.onMatchEnded = options.onMatchEnded ?? (() => {});
@@ -789,6 +798,9 @@ export class Room {
       if (this.playerCount === LOBBY_MAX_PLAYERS && this.allSeatsConnected) {
         this.beginLobbyCountdown('full');
       }
+    } else if (this.state.match.status === 'loading') {
+      this.sendRoomJoined(ws, seat.id);
+      this.broadcastLobbyState();
     } else {
       this.sendRoomJoined(ws, seat.id);
       this.broadcastSnapshot();
@@ -813,6 +825,9 @@ export class Room {
 
     if (this.state.match.status === 'waiting') {
       this.cancelLobbyCountdown();
+      this.broadcastLobbyState();
+    } else if (this.state.match.status === 'loading') {
+      this.matchReadyPlayerIds.delete(playerId);
       this.broadcastLobbyState();
     } else {
       this.broadcastSnapshot();
@@ -856,6 +871,8 @@ export class Room {
       cage.vacated = true;
     }
     const wasWaiting = this.state.match.status === 'waiting';
+    const wasLoading = this.state.match.status === 'loading';
+    this.matchReadyPlayerIds.delete(playerId);
     if (this.state.match.status === 'running') {
       const participant = this.matchRoster.find(
         (candidate) => candidate.playerId === playerId,
@@ -885,11 +902,17 @@ export class Room {
       this.checkSurvivorVictory();
     }
 
+    if (wasLoading && this.state.match.status === 'loading') {
+      this.broadcastLobbyState();
+      this.tryActivateMatch();
+    }
+
     console.info(
       `[Room:${this.id}] Player left: ${playerId} — ${this.playerCount} player(s) remaining`,
     );
 
     if (this.playerCount === 0) {
+      this.cancelMatchLoading();
       this.stopLoop();
       this.lobbyVoteAvailableAtMs = 0;
       this.onEmpty();
@@ -959,6 +982,23 @@ export class Room {
     this.disableRanking('administrator bypassed normal lobby start');
     console.info(`[Room:${this.id}] Admin ${playerId} started the match immediately`);
     this.startMatch();
+  }
+
+  /** Record one fully built client and release the roster only when all are ready. */
+  handleGameReady(playerId: string, _msg?: GameReadyMessage): void {
+    if (
+      this.state.match.status !== 'loading' ||
+      !this.sockets.has(playerId) ||
+      !this.state.players.some((player) => player.id === playerId)
+    ) {
+      return;
+    }
+
+    this.matchReadyPlayerIds.add(playerId);
+    console.info(
+      `[Room:${this.id}] Client ready: ${playerId} (${this.matchReadyPlayerIds.size}/${this.playerCount})`,
+    );
+    this.tryActivateMatch();
   }
 
   /** Allow a verified administrator to permanently remove another lobby seat. */
@@ -1314,7 +1354,12 @@ export class Room {
   private getLobbyState(): LobbyState {
     return {
       roomId: this.id,
-      phase: this.countdownHandle === null ? 'waiting' : 'countdown',
+      phase:
+        this.state.match.status === 'loading'
+          ? 'loading'
+          : this.countdownHandle === null
+            ? 'waiting'
+            : 'countdown',
       players: Array.from(this.seats.values()).map((seat) => ({
         id: seat.id,
         displayName: seat.displayName,
@@ -1360,7 +1405,11 @@ export class Room {
   }
 
   private broadcastLobbyState(): void {
-    if (this.state.match.status !== 'waiting') return;
+    if (
+      this.state.match.status !== 'waiting' &&
+      this.state.match.status !== 'loading'
+    )
+      return;
     const message: LobbyUpdatedMessage = {
       type: MessageType.LobbyUpdated,
       lobby: this.getLobbyState(),
@@ -1488,15 +1537,14 @@ export class Room {
     }
     this.cancelLobbyCountdown();
     this.createMatchPlayers();
-    const now = Date.now();
-    this.captureStartingRoster(now);
-    this.matchEndsAtMs = now + MATCH_DURATION_MS;
-    this.state.match.status = 'running';
+    this.state.match.status = 'loading';
     this.state.match.winner = null;
     this.state.match.finalRoster = null;
     this.state.match.remainingMs = MATCH_DURATION_MS;
     this.syncMatchCounts();
     this.inFlightSnapshotIds.clear();
+    this.matchReadyPlayerIds.clear();
+    this.broadcastLobbyState();
 
     for (const player of this.state.players) {
       const socket = this.sockets.get(player.id);
@@ -1504,10 +1552,81 @@ export class Room {
       this.sendRoomJoined(socket, player.id);
     }
 
+    this.matchLoadingTimeoutHandle = setTimeout(
+      () => this.handleMatchLoadingTimeout(),
+      this.matchLoadingTimeoutMs,
+    );
+    console.info(
+      `[Room:${this.id}] Match loading started for ${this.playerCount} players`,
+    );
+  }
+
+  private tryActivateMatch(): void {
+    if (
+      this.state.match.status !== 'loading' ||
+      this.playerCount === 0 ||
+      !this.allSeatsConnected ||
+      this.state.players.some(
+        (player) => !this.matchReadyPlayerIds.has(player.id),
+      )
+    ) {
+      return;
+    }
+
+    this.cancelMatchLoading();
+    const now = Date.now();
+    this.captureStartingRoster(now);
+    this.matchEndsAtMs = now + MATCH_DURATION_MS;
+    this.state.match.status = 'running';
+    this.state.match.remainingMs = MATCH_DURATION_MS;
+    this.syncMatchCounts();
+
+    const startedMessage: MatchStartedMessage = {
+      type: MessageType.MatchStarted,
+      gameState: this.cloneState(),
+    };
+    this.broadcast(startedMessage);
     this.startLoop();
     console.info(
-      `[Room:${this.id}] Match started with ${this.playerCount} players; deadline in 10 minutes; ${this.matchIsRanked ? 'ranked' : 'unranked'}`,
+      `[Room:${this.id}] Match started with ${this.playerCount} ready players; deadline in 10 minutes; ${this.matchIsRanked ? 'ranked' : 'unranked'}`,
     );
+  }
+
+  private handleMatchLoadingTimeout(): void {
+    this.matchLoadingTimeoutHandle = null;
+    if (this.state.match.status !== 'loading') return;
+
+    const unreadyPlayerIds = this.state.players
+      .filter(
+        (player) =>
+          !this.sockets.has(player.id) ||
+          !this.matchReadyPlayerIds.has(player.id),
+      )
+      .map((player) => player.id);
+
+    console.warn(
+      `[Room:${this.id}] Match loading timed out; removing ${unreadyPlayerIds.length} unready player(s)`,
+    );
+    for (const playerId of unreadyPlayerIds) {
+      const socket = this.sockets.get(playerId);
+      if (socket) {
+        const timedOutMessage: LobbyKickedMessage = {
+          type: MessageType.LobbyKicked,
+          message: 'The game could not wait any longer for this client to load.',
+        };
+        this.send(socket, timedOutMessage);
+      }
+      this.removePlayer(playerId);
+    }
+    this.tryActivateMatch();
+  }
+
+  private cancelMatchLoading(): void {
+    if (this.matchLoadingTimeoutHandle !== null) {
+      clearTimeout(this.matchLoadingTimeoutHandle);
+      this.matchLoadingTimeoutHandle = null;
+    }
+    this.matchReadyPlayerIds.clear();
   }
 
   /** Keep public progress derived from every occupied private role. */
@@ -3246,7 +3365,11 @@ export class Room {
   }
 
   private broadcastSnapshot(): void {
-    if (this.state.match.status === 'waiting') return;
+    if (
+      this.state.match.status === 'waiting' ||
+      this.state.match.status === 'loading'
+    )
+      return;
     const message: TickUpdateMessage = {
       type: MessageType.TickUpdate,
       snapshotId: this.nextSnapshotId++,
@@ -3299,6 +3422,7 @@ export class Room {
 
   destroy(): void {
     this.cancelLobbyCountdown();
+    this.cancelMatchLoading();
     this.stopLoop();
     for (const seat of this.seats.values()) {
       if (seat.reservationHandle !== null) clearTimeout(seat.reservationHandle);

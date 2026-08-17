@@ -10,6 +10,9 @@ export const LOBBY_VOTE_DELAY_MS = 60_000;
 /** Short server-authoritative pause before a locked roster enters the match. */
 export const LOBBY_COUNTDOWN_MS = 8_000;
 
+/** Maximum time a locked roster may wait for every client to finish loading. */
+export const MATCH_LOADING_TIMEOUT_MS = 60_000;
+
 /** Time an unexpectedly disconnected player keeps their occupied room seat. */
 export const RECONNECT_GRACE_MS = 45_000;
 
@@ -21,7 +24,7 @@ export const RECONNECT_TOKEN_LENGTH = 43;
 export const ROOM_CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 export const ROOM_CODE_LENGTH = 6;
 
-export type LobbyPhase = 'waiting' | 'countdown';
+export type LobbyPhase = 'waiting' | 'countdown' | 'loading';
 export type LobbyStartReason = 'full' | 'vote' | null;
 export type LobbyJoinMode = 'quick' | 'create' | 'join';
 

@@ -224,6 +224,16 @@ export class LobbyOverlay {
     const votes = this.state.players.filter((player) => player.votedToStart).length;
     const me = this.state.players.find((player) => player.id === this.localPlayerId);
 
+    if (this.state.phase === 'loading') {
+      this.status.textContent = 'Game is starting…';
+      this.voteButton.textContent = 'Starting…';
+      this.voteButton.disabled = true;
+      this.adminStartButton.disabled = true;
+      this.chatInput.disabled = true;
+      this.root.classList.add('lobby-overlay--countdown');
+      return;
+    }
+
     if (this.state.phase === 'countdown' && this.state.countdownEndsAt !== null) {
       const seconds = Math.max(0, Math.ceil((this.state.countdownEndsAt - now) / 1_000));
       this.status.textContent = `The gates open in ${seconds}…`;
@@ -235,6 +245,7 @@ export class LobbyOverlay {
     }
 
     this.root.classList.remove('lobby-overlay--countdown');
+    this.chatInput.disabled = false;
     this.adminStartButton.disabled = disconnectedCount > 0;
     const waitMs = Math.max(0, this.state.voteAvailableAt - now);
     if (disconnectedCount > 0) {

@@ -22,6 +22,7 @@ import {
   type SendLobbyChatMessage,
   type AdminStartGameMessage,
   type AdminKickPlayerMessage,
+  type GameReadyMessage,
   type PlayerInputMessage,
   type ActivateRunestoneMessage,
   type OpenChestMessage,
@@ -83,6 +84,7 @@ export interface NetworkCallbacks {
     isAdmin: boolean,
     resumed: boolean,
   ) => void;
+  onMatchStarted: (gameState: GameState) => void;
   onTickUpdate: (gameState: GameState) => void;
   onPlayerLeft: (playerId: string) => void;
   onRunestoneActivated: (runestoneIndex: number) => void;
@@ -433,6 +435,11 @@ export class NetworkManager {
         }
         break;
 
+      case MessageType.MatchStarted:
+        this._gameState = msg.gameState;
+        this.callbacks.onMatchStarted(msg.gameState);
+        break;
+
       case MessageType.TickUpdate:
         {
           const receivedAt = performance.now();
@@ -559,6 +566,12 @@ export class NetworkManager {
       type: MessageType.AdminKickPlayer,
       playerId,
     };
+    this.send(msg);
+  }
+
+  /** Confirm that assets and the initial maze scene are ready for release. */
+  sendGameReady(): void {
+    const msg: GameReadyMessage = { type: MessageType.GameReady };
     this.send(msg);
   }
 

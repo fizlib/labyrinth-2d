@@ -51,14 +51,15 @@ One room owns one maze instance. The server is authoritative for player state, h
 
 ### Room Lifecycle
 
-1. After loading game assets, a client connects and sends `JOIN_ROOM` in `quick`, `create`, or `join` mode.
+1. A client starts loading game assets, connects in parallel, and sends `JOIN_ROOM` in `quick`, `create`, or `join` mode.
 2. Quick Play reuses the first joinable public room or creates one. Private creation returns a generated six-character code; private joining requires an existing code.
 3. Waiting rooms are event-driven and broadcast `LobbyState` only when their roster, votes, or countdown changes. They do not run the 20 Hz simulation loop.
 4. Nine connected players start an eight-second countdown automatically. With 6-8 players, start voting unlocks after 60 seconds and requires `ceil(connected players × 2 / 3)` votes.
-5. When the countdown completes, the server balances the locked roster across all three squads, assigns hidden roles for the actual population, starts the ten-minute deadline, privately sends `ROOM_JOINED`, and starts the fixed tick loop.
-6. An unexpected socket close marks the occupied seat disconnected for 45 seconds. Any countdown is cancelled and starting remains blocked until every reserved seat reconnects or expires.
-7. A valid private reconnect token restores the same player id and authoritative lobby or match state even while the room is full, counting down, running, or ended. Explicit leave releases the seat immediately.
-8. Grace expiry performs permanent player removal and recalculates match thresholds. The room stops and is destroyed only after its final occupied or reserved seat is released.
+5. When the countdown completes, the server locks and balances the roster, assigns hidden roles, changes the match to `loading`, broadcasts the loading lobby phase, and privately sends `ROOM_JOINED`. Every client shows **Game is starting…**, builds its initial maze behind the loading screen, and replies with `GAME_READY`.
+6. The server keeps the timer and fixed tick loop stopped until every occupied seat is connected and ready. It then sets one ten-minute wall-clock deadline, broadcasts `MATCH_STARTED`, and releases every loaded client into the maze. An unready client is removed after the bounded 60-second loading timeout so it cannot hold the room forever.
+7. An unexpected socket close marks the occupied seat disconnected for 45 seconds. A waiting-room countdown is cancelled; during match loading, the ready roster waits for that seat to reconnect and rebuild or expire.
+8. A valid private reconnect token restores the same player id and authoritative lobby, loading, running, or ended state. Explicit leave releases the seat immediately.
+9. Grace expiry performs permanent player removal and recalculates match thresholds. The room stops and is destroyed only after its final occupied or reserved seat is released.
 
 ### Simulation and Reconciliation
 
@@ -82,6 +83,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `LEAVE_ROOM` | Explicitly release the current seat without a reconnect grace period |
 | `VOTE_TO_START` | Cast or withdraw the local player's underfilled-start vote |
 | `SEND_LOBBY_CHAT` | Submit one server-validated room-wide waiting-room message |
+| `GAME_READY` | Confirm that runtime assets and the recipient's initial maze scene are ready |
 | `PLAYER_INPUT` | Send one frame of movement intent plus `sequenceNumber` |
 | `ACTIVATE_RUNESTONE` | Request activation of a nearby runestone |
 | `OPEN_CHEST` | Request opening a nearby unopened treasure chest |
@@ -101,6 +103,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | Message | Purpose |
 | --- | --- |
 | `ROOM_JOINED` | Initial or resumed match payload with `playerId`, `mapSeed`, full `gameState`, verified admin status, and the recipient's private role/orb inventory |
+| `MATCH_STARTED` | Release a fully loaded roster with the first shared running state and authoritative ten-minute deadline |
 | `LOBBY_JOINED` | Private lobby admission with the server player ID and current `LobbyState` |
 | `LOBBY_UPDATED` | Event-driven public roster, vote, or countdown replacement state |
 | `LOBBY_CHAT_MESSAGE` | Transient room-wide waiting-room chat event |
@@ -221,7 +224,7 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 
 ### Match Timer and Victory
 
-- Completing the lobby countdown starts a server wall-clock deadline of `600000ms`; snapshots expose authoritative remaining time and the client interpolates the top-center `MM:SS` display between ticks.
+- Completing the lobby countdown begins the synchronized loading phase. Only after every occupied client sends `GAME_READY` does the server start the `600000ms` wall-clock deadline; snapshots expose authoritative remaining time and the client interpolates the top-center `MM:SS` display between ticks.
 - A full room requires five survivor escapes. Underfilled rooms use `max(1, ceil(occupied survivors × 5 / 7))`; temporary disconnects preserve that population during grace, while final leaves, expiry, and debug role changes recalculate it.
 - Reaching the threshold, or having every occupied survivor escaped, ends the match immediately for survivors. Reaching the deadline below the threshold ends it for wardens, including action requests that race the next server tick.
 - Ending is immutable: queued input is cleared, the server loop stops, gameplay/chat requests are rejected, a final snapshot is broadcast, and clients freeze under a persistent result panel. The panel reveals Survivor and Warden rosters only after completion.
@@ -378,9 +381,10 @@ The client first runs a lightweight DOM app shell with these states:
 6. dynamically import PixiJS after Quick Play, Create Private Game, or Join Room is selected;
 7. start runtime-asset loading and the authoritative waiting-room connection in
    parallel, showing the DOM lobby overlay as soon as admission succeeds; and
-8. restore the loading screen when the match starts, then build the maze only
-   after the server sends `ROOM_JOINED` at countdown completion and the runtime
-   assets are ready.
+8. show **Game is starting…** for every player when the server locks the roster,
+   build the maze after `ROOM_JOINED`, send `GAME_READY`, and keep the loading
+   screen visible until the server releases the fully ready roster with
+   `MATCH_STARTED`.
 
 Guest profiles are created only after the naming form is submitted, use
 `sessionStorage`, never call Supabase, and are discarded
@@ -396,7 +400,9 @@ Quick Play/private-room connection begins inside `startGame()` and uses the
 profile display name. Asset progress continues in the background while the
 player can vote, chat, and inspect the lobby. If a countdown completes first,
 the client restores the loading screen, retains the latest authoritative match
-snapshot and match events, and applies them after asset loading finishes. Each
+snapshot and match events, and applies them after asset loading finishes. It
+does not expose the maze or begin local input until every client is ready and
+the server broadcasts `MATCH_STARTED`. Each
 occupied seat has a private 256-bit bearer token in
 the current tab's `sessionStorage`, scoped to the current profile ID. After
 identity restoration, a reload automatically resumes that seat; a different

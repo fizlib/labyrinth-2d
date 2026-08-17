@@ -44,6 +44,15 @@ function createLobby(playerCount, options) {
   return { room, sockets };
 }
 
+function markEveryClientReady(room) {
+  for (const player of room.state.players) room.handleGameReady(player.id);
+}
+
+function startReadyMatch(room) {
+  room.startMatch();
+  markEveryClientReady(room);
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -79,8 +88,21 @@ test('only admins can bypass lobby population and voting requirements', (t) => {
   const joined = adminSocket.sent.find((message) => message.type === 'LOBBY_JOINED');
   assert.equal(joined.isAdmin, true);
   adminRoom.handleAdminStartGame('admin-player');
+  assert.equal(adminRoom.state.match.status, 'loading');
+  assert.equal(adminRoom.loopHandle, null);
+  assert.equal(
+    adminSocket.sent.findLast((message) => message.type === 'LOBBY_UPDATED').lobby
+      .phase,
+    'loading',
+  );
+  assert.equal(
+    adminSocket.sent.find((message) => message.type === 'ROOM_JOINED').gameState.match
+      .status,
+    'loading',
+  );
+  adminRoom.handleGameReady('admin-player');
   assert.equal(adminRoom.state.match.status, 'running');
-  assert.ok(adminSocket.sent.some((message) => message.type === 'ROOM_JOINED'));
+  assert.ok(adminSocket.sent.some((message) => message.type === 'MATCH_STARTED'));
 });
 
 test('only admins can kick another player from a waiting lobby', (t) => {
@@ -136,7 +158,22 @@ test('six players can vote into a countdown and receive balanced private match s
   assert.equal(countdown.lobby.startReason, 'vote');
 
   room.startMatch();
+  assert.equal(room.state.match.status, 'loading');
+  assert.equal(room.loopHandle, null);
+  for (let index = 0; index < sockets.length - 1; index++) {
+    room.handleGameReady(`player-${index}`);
+  }
+  assert.equal(
+    room.state.match.status,
+    'loading',
+    'the timer remains frozen until the final client is ready',
+  );
+  assert.equal(room.matchStartedAtMs, null);
+  assert.equal(room.matchEndsAtMs, null);
+  room.handleGameReady(`player-${sockets.length - 1}`);
   assert.equal(room.state.match.status, 'running');
+  assert.notEqual(room.matchStartedAtMs, null);
+  assert.notEqual(room.matchEndsAtMs, null);
   assert.deepEqual(
     room.state.players.reduce((counts, player) => {
       counts[player.teamId] = (counts[player.teamId] ?? 0) + 1;
@@ -155,7 +192,7 @@ test('six players can vote into a countdown and receive balanced private match s
 test('seven-player starts keep two wardens in different squads', (t) => {
   const { room } = createLobby(7);
   t.after(() => room.destroy());
-  room.startMatch();
+  startReadyMatch(room);
 
   const wardens = room.state.players.filter((player) => player.role === 'warden');
   assert.equal(wardens.length, 2);
@@ -168,6 +205,50 @@ test('seven-player starts keep two wardens in different squads', (t) => {
       }, [])
       .sort(),
     [2, 2, 3],
+  );
+});
+
+test('loading waits for a disconnected client to reconnect and rebuild', (t) => {
+  const { room, sockets } = createLobby(2);
+  t.after(() => room.destroy());
+  room.startMatch();
+  room.handleGameReady('player-0');
+
+  assert.equal(room.disconnectPlayer('player-1', sockets[1]), true);
+  assert.equal(room.state.match.status, 'loading');
+
+  const replacement = new FakeSocket('replacement');
+  assert.equal(room.reconnectPlayer(replacement, 'token-1'), 'resumed');
+  assert.equal(
+    replacement.sent.find((message) => message.type === 'ROOM_JOINED').gameState.match
+      .status,
+    'loading',
+  );
+  assert.equal(room.state.match.status, 'loading');
+
+  room.handleGameReady('player-1');
+  assert.equal(room.state.match.status, 'running');
+  assert.ok(
+    replacement.sent.some((message) => message.type === 'MATCH_STARTED'),
+  );
+});
+
+test('loading timeout removes only unready clients before releasing the match', async (t) => {
+  const { room, sockets } = createLobby(2, { matchLoadingTimeoutMs: 15 });
+  t.after(() => room.destroy());
+  room.startMatch();
+  room.handleGameReady('player-0');
+
+  await delay(35);
+
+  assert.equal(room.state.match.status, 'running');
+  assert.equal(room.playerCount, 1);
+  assert.ok(sockets[0].sent.some((message) => message.type === 'MATCH_STARTED'));
+  assert.ok(
+    sockets[1].sent.some(
+      (message) =>
+        message.type === 'LOBBY_KICKED' && message.message.includes('wait'),
+    ),
   );
 });
 
@@ -252,7 +333,7 @@ test('reserved seats cannot be replaced and live seats cannot be reclaimed twice
 test('active-match reconnect preserves private state and victory thresholds', (t) => {
   const { room, sockets } = createLobby(6);
   t.after(() => room.destroy());
-  room.startMatch();
+  startReadyMatch(room);
 
   const player = room.state.players.find((candidate) => candidate.id === 'player-0');
   assert.ok(player);
@@ -287,7 +368,7 @@ test('active-match reconnect preserves private state and victory thresholds', (t
 test('temporarily disconnected match players are inert in occupancy interactions', (t) => {
   const { room, sockets } = createLobby(6);
   t.after(() => room.destroy());
-  room.startMatch();
+  startReadyMatch(room);
 
   const disconnectedSurvivor = room.state.players.find(
     (player) => player.id === 'player-0',
@@ -335,7 +416,7 @@ test('temporarily disconnected match players are inert in occupancy interactions
 test('active-match expiry performs the final removal only after grace', async (t) => {
   const { room, sockets } = createLobby(6, { reconnectGraceMs: 15 });
   t.after(() => room.destroy());
-  room.startMatch();
+  startReadyMatch(room);
   const player = room.state.players.find((candidate) => candidate.id === 'player-0');
   assert.ok(player);
   const originalThreshold = room.state.match.escapeThreshold;
@@ -392,7 +473,7 @@ test('grace expiry and explicit leave permanently release seats', async (t) => {
 test('ended matches can be reclaimed during the grace window', (t) => {
   const { room, sockets } = createLobby(6);
   t.after(() => room.destroy());
-  room.startMatch();
+  startReadyMatch(room);
   room.endMatch('wardens', Date.now());
   room.disconnectPlayer('player-0', sockets[0]);
 

@@ -35,6 +35,11 @@ class FakeSocket {
   }
 }
 
+function startReadyMatch(room) {
+  room.startMatch();
+  for (const player of room.state.players) room.handleGameReady(player.id);
+}
+
 function createRoom(playerCount = 9) {
   const room = new Room(`test-${Math.random()}`);
   const sockets = [];
@@ -43,7 +48,7 @@ function createRoom(playerCount = 9) {
     sockets.push(socket);
     room.addPlayer(socket, `token-${index}`);
   }
-  room.startMatch();
+  startReadyMatch(room);
   return { room, sockets };
 }
 
@@ -394,7 +399,7 @@ test('authenticated public starting rosters emit one Elo result', (t) => {
     room.addPlayer(socket, `ranked-token-${index}`);
   }
 
-  room.startMatch();
+  startReadyMatch(room);
   room.endMatch('survivors', Date.now());
   room.endMatch('wardens', Date.now());
 
@@ -425,7 +430,7 @@ test('ranked results retain and mark players who abandoned the starting roster',
     room.addPlayer(socket, `ranked-leaver-token-${index}`);
   }
 
-  room.startMatch();
+  startReadyMatch(room);
   const leaver = room.state.players.find((player) => player.role === 'warden');
   assert.ok(leaver);
   const leaverSeat = room.seats.get(leaver.id);
@@ -478,10 +483,10 @@ test('private, guest-containing, guest-only, and underfilled matches record with
 
   guestOnlyRoom.addPlayer(new FakeSocket('guest-only-player'), 'guest-only-token');
 
-  privateRoom.startMatch();
-  publicRoom.startMatch();
-  guestOnlyRoom.startMatch();
-  underfilledRoom.startMatch();
+  startReadyMatch(privateRoom);
+  startReadyMatch(publicRoom);
+  startReadyMatch(guestOnlyRoom);
+  startReadyMatch(underfilledRoom);
   privateRoom.endMatch('wardens', Date.now());
   publicRoom.endMatch('wardens', Date.now());
   guestOnlyRoom.endMatch('wardens', Date.now());

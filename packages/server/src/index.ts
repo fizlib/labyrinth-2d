@@ -386,6 +386,11 @@ uWS
             break;
           }
 
+          case MessageType.GameReady: {
+            if (data.roomId) rooms.get(data.roomId)?.handleGameReady(data.id, msg);
+            break;
+          }
+
           case MessageType.VoteToStart: {
             if (data.roomId) rooms.get(data.roomId)?.handleVoteToStart(data.id, msg);
             break;

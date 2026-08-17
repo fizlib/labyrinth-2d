@@ -33,6 +33,8 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - Reconnecting within the grace period restores the same player ID and lobby slot. If the seat expires it is removed; an underfilled lobby must collect a new vote before starting.
 - Explicit Leave, Play Again, and sign-out release the seat immediately.
 - Squads and hidden roles are assigned only when the countdown completes. Six-player matches use one Warden; matches with seven to nine players use two Wardens in different squads.
+- Countdown completion puts every player on a **Game is starting…** loading screen while each client finishes assets and builds its maze. The server waits for every occupied seat to report ready before spawning the roster together and starting the match timer.
+- A disconnected player can reconnect during this loading phase. A client that remains unready for 60 seconds is removed so the ready roster is not held indefinitely.
 
 ## Reconnecting during a match
 
@@ -81,7 +83,7 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 
 ## Time limit and victory conditions
 
-- The match lasts **10 minutes**, starting when the lobby countdown completes, with a live top-center timer.
+- The match lasts **10 minutes**, starting only after every occupied client has loaded the maze and the server releases the roster, with a live top-center timer.
 - **Survivors win immediately when 5 of the 7 survivors have escaped.** The match ends as soon as the fifth survivor escapes.
 - **Wardens win when the timer expires and 4 or fewer survivors have escaped.**
 - With fewer than seven occupied survivors, the target is `max(1, ceil(occupied survivors × 5 / 7))` and is recalculated after a permanent leave or expired reservation, not during the 45-second grace period.

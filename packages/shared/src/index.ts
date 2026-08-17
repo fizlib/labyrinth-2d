@@ -18,6 +18,7 @@ export {
   LOBBY_MIN_PLAYERS,
   LOBBY_VOTE_DELAY_MS,
   LOBBY_COUNTDOWN_MS,
+  MATCH_LOADING_TIMEOUT_MS,
   RECONNECT_GRACE_MS,
   RECONNECT_TOKEN_BYTES,
   RECONNECT_TOKEN_LENGTH,
@@ -420,12 +421,14 @@ export enum MessageType {
   SendLobbyChat = 'SEND_LOBBY_CHAT',
   AdminStartGame = 'ADMIN_START_GAME',
   AdminKickPlayer = 'ADMIN_KICK_PLAYER',
+  GameReady = 'GAME_READY',
   ReconnectRoom = 'RECONNECT_ROOM',
   LeaveRoom = 'LEAVE_ROOM',
   SnapshotApplied = 'SNAPSHOT_APPLIED',
 
   // ── Server → Client ──
   RoomJoined = 'ROOM_JOINED',
+  MatchStarted = 'MATCH_STARTED',
   TickUpdate = 'TICK_UPDATE',
   PlayerLeft = 'PLAYER_LEFT',
   RunestoneActivated = 'RUNESTONE_ACTIVATED',
@@ -497,6 +500,11 @@ export interface AdminStartGameMessage {
 export interface AdminKickPlayerMessage {
   type: MessageType.AdminKickPlayer;
   playerId: string;
+}
+
+/** Confirms that the client has loaded assets and built its initial maze scene. */
+export interface GameReadyMessage {
+  type: MessageType.GameReady;
 }
 
 export interface PlayerInputMessage {
@@ -659,6 +667,12 @@ export interface RoomJoinedMessage {
   role: PlayerRole;
   /** Private starting orb count for the recipient of this message. */
   wisdomOrbs: number;
+  gameState: GameState;
+}
+
+/** Releases a fully loaded roster into the running match at one server deadline. */
+export interface MatchStartedMessage {
+  type: MessageType.MatchStarted;
   gameState: GameState;
 }
 
@@ -859,7 +873,7 @@ export interface ChestState {
 
 // ── Game State ──────────────────────────────────────────────────────────────
 
-export type MatchStatus = 'waiting' | 'running' | 'ended';
+export type MatchStatus = 'waiting' | 'loading' | 'running' | 'ended';
 export type MatchWinner = 'survivors' | 'wardens';
 
 /** Public role reveal captured once, when the match becomes immutable. */
@@ -919,6 +933,7 @@ export type ClientToServerMessage =
   | SendLobbyChatMessage
   | AdminStartGameMessage
   | AdminKickPlayerMessage
+  | GameReadyMessage
   | PlayerInputMessage
   | ActivateRunestoneMessage
   | OpenChestMessage
@@ -940,6 +955,7 @@ export type ServerToClientMessage =
   | LobbyChatMessage
   | LobbyKickedMessage
   | RoomJoinedMessage
+  | MatchStartedMessage
   | TickUpdateMessage
   | PlayerLeftMessage
   | RunestoneActivatedMessage

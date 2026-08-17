@@ -1806,12 +1806,16 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   let latestAssetProgress = 0.06;
   let latestAssetStatus = 'Lighting the first torch…';
+  let matchStartPending = false;
   let assets!: GameAssets;
   let assetsReady = false;
   const assetLoadPromise = loadAssets((progress, status) => {
     latestAssetProgress = progress;
     latestAssetStatus = status;
-    updateLoadingProgress(progress, status);
+    updateLoadingProgress(
+      progress,
+      matchStartPending ? 'Game is starting…' : status,
+    );
   });
 
   // ── World Container ───────────────────────────────────────────────────
@@ -2434,6 +2438,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   const networkCallbacks: NetworkCallbacks = {
     onLobbyJoined: (playerId, lobby, isAdmin, resumed) => {
+      matchStartPending = false;
       matchRuntimeReady = false;
       DebugSettings.setAdminAccess(isAdmin);
       isAdminSession = isAdmin;
@@ -2472,7 +2477,6 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           isAdmin,
           onVote: (vote) => net.sendLobbyVote(vote),
           onStartNow: () => {
-            showLoadingScreen(0.9, 'Opening the gates to the maze…');
             net.sendAdminStartGame();
           },
           onKick: (playerId) => net.sendAdminKickPlayer(playerId),
@@ -2489,6 +2493,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onLobbyUpdated: (lobby) => {
       lobbyOverlay?.update(lobby);
+      if (lobby.phase === 'loading') {
+        matchStartPending = true;
+        showLoadingScreen(latestAssetProgress, 'Game is starting…');
+      }
     },
 
     onLobbyChatMessage: (playerId, displayName, text, sentAt) => {
@@ -2513,6 +2521,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       isAdmin,
       resumed,
     ) => {
+      matchStartPending = gameState.match.status === 'loading';
       const isResumingDeferredAdmission = deferredRoomAdmission !== null;
       matchRuntimeReady = false;
       if (!isResumingDeferredAdmission) {
@@ -2531,12 +2540,20 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           isAdmin,
           resumed,
         ];
-        showLoadingScreen(latestAssetProgress, latestAssetStatus);
+        showLoadingScreen(
+          latestAssetProgress,
+          matchStartPending ? 'Game is starting…' : latestAssetStatus,
+        );
         return;
       }
 
       syncActivatedWardstoneIndexes(gameState);
-      showLoadingScreen(0.92, 'Carving your path through the maze…');
+      showLoadingScreen(
+        0.92,
+        matchStartPending
+          ? 'Game is starting…'
+          : 'Carving your path through the maze…',
+      );
       runAfterLoadingScreenPaint(() => {
         DebugSettings.setAdminAccess(isAdmin);
         isAdminSession = isAdmin;
@@ -2561,7 +2578,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         if (fullscreenToggle) fullscreenToggle.hidden = false;
         lobbyOverlay?.destroy();
         lobbyOverlay = null;
-        updateLoadingProgress(0.99, 'Carving your path through the maze…');
+        updateLoadingProgress(
+          0.99,
+          matchStartPending
+            ? 'Game is starting…'
+            : 'Carving your path through the maze…',
+        );
         console.info(
           `[Main] ${resumed ? 'Resumed' : 'Joined'} room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
         );
@@ -2814,8 +2836,31 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         const queuedTickUpdate = deferredTickUpdate;
         deferredTickUpdate = null;
         if (queuedTickUpdate) networkCallbacks.onTickUpdate(queuedTickUpdate);
-        window.requestAnimationFrame(dismissLoadingScreen);
+        if (gameState.match.status === 'loading') {
+          updateLoadingProgress(
+            1,
+            'Game is starting… Waiting for other players.',
+          );
+          net.sendGameReady();
+        } else {
+          matchStartPending = false;
+          window.requestAnimationFrame(dismissLoadingScreen);
+        }
       });
+    },
+
+    onMatchStarted: (gameState) => {
+      if (
+        deferMatchEvent(() => networkCallbacks.onMatchStarted(gameState))
+      )
+        return;
+      matchStartPending = false;
+      networkCallbacks.onTickUpdate(gameState);
+      if (localPlayerRole) {
+        applyLocalRoleUi(localPlayerRole, localWisdomOrbs, true);
+      }
+      updateLoadingProgress(1, 'Entering the maze…');
+      window.requestAnimationFrame(dismissLoadingScreen);
     },
 
     onTickUpdate: (gameState) => {
@@ -4305,7 +4350,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   try {
     assets = await assetLoadPromise;
     assetsReady = true;
-    updateLoadingProgress(0.98, 'Finding your place in the maze…');
+    updateLoadingProgress(
+      0.98,
+      matchStartPending ? 'Game is starting…' : 'Finding your place in the maze…',
+    );
   } catch (error) {
     net.leaveRoom();
     throw error;
