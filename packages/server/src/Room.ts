@@ -14,6 +14,7 @@ import type uWS from 'uWebSockets.js';
 import {
   MessageType,
   SERVER_TICK_MS,
+  SERVER_TICKS_PER_SNAPSHOT,
   PLAYERS_PER_TEAM,
   MAX_TEAMS,
   SQUAD_COLORS,
@@ -1083,11 +1084,7 @@ export class Room {
       return;
     }
 
-    const update: TickUpdateMessage = {
-      type: MessageType.TickUpdate,
-      gameState: this.cloneState(),
-    };
-    this.broadcast(update);
+    this.broadcastSnapshot();
     console.info(
       `[Room:${this.id}] Debug set match timer to ${Math.ceil(msg.remainingMs / 1_000)} seconds`,
     );
@@ -2374,11 +2371,12 @@ export class Room {
     this.updateGateStates();
     this.updateSpikeGateStates(spikeGatePreviousPositions);
 
-    const update: TickUpdateMessage = {
-      type: MessageType.TickUpdate,
-      gameState: this.cloneState(),
-    };
-    this.broadcast(update);
+    // Physics remains authoritative at 20 Hz, while clients receive the latest
+    // state at 10 Hz. This halves snapshot parsing/render-sync work and prevents
+    // slower mobile main threads from accumulating an ever-growing FIFO queue.
+    if (this.state.tick % SERVER_TICKS_PER_SNAPSHOT === 0) {
+      this.broadcastSnapshot();
+    }
   }
 
   private advanceSwordFields(): void {

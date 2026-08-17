@@ -811,6 +811,8 @@ interface NetworkStatsHudDom {
   txRate: HTMLElement;
   ackAge: HTMLElement;
   rxRate: HTMLElement;
+  applyRate: HTMLElement;
+  coalescedRate: HTMLElement;
   snapshotAge: HTMLElement;
   bufferedAmount: HTMLElement;
 }
@@ -875,6 +877,8 @@ function createNetworkStatsHud(): NetworkStatsHudDom {
     <span>Tx <strong id="tx-rate">0/s</strong></span>
     <span>Ack <strong id="ack-age">—</strong></span>
     <span>Rx <strong id="rx-rate">0/s</strong></span>
+    <span>Apply <strong id="apply-rate">0/s</strong></span>
+    <span>Drop <strong id="coalesced-rate">0/s</strong></span>
     <span>Age <strong id="snapshot-age">—</strong></span>
     <span>WS <strong id="buffered-amount">0 B</strong></span>
     <span>Snaps <strong id="snapshot-count">0</strong></span>
@@ -887,6 +891,8 @@ function createNetworkStatsHud(): NetworkStatsHudDom {
   const txRate = root.querySelector<HTMLElement>('#tx-rate');
   const ackAge = root.querySelector<HTMLElement>('#ack-age');
   const rxRate = root.querySelector<HTMLElement>('#rx-rate');
+  const applyRate = root.querySelector<HTMLElement>('#apply-rate');
+  const coalescedRate = root.querySelector<HTMLElement>('#coalesced-rate');
   const snapshotAge = root.querySelector<HTMLElement>('#snapshot-age');
   const bufferedAmount = root.querySelector<HTMLElement>('#buffered-amount');
   if (
@@ -896,6 +902,8 @@ function createNetworkStatsHud(): NetworkStatsHudDom {
     !txRate ||
     !ackAge ||
     !rxRate ||
+    !applyRate ||
+    !coalescedRate ||
     !snapshotAge ||
     !bufferedAmount
   ) {
@@ -911,6 +919,8 @@ function createNetworkStatsHud(): NetworkStatsHudDom {
     txRate,
     ackAge,
     rxRate,
+    applyRate,
+    coalescedRate,
     snapshotAge,
     bufferedAmount,
   };
@@ -972,6 +982,8 @@ function updateNetworkStatsHud(
   );
   const txRateText = `${diagnostics.movementMessagesPerSecond}/s`;
   const rxRateText = `${diagnostics.snapshotMessagesPerSecond}/s`;
+  const applyRateText = `${diagnostics.snapshotApplicationsPerSecond}/s`;
+  const coalescedRateText = `${diagnostics.coalescedSnapshotsPerSecond}/s`;
   const snapshotAgeText = formatNetworkDuration(diagnostics.snapshotAgeMs);
   const bufferedAmountText = formatBufferedAmount(diagnostics.bufferedAmount);
   if (statsHud.tick.textContent !== tickText) statsHud.tick.textContent = tickText;
@@ -987,6 +999,12 @@ function updateNetworkStatsHud(
     statsHud.ackAge.textContent = ackAgeText;
   if (statsHud.rxRate.textContent !== rxRateText)
     statsHud.rxRate.textContent = rxRateText;
+  if (statsHud.applyRate.textContent !== applyRateText) {
+    statsHud.applyRate.textContent = applyRateText;
+  }
+  if (statsHud.coalescedRate.textContent !== coalescedRateText) {
+    statsHud.coalescedRate.textContent = coalescedRateText;
+  }
   if (statsHud.snapshotAge.textContent !== snapshotAgeText) {
     statsHud.snapshotAge.textContent = snapshotAgeText;
   }
@@ -1772,6 +1790,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     canvas: document.createElement('canvas'),
     resizeTo: undefined,
   });
+
+  // High-refresh phones can otherwise run collision and scene updates at
+  // 90-120 Hz. The game is authored for 60 Hz rendering and a 20 Hz server.
+  app.ticker.maxFPS = 60;
 
   const container = document.getElementById('game-container');
   if (!container) throw new Error('Missing #game-container');

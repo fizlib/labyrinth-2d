@@ -48,6 +48,7 @@ import {
   NetworkDiagnosticsTracker,
   type NetworkDiagnostics,
 } from './NetworkDiagnosticsTracker';
+import { LatestSnapshotScheduler } from './LatestSnapshotScheduler';
 
 export type NetworkConnectionState =
   | { status: 'connected' }
@@ -132,6 +133,7 @@ export class NetworkManager {
   private shouldReconnect = false;
   private recovering = false;
   private readonly diagnosticsTracker = new NetworkDiagnosticsTracker();
+  private readonly snapshotScheduler: LatestSnapshotScheduler<GameState>;
 
   /** The latest game state received from the server. */
   private _gameState: GameState | null = null;
@@ -141,6 +143,13 @@ export class NetworkManager {
 
   constructor(callbacks: NetworkCallbacks) {
     this.callbacks = callbacks;
+    this.snapshotScheduler = new LatestSnapshotScheduler<GameState>({
+      apply: (gameState) => {
+        this.diagnosticsTracker.recordSnapshotApplied(performance.now());
+        this._gameState = gameState;
+        this.callbacks.onTickUpdate(gameState);
+      },
+    });
     window.addEventListener('pagehide', () => {
       if (!this.shouldReconnect || !this.reconnectSession?.roomId) return;
       this.reconnectSession = markReconnectDisconnected(this.reconnectSession);
@@ -198,6 +207,7 @@ export class NetworkManager {
     if (!this.connectionUrl || this.ws) return;
 
     this.diagnosticsTracker.reset();
+    this.snapshotScheduler.reset();
     const url = this.connectionUrl;
     console.info(`[Net] Connecting to ${url}...`);
     const ws = new WebSocket(url);
@@ -243,6 +253,7 @@ export class NetworkManager {
       if (this.ws !== ws) return;
 
       console.info('[Net] Disconnected');
+      this.snapshotScheduler.reset();
       this.ws = null;
       this.recovering = true;
       if (this.reconnectSession) {
@@ -285,6 +296,7 @@ export class NetworkManager {
     // away; the stale socket's close handler is deliberately ignored.
     this.ws = null;
     this._playerId = null;
+    this.snapshotScheduler.reset();
     ws.close();
   }
 
@@ -388,6 +400,7 @@ export class NetworkManager {
       }
 
       case MessageType.RoomJoined:
+        this.snapshotScheduler.reset();
         this._playerId = msg.playerId;
         this._gameState = msg.gameState;
         {
@@ -406,9 +419,13 @@ export class NetworkManager {
         break;
 
       case MessageType.TickUpdate:
-        this.diagnosticsTracker.recordSnapshotReceived(performance.now());
-        this._gameState = msg.gameState;
-        this.callbacks.onTickUpdate(msg.gameState);
+        {
+          const receivedAt = performance.now();
+          this.diagnosticsTracker.recordSnapshotReceived(receivedAt);
+          if (this.snapshotScheduler.enqueue(msg.gameState)) {
+            this.diagnosticsTracker.recordSnapshotCoalesced(receivedAt);
+          }
+        }
         break;
 
       case MessageType.PlayerLeft:

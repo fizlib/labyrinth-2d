@@ -41,6 +41,26 @@ function createRoom(playerCount = 9) {
   return { room, sockets };
 }
 
+test('simulates at 20 Hz while broadcasting periodic snapshots at 10 Hz', (t) => {
+  const { room, sockets } = createRoom(1);
+  t.after(() => room.destroy());
+  room.stopLoop();
+  sockets[0].sent.length = 0;
+
+  room.tick();
+  assert.equal(
+    sockets[0].sent.filter((message) => message.type === 'TICK_UPDATE').length,
+    0,
+  );
+
+  room.tick();
+  const snapshots = sockets[0].sent.filter(
+    (message) => message.type === 'TICK_UPDATE',
+  );
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].gameState.tick, 2);
+});
+
 function activatePortal(room) {
   for (const runestone of room.runestones) runestone.activated = true;
   room.portalActivated = true;

@@ -9,10 +9,14 @@ test('reports rolling movement and snapshot rates with snapshot age', () => {
   tracker.recordMovementSent(600);
   tracker.recordSnapshotReceived(500);
   tracker.recordSnapshotReceived(900);
+  tracker.recordSnapshotApplied(700);
+  tracker.recordSnapshotCoalesced(800);
 
   assert.deepEqual(tracker.getDiagnostics(1_000, 321), {
     movementMessagesPerSecond: 2,
     snapshotMessagesPerSecond: 2,
+    snapshotApplicationsPerSecond: 1,
+    coalescedSnapshotsPerSecond: 1,
     snapshotAgeMs: 100,
     bufferedAmount: 321,
   });
@@ -20,6 +24,8 @@ test('reports rolling movement and snapshot rates with snapshot age', () => {
   assert.deepEqual(tracker.getDiagnostics(1_601, -1), {
     movementMessagesPerSecond: 0,
     snapshotMessagesPerSecond: 1,
+    snapshotApplicationsPerSecond: 1,
+    coalescedSnapshotsPerSecond: 1,
     snapshotAgeMs: 701,
     bufferedAmount: 0,
   });
@@ -29,11 +35,15 @@ test('reset clears all accumulated network measurements', () => {
   const tracker = new NetworkDiagnosticsTracker();
   tracker.recordMovementSent(100);
   tracker.recordSnapshotReceived(100);
+  tracker.recordSnapshotApplied(100);
+  tracker.recordSnapshotCoalesced(100);
   tracker.reset();
 
   assert.deepEqual(tracker.getDiagnostics(200, 0), {
     movementMessagesPerSecond: 0,
     snapshotMessagesPerSecond: 0,
+    snapshotApplicationsPerSecond: 0,
+    coalescedSnapshotsPerSecond: 0,
     snapshotAgeMs: null,
     bufferedAmount: 0,
   });

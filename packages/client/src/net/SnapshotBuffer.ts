@@ -3,8 +3,8 @@
 // SnapshotBuffer — Stores timestamped server state snapshots for interpolation.
 //
 // Remote players are rendered at a position interpolated between two server
-// snapshots, using a fixed INTERPOLATION_DELAY (100ms = 2 server ticks).
-// This hides the 20-tps update rate and produces smooth 60-fps visuals.
+// snapshots, using a fixed interpolation delay. This hides the lower network
+// snapshot rate while the authoritative server simulation continues at 20 Hz.
 //
 // The local player is NOT affected — it uses client-side prediction.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -21,11 +21,11 @@ export interface TimestampedSnapshot {
 
 /**
  * How far back in time (ms) we render remote entities.
- * 100ms = 2 server ticks at 20 TPS.
+ * 150ms gives a 10 Hz snapshot stream enough room for ordinary jitter.
  * This gives us a guaranteed pair of snapshots to interpolate between,
  * even if one tick is slightly delayed.
  */
-export const INTERPOLATION_DELAY = 100;
+export const INTERPOLATION_DELAY = 150;
 
 /** Maximum age (ms) before a snapshot is pruned from the buffer. */
 const MAX_SNAPSHOT_AGE = 1000;

@@ -349,6 +349,12 @@ export const MAX_PLAYERS_PER_ROOM = MAX_TEAMS * PLAYERS_PER_TEAM;
 /** Server simulation tick rate (ticks per second). */
 export const SERVER_TICK_RATE = 20;
 
+/** Authoritative state broadcasts are intentionally cheaper than simulation. */
+export const SERVER_SNAPSHOT_RATE = 10;
+
+/** Number of simulation ticks represented by one periodic state broadcast. */
+export const SERVER_TICKS_PER_SNAPSHOT = SERVER_TICK_RATE / SERVER_SNAPSHOT_RATE;
+
 /** Duration of one server tick in milliseconds. */
 export const SERVER_TICK_MS = 1000 / SERVER_TICK_RATE;
 
