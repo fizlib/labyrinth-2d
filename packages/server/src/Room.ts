@@ -223,7 +223,6 @@ export interface RoomOptions {
   onSeatReleased?: (
     reconnectToken: string,
     userId: string | null,
-    retainUserClaim: boolean,
   ) => void;
   onEmpty?: () => void;
   onMatchEnded?: (record: MatchRecord) => void;
@@ -416,7 +415,6 @@ export class Room {
   private readonly onSeatReleased: (
     reconnectToken: string,
     userId: string | null,
-    retainUserClaim: boolean,
   ) => void;
   private readonly onEmpty: () => void;
   private readonly onMatchEnded: (record: MatchRecord) => void;
@@ -820,11 +818,7 @@ export class Room {
     this.revealedWisdomBridges.delete(playerId);
     this.revealedWisdomSwamps.delete(playerId);
     this.lobbyVotes.delete(playerId);
-    this.onSeatReleased(
-      seat.reconnectToken,
-      seat.userId,
-      this.state.match.status === 'running',
-    );
+    this.onSeatReleased(seat.reconnectToken, seat.userId);
     for (const cage of this.cageStates) {
       if (cage.prisonerPlayerId !== playerId || cage.vacated) continue;
       cage.opened = true;

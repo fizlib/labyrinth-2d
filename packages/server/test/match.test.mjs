@@ -249,9 +249,11 @@ test('authenticated public starting rosters emit one Elo result', (t) => {
 
 test('ranked results retain and mark players who abandoned the starting roster', (t) => {
   const records = [];
+  const releasedSeats = [];
   const room = new Room(`ranked-leaver-${Math.random()}`, true, {
     matchRecordingEnabled: true,
     onMatchEnded: (record) => records.push(record),
+    onSeatReleased: (...seatIdentity) => releasedSeats.push(seatIdentity),
   });
   t.after(() => room.destroy());
 
@@ -264,8 +266,10 @@ test('ranked results retain and mark players who abandoned the starting roster',
   room.startMatch();
   const leaver = room.state.players.find((player) => player.role === 'warden');
   assert.ok(leaver);
-  const leaverProfileId = room.seats.get(leaver.id).userId;
+  const leaverSeat = room.seats.get(leaver.id);
+  const leaverProfileId = leaverSeat.userId;
   room.removePlayer(leaver.id);
+  assert.deepEqual(releasedSeats, [[leaverSeat.reconnectToken, leaverProfileId]]);
   room.endMatch('survivors', Date.now());
 
   assert.equal(records.length, 1);

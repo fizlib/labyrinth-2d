@@ -70,11 +70,11 @@ function createRoom(isPublic: boolean): Room {
   let room: Room;
   room = new Room(roomId, isPublic, {
     matchRecordingEnabled: isSupabaseMatchPersistenceConfigured,
-    onSeatReleased: (reconnectToken, userId, retainUserClaim) => {
+    onSeatReleased: (reconnectToken, userId) => {
       if (roomsByReconnectToken.get(reconnectToken) === room) {
         roomsByReconnectToken.delete(reconnectToken);
       }
-      if (userId && !retainUserClaim && roomsByUserId.get(userId) === room) {
+      if (userId && roomsByUserId.get(userId) === room) {
         roomsByUserId.delete(userId);
       }
     },
