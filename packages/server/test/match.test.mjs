@@ -5,6 +5,7 @@ import { Room } from '../dist/Room.js';
 
 class FakeSocket {
   sent = [];
+  bufferedAmount = 0;
 
   constructor(id) {
     this.data = {
@@ -26,6 +27,10 @@ class FakeSocket {
 
   send(payload) {
     this.sent.push(JSON.parse(payload));
+  }
+
+  getBufferedAmount() {
+    return this.bufferedAmount;
   }
 }
 
@@ -59,6 +64,35 @@ test('simulates at 20 Hz while broadcasting periodic snapshots at 10 Hz', (t) =>
   );
   assert.equal(snapshots.length, 1);
   assert.equal(snapshots[0].gameState.tick, 2);
+});
+
+test('drops disposable snapshots for a backpressured client', (t) => {
+  const { room, sockets } = createRoom(2);
+  t.after(() => room.destroy());
+  room.stopLoop();
+  for (const socket of sockets) socket.sent.length = 0;
+
+  sockets[0].bufferedAmount = 1;
+  room.tick();
+  room.tick();
+
+  assert.equal(
+    sockets[0].sent.filter((message) => message.type === 'TICK_UPDATE').length,
+    0,
+  );
+  assert.equal(
+    sockets[1].sent.filter((message) => message.type === 'TICK_UPDATE').length,
+    1,
+  );
+
+  sockets[0].bufferedAmount = 0;
+  room.tick();
+  room.tick();
+  const recoveredSnapshot = sockets[0].sent.findLast(
+    (message) => message.type === 'TICK_UPDATE',
+  );
+  assert.ok(recoveredSnapshot);
+  assert.equal(recoveredSnapshot.gameState.tick, 4);
 });
 
 function activatePortal(room) {

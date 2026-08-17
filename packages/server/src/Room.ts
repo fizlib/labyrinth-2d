@@ -3216,7 +3216,15 @@ export class Room {
       type: MessageType.TickUpdate,
       gameState: this.cloneState(),
     };
-    this.broadcast(message);
+    const payload = JSON.stringify(message);
+    for (const ws of this.sockets.values()) {
+      // Tick updates are disposable. If this connection has not flushed its
+      // previous data yet, queueing another full snapshot would make every
+      // later acknowledgement and chat message wait behind stale game states.
+      // The next periodic snapshot contains the complete authoritative state.
+      if (ws.getBufferedAmount() > 0) continue;
+      ws.send(payload, false);
+    }
   }
 
   private cloneState(): GameState {

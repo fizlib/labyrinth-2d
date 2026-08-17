@@ -27,6 +27,10 @@ class FakeSocket {
   send(payload) {
     this.sent.push(JSON.parse(payload));
   }
+
+  getBufferedAmount() {
+    return 0;
+  }
 }
 
 function createLobby(playerCount, options) {
