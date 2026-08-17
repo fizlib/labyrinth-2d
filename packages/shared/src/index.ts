@@ -487,7 +487,7 @@ export interface PlayerInputMessage {
   down: boolean;
   left: boolean;
   right: boolean;
-  /** Client-side frame delta (seconds) used for this input's prediction. */
+  /** Total client prediction time (seconds) represented by this input command. */
   dt: number;
 }
 

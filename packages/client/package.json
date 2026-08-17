@@ -11,7 +11,8 @@
     "sync:runtime-assets": "node scripts/sync-runtime-assets.mjs",
     "verify:runtime-assets": "node scripts/verify-runtime-assets.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsc && node --test test/*.test.mjs"
   },
   "dependencies": {
     "@labyrinth/shared": "*",

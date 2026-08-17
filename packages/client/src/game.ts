@@ -66,6 +66,7 @@ import {
   INTERPOLATION_DELAY,
   type TimestampedSnapshot,
 } from './net/SnapshotBuffer';
+import { MovementInputScheduler } from './net/MovementInputScheduler';
 import { loadAssets, type GameAssets } from './assets/AssetLoader';
 import { DebugSettings } from './config/DebugSettings';
 import { Minimap } from './systems/Minimap';
@@ -200,12 +201,18 @@ interface PendingInput {
 
 let pendingInputs: PendingInput[] = [];
 let inputSequenceNumber = 0;
+const movementInputScheduler = new MovementInputScheduler();
 let localX = 0;
 let localY = 0;
 let localPlayerInitialized = false;
 let localPlayerRole: PlayerRole | null = null;
 let localWisdomOrbs = 0;
 let localFacing: FacingDirection = 'down';
+
+function clearPendingMovementInputs(): void {
+  pendingInputs = [];
+  movementInputScheduler.reset();
+}
 
 /** Briefly suppress reconciliation while a click-teleport reaches the server. */
 let debugTeleportActive = false;
@@ -903,15 +910,11 @@ function createDebugUI(): DebugUiDom {
   const tick = debugDiv.querySelector<HTMLSpanElement>('#tick-counter');
   const pending = debugDiv.querySelector<HTMLSpanElement>('#pending-count');
   const snapshot = debugDiv.querySelector<HTMLSpanElement>('#snapshot-count');
-  const matchTimerForm = debugDiv.querySelector<HTMLFormElement>(
-    '#debug-match-timer',
-  );
-  const matchTimerMinutes = debugDiv.querySelector<HTMLInputElement>(
-    '#debug-match-minutes',
-  );
-  const matchTimerSeconds = debugDiv.querySelector<HTMLInputElement>(
-    '#debug-match-seconds',
-  );
+  const matchTimerForm = debugDiv.querySelector<HTMLFormElement>('#debug-match-timer');
+  const matchTimerMinutes =
+    debugDiv.querySelector<HTMLInputElement>('#debug-match-minutes');
+  const matchTimerSeconds =
+    debugDiv.querySelector<HTMLInputElement>('#debug-match-seconds');
   const setMatchTimerButton = debugDiv.querySelector<HTMLButtonElement>(
     '#debug-set-match-timer',
   );
@@ -1916,10 +1919,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
 
       animation.elapsed += dtSeconds;
-      const progress = Math.min(
-        1,
-        animation.elapsed / PORTAL_ESCAPE_ANIMATION_DURATION,
-      );
+      const progress = Math.min(1, animation.elapsed / PORTAL_ESCAPE_ANIMATION_DURATION);
       const eased = 1 - (1 - progress) ** 3;
       data.container.x = Math.round(
         animation.startX + (animation.portalX - animation.startX) * eased,
@@ -2225,7 +2225,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         debugUi = null;
         statusEl = null;
       }
-      const fullscreenToggle = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
+      const fullscreenToggle =
+        document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
       if (fullscreenToggle) fullscreenToggle.hidden = true;
       setGameMenuAvailable(false);
       if (resumed && lobbyOverlay) {
@@ -2283,257 +2284,264 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       syncActivatedWardstoneIndexes(gameState);
       showLoadingScreen(0.92, 'Carving your path through the maze…');
       runAfterLoadingScreenPaint(() => {
-      DebugSettings.setAdminAccess(isAdmin);
-      if (isAdmin && !debugUi) {
-        debugUi = createDebugUI();
-        statusEl = debugUi.status;
-        setupDebugToggles(debugUi);
-        setupDebugPlayerActions(
-          debugUi,
-          net,
-          () => latestServerState,
-          () => net.playerId,
-        );
-      }
-      const fullscreenToggle = document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
-      if (fullscreenToggle) fullscreenToggle.hidden = false;
-      lobbyOverlay?.destroy();
-      lobbyOverlay = null;
-      updateLoadingProgress(0.99, 'Carving your path through the maze…');
-      console.info(
-        `[Main] ${resumed ? 'Resumed' : 'Joined'} room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
-      );
-      debugPlayerRoles.clear();
-      debugPlayerRoles.set(playerId, role);
-      if (!resumed) chatHud?.clear();
-      chatHud?.setEnabled(true);
-      matchHud.sync(gameState.match);
-      setGameMenuAvailable(gameState.match.status === 'running');
-      snapshotBuffer.clear();
-      pendingInputs = [];
-
-      const reuseExistingWorld = Boolean(
-        resumed &&
-        currentMapSeed === mapSeed &&
-        currentMap &&
-        currentLayout &&
-        tilemapRenderer,
-      );
-
-      pendingPortalPos = null;
-      shakeTimeRemaining = 0;
-      cinematicPhase = 'idle';
-      bridgeCameraBlend = 0;
-      bridgeCameraFocus = null;
-      emptyTrapPromptShakeRemaining = 0;
-      emptyTrapPromptShakeElapsed = 0;
-      portalEscapeAnimations.clear();
-
-      if (!reuseExistingWorld) {
-        gateSlideStates.clear();
-        portal?.destroy();
-        portal = null;
-        portalPlatform?.destroy();
-        portalPlatform = null;
-        clearCageVisuals();
-
-        const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
-        currentMapSeed = mapSeed;
-        currentMap = layout.map;
-        currentLayout = layout;
-        mapPixelW = currentMap.width * currentMap.tileSize;
-        mapPixelH = currentMap.height * currentMap.tileSize;
-
-        // ── Build chunk-based tilemap ────────────────────────────────────
-        tilemapRenderer?.destroy();
-        tilemapRenderer = new TilemapRenderer(
-          currentMap,
-          layout.gates,
-          layout.pressurePlates,
-          layout.bridges,
-          layout.swamps,
-          layout.swordFields,
-          layout.spikeGateObstacles,
-          layout.trapCells,
-          layout.chestDeadEnds,
-          layout.tIntersectionDecorations,
-          layout.decoratedVerticalPassages,
-          layout.dirtMask,
-          assets,
-          app.renderer,
-        );
-        if (cellBoundaryOverlay?.parent === worldContainer) {
-          worldContainer.removeChild(cellBoundaryOverlay);
-        }
-        cellBoundaryOverlay?.destroy();
-        cellBoundaryOverlay = createCellBoundaryOverlay();
-        attachTilemapLayers(tilemapRenderer);
-      }
-
-      const activeTilemapRenderer = tilemapRenderer;
-      if (!activeTilemapRenderer) throw new Error('Missing tilemap after room admission');
-      activeTilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
-      activeTilemapRenderer.syncSwordFieldStates(
-        gameState.swordFieldStates,
-        gameState.tick,
-        false,
-      );
-      activeTilemapRenderer.syncSpikeGateStates(
-        gameState.spikeGateStates,
-        gameState.spikePlateStates,
-        false,
-      );
-      activeTilemapRenderer.syncChestStates(gameState.chestStates, false);
-      syncCageVisuals(gameState.cageStates, false);
-
-      if (statusEl) {
-        statusEl.textContent = '🟢 Connected';
-        statusEl.classList.add('connected');
-      }
-
-      const me = gameState.players.find((p) => p.id === playerId);
-      if (me) {
-        localX = me.x;
-        localY = me.y;
-        localFacing = me.facing;
-        inputSequenceNumber = me.lastProcessedInput;
-        localPlayerInitialized = true;
-      }
-
-      const canLocalPlayerAct =
-        gameState.match.status === 'running' && !(me?.escaped ?? false);
-      chatHud?.setCanSend(canLocalPlayerAct);
-      syncLocalInputAvailability();
-      applyLocalRoleUi(
-        role,
-        wisdomOrbs,
-        gameState.match.status === 'running' && !resumed,
-      );
-
-      // ── Sync runestone activation state from initial GameState ─────
-      for (const rsInfo of gameState.runestones) {
-        const rsData = tilemapRenderer?.runestoneSprites.find(
-          (r) => r.index === rsInfo.index,
-        );
-        if (rsData && rsInfo.activated && !rsData.activated) {
-          rsData.activated = true;
-          rsData.sprite.texture = assets.runestoneTextures[rsInfo.index][1];
-        }
-      }
-
-      // ── Initial portal sync ────────────────────────────────────────
-      if (gameState.portal) {
-        const portalAlreadyActive = gameState.runestones.every((rs) => rs.activated);
-        if (!portalPlatform || !portal) {
-          portalPlatform = new PortalPlatform(
-            gameState.portal.x,
-            gameState.portal.y,
-            assets.portalPlatformTextures,
-            activeTilemapRenderer.portalTerrainLayer,
-            activeTilemapRenderer.groundDetailLayer,
-            entityLayer,
+        DebugSettings.setAdminAccess(isAdmin);
+        if (isAdmin && !debugUi) {
+          debugUi = createDebugUI();
+          statusEl = debugUi.status;
+          setupDebugToggles(debugUi);
+          setupDebugPlayerActions(
+            debugUi,
+            net,
+            () => latestServerState,
+            () => net.playerId,
           );
-          portal = new Portal(
-            gameState.portal.x,
-            gameState.portal.y,
-            assets.portalFrames,
-            assets.portalActivationCount,
-            entityLayer,
-            portalAlreadyActive,
-          );
-        } else if (portalAlreadyActive) {
-          portal.activate();
         }
-        minimap?.setPortalPosition(gameState.portal.x, gameState.portal.y);
+        const fullscreenToggle =
+          document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
+        if (fullscreenToggle) fullscreenToggle.hidden = false;
+        lobbyOverlay?.destroy();
+        lobbyOverlay = null;
+        updateLoadingProgress(0.99, 'Carving your path through the maze…');
         console.info(
-          `[Main] Portal ${portalAlreadyActive ? 'active' : 'inactive'} at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`,
+          `[Main] ${resumed ? 'Resumed' : 'Joined'} room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
         );
-      }
+        debugPlayerRoles.clear();
+        debugPlayerRoles.set(playerId, role);
+        if (!resumed) chatHud?.clear();
+        chatHud?.setEnabled(true);
+        matchHud.sync(gameState.match);
+        setGameMenuAvailable(gameState.match.status === 'running');
+        snapshotBuffer.clear();
+        clearPendingMovementInputs();
 
-      // ── Late-join gate state sync ────────────────────────────────────
-      if (gameState.gateStates && currentLayout) {
-        for (const gs of gameState.gateStates) {
-          applyGateState(
-            gs.gateIndex,
-            gs.open,
-            currentLayout.gates,
-            currentMap!,
-            tilemapRenderer!,
+        const reuseExistingWorld = Boolean(
+          resumed &&
+          currentMapSeed === mapSeed &&
+          currentMap &&
+          currentLayout &&
+          tilemapRenderer,
+        );
+
+        pendingPortalPos = null;
+        shakeTimeRemaining = 0;
+        cinematicPhase = 'idle';
+        bridgeCameraBlend = 0;
+        bridgeCameraFocus = null;
+        emptyTrapPromptShakeRemaining = 0;
+        emptyTrapPromptShakeElapsed = 0;
+        portalEscapeAnimations.clear();
+
+        if (!reuseExistingWorld) {
+          gateSlideStates.clear();
+          portal?.destroy();
+          portal = null;
+          portalPlatform?.destroy();
+          portalPlatform = null;
+          clearCageVisuals();
+
+          const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
+          currentMapSeed = mapSeed;
+          currentMap = layout.map;
+          currentLayout = layout;
+          mapPixelW = currentMap.width * currentMap.tileSize;
+          mapPixelH = currentMap.height * currentMap.tileSize;
+
+          // ── Build chunk-based tilemap ────────────────────────────────────
+          tilemapRenderer?.destroy();
+          tilemapRenderer = new TilemapRenderer(
+            currentMap,
+            layout.gates,
+            layout.pressurePlates,
+            layout.bridges,
+            layout.swamps,
+            layout.swordFields,
+            layout.spikeGateObstacles,
+            layout.trapCells,
+            layout.chestDeadEnds,
+            layout.tIntersectionDecorations,
+            layout.decoratedVerticalPassages,
+            layout.dirtMask,
             assets,
+            app.renderer,
+          );
+          if (cellBoundaryOverlay?.parent === worldContainer) {
+            worldContainer.removeChild(cellBoundaryOverlay);
+          }
+          cellBoundaryOverlay?.destroy();
+          cellBoundaryOverlay = createCellBoundaryOverlay();
+          attachTilemapLayers(tilemapRenderer);
+        }
+
+        const activeTilemapRenderer = tilemapRenderer;
+        if (!activeTilemapRenderer)
+          throw new Error('Missing tilemap after room admission');
+        activeTilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
+        activeTilemapRenderer.syncSwordFieldStates(
+          gameState.swordFieldStates,
+          gameState.tick,
+          false,
+        );
+        activeTilemapRenderer.syncSpikeGateStates(
+          gameState.spikeGateStates,
+          gameState.spikePlateStates,
+          false,
+        );
+        activeTilemapRenderer.syncChestStates(gameState.chestStates, false);
+        syncCageVisuals(gameState.cageStates, false);
+
+        if (statusEl) {
+          statusEl.textContent = '🟢 Connected';
+          statusEl.classList.add('connected');
+        }
+
+        const me = gameState.players.find((p) => p.id === playerId);
+        if (me) {
+          localX = me.x;
+          localY = me.y;
+          localFacing = me.facing;
+          inputSequenceNumber = me.lastProcessedInput;
+          localPlayerInitialized = true;
+        }
+
+        const canLocalPlayerAct =
+          gameState.match.status === 'running' && !(me?.escaped ?? false);
+        chatHud?.setCanSend(canLocalPlayerAct);
+        syncLocalInputAvailability();
+        applyLocalRoleUi(
+          role,
+          wisdomOrbs,
+          gameState.match.status === 'running' && !resumed,
+        );
+
+        // ── Sync runestone activation state from initial GameState ─────
+        for (const rsInfo of gameState.runestones) {
+          const rsData = tilemapRenderer?.runestoneSprites.find(
+            (r) => r.index === rsInfo.index,
+          );
+          if (rsData && rsInfo.activated && !rsData.activated) {
+            rsData.activated = true;
+            rsData.sprite.texture = assets.runestoneTextures[rsInfo.index][1];
+          }
+        }
+
+        // ── Initial portal sync ────────────────────────────────────────
+        if (gameState.portal) {
+          const portalAlreadyActive = gameState.runestones.every((rs) => rs.activated);
+          if (!portalPlatform || !portal) {
+            portalPlatform = new PortalPlatform(
+              gameState.portal.x,
+              gameState.portal.y,
+              assets.portalPlatformTextures,
+              activeTilemapRenderer.portalTerrainLayer,
+              activeTilemapRenderer.groundDetailLayer,
+              entityLayer,
+            );
+            portal = new Portal(
+              gameState.portal.x,
+              gameState.portal.y,
+              assets.portalFrames,
+              assets.portalActivationCount,
+              entityLayer,
+              portalAlreadyActive,
+            );
+          } else if (portalAlreadyActive) {
+            portal.activate();
+          }
+          minimap?.setPortalPosition(gameState.portal.x, gameState.portal.y);
+          console.info(
+            `[Main] Portal ${portalAlreadyActive ? 'active' : 'inactive'} at (${Math.round(gameState.portal.x)}, ${Math.round(gameState.portal.y)})`,
           );
         }
-      }
 
-      // ── Interaction prompt ─────────────────────────────────────────
-      if (interactPrompt) {
-        worldContainer.removeChild(interactPrompt);
-        interactPrompt.destroy();
-      }
-      interactPrompt = new Text({
-        text: '[ E ]',
-        style: new TextStyle({
-          fontFamily: 'PixelOperator8',
-          fontSize: 64, // Render huge so the canvas draws it perfectly sharp
-          fill: getInteractPromptColor(role),
-          // A sharp, blocky drop shadow instead of a bubbly round stroke
-          dropShadow: {
-            alpha: 1,
-            blur: 0, // 0 blur keeps the shadow blocky
-            color: '#000000',
-            distance: 8, // 8px shadow becomes 1px thick when scaled down
-            angle: Math.PI / 4,
-          },
-          align: 'center',
-        }),
-        roundPixels: true,
-        resolution: 2, // High resolution prevents any WebGL blur
-      });
-
-      // Scale it back down to a native 8px height (64 * 0.125 = 8)
-      interactPrompt.scale.set(0.125);
-      interactPrompt.anchor.set(0.5, 1.0);
-      interactPrompt.visible = false;
-      interactPrompt.zIndex = 99999;
-      interactPrompt.eventMode = 'static';
-      interactPrompt.cursor = 'pointer';
-      interactPrompt.on('pointertap', (event) => {
-        event.stopPropagation();
-        if (interactPrompt?.text === '[ Q ]') {
-          triggerUseWisdomOrb('Click');
-        } else {
-          triggerInteract();
+        // ── Late-join gate state sync ────────────────────────────────────
+        if (gameState.gateStates && currentLayout) {
+          for (const gs of gameState.gateStates) {
+            applyGateState(
+              gs.gateIndex,
+              gs.open,
+              currentLayout.gates,
+              currentMap!,
+              tilemapRenderer!,
+              assets,
+            );
+          }
         }
-      });
-      entityLayer.addChild(interactPrompt);
 
-      for (const player of gameState.players) {
-        const isLocal = player.id === playerId;
-        const data = ensurePlayerSprite(
-          player.id,
-          player.spriteIndex,
-          player.teamId,
-          player.connected ? player.displayName : `${player.displayName} · reconnecting`,
-          !isLocal && !player.escaped,
-        );
-        setPlayerAnimation(
-          data,
-          getAnimationKey(player.facing, player.isMoving, player.isDead),
-        );
-        setPlayerPosition(data, player.x, player.y, gameState.portal);
-        data.container.alpha = player.connected ? 1 : 0.45;
-        data.container.visible = !player.escaped;
-        if (!isLocal && !player.escaped) knownRemotePlayers.add(player.id);
-      }
+        // ── Interaction prompt ─────────────────────────────────────────
+        if (interactPrompt) {
+          worldContainer.removeChild(interactPrompt);
+          interactPrompt.destroy();
+        }
+        interactPrompt = new Text({
+          text: '[ E ]',
+          style: new TextStyle({
+            fontFamily: 'PixelOperator8',
+            fontSize: 64, // Render huge so the canvas draws it perfectly sharp
+            fill: getInteractPromptColor(role),
+            // A sharp, blocky drop shadow instead of a bubbly round stroke
+            dropShadow: {
+              alpha: 1,
+              blur: 0, // 0 blur keeps the shadow blocky
+              color: '#000000',
+              distance: 8, // 8px shadow becomes 1px thick when scaled down
+              angle: Math.PI / 4,
+            },
+            align: 'center',
+          }),
+          roundPixels: true,
+          resolution: 2, // High resolution prevents any WebGL blur
+        });
 
-      snapshotBuffer.push(gameState);
-      if (worldContainer.scale.x !== zoomLevel || worldContainer.scale.y !== zoomLevel) {
-        worldContainer.scale.set(zoomLevel);
-      }
-      updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
-      latestServerState = gameState;
-      updatePlayerNameTagScreenPositions();
-      if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
-      window.requestAnimationFrame(dismissLoadingScreen);
+        // Scale it back down to a native 8px height (64 * 0.125 = 8)
+        interactPrompt.scale.set(0.125);
+        interactPrompt.anchor.set(0.5, 1.0);
+        interactPrompt.visible = false;
+        interactPrompt.zIndex = 99999;
+        interactPrompt.eventMode = 'static';
+        interactPrompt.cursor = 'pointer';
+        interactPrompt.on('pointertap', (event) => {
+          event.stopPropagation();
+          if (interactPrompt?.text === '[ Q ]') {
+            triggerUseWisdomOrb('Click');
+          } else {
+            triggerInteract();
+          }
+        });
+        entityLayer.addChild(interactPrompt);
+
+        for (const player of gameState.players) {
+          const isLocal = player.id === playerId;
+          const data = ensurePlayerSprite(
+            player.id,
+            player.spriteIndex,
+            player.teamId,
+            player.connected
+              ? player.displayName
+              : `${player.displayName} · reconnecting`,
+            !isLocal && !player.escaped,
+          );
+          setPlayerAnimation(
+            data,
+            getAnimationKey(player.facing, player.isMoving, player.isDead),
+          );
+          setPlayerPosition(data, player.x, player.y, gameState.portal);
+          data.container.alpha = player.connected ? 1 : 0.45;
+          data.container.visible = !player.escaped;
+          if (!isLocal && !player.escaped) knownRemotePlayers.add(player.id);
+        }
+
+        snapshotBuffer.push(gameState);
+        if (
+          worldContainer.scale.x !== zoomLevel ||
+          worldContainer.scale.y !== zoomLevel
+        ) {
+          worldContainer.scale.set(zoomLevel);
+        }
+        updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
+        latestServerState = gameState;
+        updatePlayerNameTagScreenPositions();
+        if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
+        window.requestAnimationFrame(dismissLoadingScreen);
       });
     },
 
@@ -2570,7 +2578,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         if (localPlayerData.escaped && !localEscapeAnimating) {
           data.container.visible = false;
         } else if (!localEscapeAnimating && !debugTeleportActive) {
-          // Compute reconciled position from server state + pending input replay
+          // Compute reconciled position from the server state, sent-but-unacknowledged
+          // commands, and the small movement fraction waiting for the next 25 Hz send.
           let reconciledX = localPlayerData.x;
           let reconciledY = localPlayerData.y;
 
@@ -2578,7 +2587,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
             (input) => input.sequenceNumber > localPlayerData.lastProcessedInput,
           );
 
-          for (const input of pendingInputs) {
+          const unsentInput = movementInputScheduler.getUnsentInput();
+          const replayInputs = unsentInput
+            ? [...pendingInputs, unsentInput]
+            : pendingInputs;
+
+          for (const input of replayInputs) {
             const result = applyInputWithCollision(
               reconciledX,
               reconciledY,
@@ -2632,7 +2646,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
             player.id,
             player.spriteIndex,
             player.teamId,
-            player.connected ? player.displayName : `${player.displayName} · reconnecting`,
+            player.connected
+              ? player.displayName
+              : `${player.displayName} · reconnecting`,
             !player.escaped,
           );
           data.container.alpha = player.connected ? 1 : 0.45;
@@ -2659,7 +2675,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       setGameMenuAvailable(gameState.match.status === 'running');
       if (!canLocalPlayerAct) {
         resetAllInput();
-        pendingInputs = [];
+        clearPendingMovementInputs();
       }
       chatHud?.setCanSend(canLocalPlayerAct);
       syncLocalInputAvailability();
@@ -2815,7 +2831,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       startPortalEscapeAnimation(playerId, portalX, portalY);
       if (playerId === net.playerId) {
         resetAllInput();
-        pendingInputs = [];
+        clearPendingMovementInputs();
         chatHud?.setCanSend(false);
         syncLocalInputAvailability();
       }
@@ -2824,15 +2840,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       );
     },
 
-    onMatchEnded: (
-      winner,
-      escapedCount,
-      escapeThreshold,
-      remainingMs,
-      finalRoster,
-    ) => {
+    onMatchEnded: (winner, escapedCount, escapeThreshold, remainingMs, finalRoster) => {
       resetAllInput();
-      pendingInputs = [];
+      clearPendingMovementInputs();
       minimap?.closeExpanded();
       introDialogueHud?.destroy();
       introDialogueHud = null;
@@ -2865,7 +2875,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
 
       resetAllInput();
-      pendingInputs = [];
+      clearPendingMovementInputs();
       snapshotBuffer.clear();
       minimap?.closeExpanded();
       chatHud?.setCanSend(false);
@@ -2873,7 +2883,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       syncLocalInputAvailability();
       if (interactPrompt) interactPrompt.visible = false;
       if (statusEl) {
-        statusEl.textContent = state.status === 'failed' ? '🔴 Disconnected' : '🟠 Reconnecting';
+        statusEl.textContent =
+          state.status === 'failed' ? '🔴 Disconnected' : '🟠 Reconnecting';
         statusEl.classList.remove('connected');
       }
     },
@@ -2909,7 +2920,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const isLocalPlayerActionable = (): boolean => {
     const playerId = net.playerId;
     if (!playerId || latestServerState?.match.status !== 'running') return false;
-    const player = latestServerState.players.find((candidate) => candidate.id === playerId);
+    const player = latestServerState.players.find(
+      (candidate) => candidate.id === playerId,
+    );
     return Boolean(player && !player.escaped && !portalEscapeAnimations.has(playerId));
   };
 
@@ -2981,10 +2994,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       localPlayerRole === 'survivor' &&
       latestServerState?.portal &&
       latestServerState.runestones.every((runestone) => runestone.activated) &&
-      isWithinPortalInteractionRange(
-        { x: localX, y: localY },
-        latestServerState.portal,
-      )
+      isWithinPortalInteractionRange({ x: localX, y: localY }, latestServerState.portal)
     ) {
       net.sendEscapePortal();
       return;
@@ -3155,7 +3165,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     if (gameMenuToggle) {
       gameMenuToggle.hidden = !available;
       gameMenuToggle.disabled = !available;
-      gameMenuToggle.setAttribute('aria-expanded', String(gameMenuHud?.isOpen() ?? false));
+      gameMenuToggle.setAttribute(
+        'aria-expanded',
+        String(gameMenuHud?.isOpen() ?? false),
+      );
     }
   };
   syncLocalInputAvailability = () => {
@@ -3291,21 +3304,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       movementInput.up || movementInput.down || movementInput.left || movementInput.right;
     if (isMoving) {
       localFacing = deriveFacingDirection(movementInput, localFacing);
-      inputSequenceNumber++;
-
-      const input: PendingInput = {
-        sequenceNumber: inputSequenceNumber,
-        up: movementInput.up,
-        down: movementInput.down,
-        left: movementInput.left,
-        right: movementInput.right,
-        dt: dtSeconds,
-      };
 
       const result = applyInputWithCollision(
         localX,
         localY,
-        input,
+        movementInput,
         dtSeconds,
         currentMap!,
         latestServerState?.portal,
@@ -3324,16 +3327,25 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       );
       localX = result.x;
       localY = result.y;
+    }
 
+    // Prediction stays render-rate smooth; only accumulated commands cross the
+    // WebSocket at 25 Hz. Starts, turns, and stops are emitted immediately.
+    const scheduledInputs = movementInputScheduler.update(movementInput, dtSeconds);
+    for (const scheduledInput of scheduledInputs) {
+      inputSequenceNumber++;
+      const input: PendingInput = {
+        sequenceNumber: inputSequenceNumber,
+        ...scheduledInput,
+      };
       pendingInputs.push(input);
-
       net.sendInput(
         input.sequenceNumber,
         input.up,
         input.down,
         input.left,
         input.right,
-        dtSeconds,
+        input.dt,
       );
     }
 
@@ -3543,10 +3555,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         latestServerState.portal &&
         portal &&
         latestServerState.runestones.every((runestone) => runestone.activated) &&
-        isWithinPortalInteractionRange(
-          { x: localX, y: localY },
-          latestServerState.portal,
-        )
+        isWithinPortalInteractionRange({ x: localX, y: localY }, latestServerState.portal)
       ) {
         const dx = localX - latestServerState.portal.x;
         const dy = localY - latestServerState.portal.y;
@@ -3561,12 +3570,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         const dy = localY - rsCenterY;
         const distSq = dx * dx + dy * dy;
         if (distSq < INTERACT_RANGE_SQ) {
-          considerPrompt(
-            0,
-            distSq,
-            rs.sprite.x,
-            rs.sprite.y - rs.sprite.height - 2,
-          );
+          considerPrompt(0, distSq, rs.sprite.x, rs.sprite.y - rs.sprite.height - 2);
         }
       }
 
@@ -3882,12 +3886,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   }
   const displayName = options.displayName;
 
-  net.connect(
-    wsUrl,
-    options.reconnectSession,
-    displayName,
-    options.accessToken,
-  );
+  net.connect(wsUrl, options.reconnectSession, displayName, options.accessToken);
 
   console.info('─────────────────────────────────────────────────');
   console.info('  🏹 False Arrow Client');
