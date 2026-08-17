@@ -407,6 +407,7 @@ export enum MessageType {
   DebugTeleport = 'DEBUG_TELEPORT',
   DebugPlayerAction = 'DEBUG_PLAYER_ACTION',
   DebugSetMatchTime = 'DEBUG_SET_MATCH_TIME',
+  DebugSetNetworkStats = 'DEBUG_SET_NETWORK_STATS',
   SendChatMessage = 'SEND_CHAT_MESSAGE',
   EscapePortal = 'ESCAPE_PORTAL',
   VoteToStart = 'VOTE_TO_START',
@@ -551,6 +552,12 @@ export interface DebugSetMatchTimeMessage {
   type: MessageType.DebugSetMatchTime;
   /** New authoritative time remaining. Zero resolves the match as a timeout. */
   remainingMs: number;
+}
+
+export interface DebugSetNetworkStatsMessage {
+  type: MessageType.DebugSetNetworkStats;
+  /** Whether every participant should see the in-match network statistics HUD. */
+  enabled: boolean;
 }
 
 export type DebugPlayerAction =
@@ -858,6 +865,8 @@ export interface MatchState {
 export interface GameState {
   tick: number;
   match: MatchState;
+  /** Admin-controlled room-wide visibility for the in-match network statistics HUD. */
+  networkStatsVisible: boolean;
   players: PlayerInfo[];
   runestones: RunestoneInfo[];
   /** Portal position in pixel coordinates, selected when the room is created. */
@@ -902,6 +911,7 @@ export type ClientToServerMessage =
   | EscapePortalMessage
   | DebugTeleportMessage
   | DebugSetMatchTimeMessage
+  | DebugSetNetworkStatsMessage
   | DebugPlayerActionMessage;
 
 export type ServerToClientMessage =

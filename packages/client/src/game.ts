@@ -800,15 +800,19 @@ function setRoundedPosition(
 
 // ── Debug UI ────────────────────────────────────────────────────────────────
 
+interface NetworkStatsHudDom {
+  root: HTMLElement;
+  tick: HTMLElement;
+  pending: HTMLElement;
+  snapshot: HTMLElement;
+}
+
 interface DebugUiDom {
   root: HTMLDivElement;
   panel: HTMLDivElement;
   closeButton: HTMLButtonElement;
-  statsHud: HTMLElement;
   status: HTMLDivElement;
-  tick: HTMLElement;
-  pending: HTMLElement;
-  snapshot: HTMLElement;
+  networkStatsToggle: HTMLInputElement;
   matchTimerForm: HTMLFormElement;
   matchTimerMinutes: HTMLInputElement;
   matchTimerSeconds: HTMLInputElement;
@@ -826,7 +830,9 @@ interface DebugUiDom {
 }
 
 const DEBUG_UI_UPDATE_INTERVAL_MS = 150;
+const NETWORK_STATS_UPDATE_INTERVAL_MS = 150;
 let lastDebugUiUpdateAt = -Infinity;
+let lastNetworkStatsUpdateAt = -Infinity;
 let lastDebugPlayerListMarkup = '';
 let selectedDebugPlayerId: string | null = null;
 const debugPlayerRoles = new Map<string, PlayerRole>();
@@ -847,6 +853,80 @@ function getSquadDisplayName(teamId: number): string {
   return color ? `${color[0].toUpperCase()}${color.slice(1)}` : `Squad ${teamId + 1}`;
 }
 
+function createNetworkStatsHud(): NetworkStatsHudDom {
+  const root = document.createElement('aside');
+  root.className = 'debug-stats-hud';
+  root.id = 'debug-stats-hud';
+  root.dataset.gameActive = 'false';
+  root.dataset.roomEnabled = 'false';
+  root.setAttribute('aria-label', 'Network statistics');
+  root.hidden = true;
+  root.innerHTML = `
+    <span>Tick <strong id="tick-counter">—</strong></span>
+    <span>Pending <strong id="pending-count">0</strong></span>
+    <span>Snaps <strong id="snapshot-count">0</strong></span>
+  `;
+  document.body.appendChild(root);
+
+  const tick = root.querySelector<HTMLElement>('#tick-counter');
+  const pending = root.querySelector<HTMLElement>('#pending-count');
+  const snapshot = root.querySelector<HTMLElement>('#snapshot-count');
+  if (!tick || !pending || !snapshot) {
+    throw new Error('Failed to initialize network statistics HUD');
+  }
+
+  lastNetworkStatsUpdateAt = -Infinity;
+  return { root, tick, pending, snapshot };
+}
+
+function syncNetworkStatsVisibility(statsHud: NetworkStatsHudDom): void {
+  const gameActive = statsHud.root.dataset.gameActive === 'true';
+  const roomEnabled = statsHud.root.dataset.roomEnabled === 'true';
+  const adminDebugToolsEnabled =
+    DebugSettings.sessionEnabled && DebugSettings.getFlags().debugToolsEnabled;
+  statsHud.root.hidden =
+    !gameActive || (!roomEnabled && !adminDebugToolsEnabled);
+}
+
+function setNetworkStatsState(
+  statsHud: NetworkStatsHudDom,
+  gameActive: boolean,
+  roomEnabled: boolean,
+): void {
+  statsHud.root.dataset.gameActive = String(gameActive);
+  statsHud.root.dataset.roomEnabled = String(roomEnabled);
+  syncNetworkStatsVisibility(statsHud);
+}
+
+function updateNetworkStatsHud(
+  statsHud: NetworkStatsHudDom,
+  state: GameState,
+  force = false,
+): void {
+  setNetworkStatsState(
+    statsHud,
+    state.match.status === 'running',
+    state.networkStatsVisible,
+  );
+
+  const now = performance.now();
+  if (!force && now - lastNetworkStatsUpdateAt < NETWORK_STATS_UPDATE_INTERVAL_MS) {
+    return;
+  }
+  lastNetworkStatsUpdateAt = now;
+
+  const tickText = state.tick.toString();
+  const pendingText = pendingInputs.length.toString();
+  const snapshotText = snapshotBuffer.length.toString();
+  if (statsHud.tick.textContent !== tickText) statsHud.tick.textContent = tickText;
+  if (statsHud.pending.textContent !== pendingText) {
+    statsHud.pending.textContent = pendingText;
+  }
+  if (statsHud.snapshot.textContent !== snapshotText) {
+    statsHud.snapshot.textContent = snapshotText;
+  }
+}
+
 function createDebugUI(): DebugUiDom {
   const debugDiv = document.createElement('div');
   debugDiv.id = 'admin-ui';
@@ -854,11 +934,6 @@ function createDebugUI(): DebugUiDom {
   const flags = DebugSettings.getFlags();
 
   debugDiv.innerHTML = `
-    <aside class="debug-stats-hud" id="debug-stats-hud" aria-label="Network statistics" ${flags.showNetworkStats ? '' : 'hidden'}>
-      <span>Tick <strong id="tick-counter">—</strong></span>
-      <span>Pending <strong id="pending-count">0</strong></span>
-      <span>Snaps <strong id="snapshot-count">0</strong></span>
-    </aside>
     <div class="admin-panel" id="admin-panel" role="dialog" aria-modal="true" aria-labelledby="admin-panel-title" aria-hidden="true" hidden>
       <section class="admin-panel__window">
         <header class="admin-panel__header">
@@ -889,8 +964,8 @@ function createDebugUI(): DebugUiDom {
                 <span>Enable debug tools</span>
               </label>
               <label class="debug-toggle" id="toggle-network-stats">
-                <input type="checkbox" ${flags.showNetworkStats ? 'checked' : ''} data-flag="showNetworkStats">
-                <span>Show network stats</span>
+                <input type="checkbox" data-room-setting="networkStats">
+                <span>Show network stats for everyone</span>
               </label>
               <label class="debug-toggle" id="toggle-cell-boundaries">
                 <input type="checkbox" ${flags.cellBoundaries ? 'checked' : ''} data-flag="cellBoundaries">
@@ -944,11 +1019,10 @@ function createDebugUI(): DebugUiDom {
 
   const panel = debugDiv.querySelector<HTMLDivElement>('#admin-panel');
   const closeButton = debugDiv.querySelector<HTMLButtonElement>('#admin-panel-close');
-  const statsHud = debugDiv.querySelector<HTMLElement>('#debug-stats-hud');
   const status = debugDiv.querySelector<HTMLDivElement>('#connection-status');
-  const tick = debugDiv.querySelector<HTMLElement>('#tick-counter');
-  const pending = debugDiv.querySelector<HTMLElement>('#pending-count');
-  const snapshot = debugDiv.querySelector<HTMLElement>('#snapshot-count');
+  const networkStatsToggle = debugDiv.querySelector<HTMLInputElement>(
+    '[data-room-setting="networkStats"]',
+  );
   const matchTimerForm = debugDiv.querySelector<HTMLFormElement>('#debug-match-timer');
   const matchTimerMinutes =
     debugDiv.querySelector<HTMLInputElement>('#debug-match-minutes');
@@ -984,11 +1058,8 @@ function createDebugUI(): DebugUiDom {
   if (
     !panel ||
     !closeButton ||
-    !statsHud ||
     !status ||
-    !tick ||
-    !pending ||
-    !snapshot ||
+    !networkStatsToggle ||
     !matchTimerForm ||
     !matchTimerMinutes ||
     !matchTimerSeconds ||
@@ -1016,11 +1087,8 @@ function createDebugUI(): DebugUiDom {
     root: debugDiv,
     panel,
     closeButton,
-    statsHud,
     status,
-    tick,
-    pending,
-    snapshot,
+    networkStatsToggle,
     matchTimerForm,
     matchTimerMinutes,
     matchTimerSeconds,
@@ -1038,16 +1106,22 @@ function createDebugUI(): DebugUiDom {
   };
 }
 
-function setupDebugToggles(debugUi: DebugUiDom): void {
+function setupDebugToggles(
+  debugUi: DebugUiDom,
+  net: NetworkManager,
+  statsHud: NetworkStatsHudDom,
+): void {
   const debugUI = debugUi.root;
   debugUI.addEventListener('change', (e: Event) => {
     const target = e.target as HTMLInputElement;
+    if (target.dataset.roomSetting === 'networkStats') {
+      net.sendDebugSetNetworkStats(target.checked);
+      return;
+    }
     const flag = target.dataset.flag as keyof ReturnType<typeof DebugSettings.getFlags>;
     if (!flag) return;
     DebugSettings.setFlag(flag, target.checked);
-    if (flag === 'showNetworkStats') {
-      debugUi.statsHud.hidden = !target.checked;
-    }
+    if (flag === 'debugToolsEnabled') syncNetworkStatsVisibility(statsHud);
   });
 
   debugUi.closeButton.addEventListener('click', () => {
@@ -1201,19 +1275,10 @@ function updateDebugUI(
   playerId: string | null,
   force = false,
 ): void {
+  debugUi.networkStatsToggle.checked = state.networkStatsVisible;
   const now = performance.now();
   if (!force && now - lastDebugUiUpdateAt < DEBUG_UI_UPDATE_INTERVAL_MS) return;
   lastDebugUiUpdateAt = now;
-
-  const tickText = state.tick.toString();
-  const pendingText = pendingInputs.length.toString();
-  const snapshotText = snapshotBuffer.length.toString();
-
-  if (debugUi.tick.textContent !== tickText) debugUi.tick.textContent = tickText;
-  if (debugUi.pending.textContent !== pendingText)
-    debugUi.pending.textContent = pendingText;
-  if (debugUi.snapshot.textContent !== snapshotText)
-    debugUi.snapshot.textContent = snapshotText;
 
   const timerControls = [
     debugUi.matchTimerMinutes,
@@ -1222,6 +1287,7 @@ function updateDebugUI(
   ];
   const matchEnded = state.match.status === 'ended';
   for (const control of timerControls) control.disabled = matchEnded;
+  debugUi.networkStatsToggle.disabled = matchEnded;
   const timerFormFocused = debugUi.matchTimerForm.contains(document.activeElement);
   if (!timerFormFocused) {
     const totalSeconds = Math.ceil(state.match.remainingMs / 1_000);
@@ -1704,6 +1770,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const savedZoomBeforeToggle = zoomLevel;
 
   DebugSettings.setAdminAccess(false);
+  const networkStatsHud = createNetworkStatsHud();
   let debugUi: DebugUiDom | null = null;
   let statusEl: HTMLDivElement | null = null;
   let isAdminSession = false;
@@ -2258,11 +2325,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     onLobbyJoined: (playerId, lobby, isAdmin, resumed) => {
       DebugSettings.setAdminAccess(isAdmin);
       isAdminSession = isAdmin;
+      setNetworkStatsState(networkStatsHud, false, false);
       gameMenuHud?.setAdminAvailable(isAdmin);
       if (isAdmin && !debugUi) {
         debugUi = createDebugUI();
         statusEl = debugUi.status;
-        setupDebugToggles(debugUi);
+        setupDebugToggles(debugUi, net, networkStatsHud);
         setupDebugPlayerActions(
           debugUi,
           net,
@@ -2274,7 +2342,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         debugUi = null;
         statusEl = null;
       }
-      if (debugUi) setAdminPanelOpen(debugUi, false);
+      if (debugUi) {
+        setAdminPanelOpen(debugUi, false);
+      }
       const fullscreenToggle =
         document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
       if (fullscreenToggle) fullscreenToggle.hidden = true;
@@ -2340,7 +2410,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         if (isAdmin && !debugUi) {
           debugUi = createDebugUI();
           statusEl = debugUi.status;
-          setupDebugToggles(debugUi);
+          setupDebugToggles(debugUi, net, networkStatsHud);
           setupDebugPlayerActions(
             debugUi,
             net,
@@ -2597,6 +2667,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
         latestServerState = gameState;
         updatePlayerNameTagScreenPositions();
+        updateNetworkStatsHud(networkStatsHud, gameState, true);
         if (debugUi) updateDebugUI(debugUi, gameState, playerId, true);
         window.requestAnimationFrame(dismissLoadingScreen);
       });
@@ -2736,6 +2807,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
       chatHud?.setCanSend(canLocalPlayerAct);
       syncLocalInputAvailability();
+      updateNetworkStatsHud(networkStatsHud, gameState);
       if (debugUi) updateDebugUI(debugUi, gameState, localPlayerId);
     },
 
@@ -3344,6 +3416,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       chatHud?.destroy();
       matchHud.destroy();
       gameMenuHud?.destroy();
+      networkStatsHud.root.remove();
       gameMenuToggle?.removeEventListener('click', handleGameMenuToggle);
       mobileControls.destroy();
     },

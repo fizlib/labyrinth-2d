@@ -128,6 +128,7 @@ import {
   type EscapePortalMessage,
   type DebugTeleportMessage,
   type DebugSetMatchTimeMessage,
+  type DebugSetNetworkStatsMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
   type LobbyJoinedMessage,
@@ -658,6 +659,7 @@ export class Room {
         winner: null,
         finalRoster: null,
       },
+      networkStatsVisible: false,
       players: [],
       runestones: this.runestones,
       portal: this.portalPosition,
@@ -1088,6 +1090,22 @@ export class Room {
     this.broadcast(update);
     console.info(
       `[Room:${this.id}] Debug set match timer to ${Math.ceil(msg.remainingMs / 1_000)} seconds`,
+    );
+  }
+
+  /** Admin: show or hide the network statistics HUD for every participant. */
+  handleDebugSetNetworkStats(
+    requesterId: string,
+    msg: DebugSetNetworkStatsMessage,
+  ): void {
+    if (!this.isAdmin(requesterId) || !this.isMatchRunning()) return;
+    if (typeof msg.enabled !== 'boolean') return;
+    if (this.state.networkStatsVisible === msg.enabled) return;
+
+    this.state.networkStatsVisible = msg.enabled;
+    this.broadcastSnapshot();
+    console.info(
+      `[Room:${this.id}] Admin ${requesterId} ${msg.enabled ? 'enabled' : 'disabled'} network stats for all players`,
     );
   }
 
@@ -3212,6 +3230,7 @@ export class Room {
         finalRoster:
           this.state.match.finalRoster?.map((player) => ({ ...player })) ?? null,
       },
+      networkStatsVisible: this.state.networkStatsVisible,
       players: this.state.players.map(toPublicPlayerInfo),
       runestones: this.runestones.map((r) => ({ ...r })),
       portal: this.portalPosition ? { ...this.portalPosition } : null,

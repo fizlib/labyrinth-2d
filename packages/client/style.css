@@ -3515,6 +3515,7 @@ canvas {
   background: rgba(17, 26, 32, 0.9);
   color: #b8c1bd;
   box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.65);
+  font-family: 'PixelOperator8', 'Courier New', Courier, monospace;
   font-size: 0.65rem;
   line-height: 1;
   text-shadow: 1px 1px 0 #000;

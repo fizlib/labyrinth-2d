@@ -13,14 +13,11 @@ export interface DebugFlags {
   debugToolsEnabled: boolean;
   /** Draw the logical maze-cell boundaries over the world. */
   cellBoundaries: boolean;
-  /** Show Tick, Pending, and Snaps in the top-left gameplay HUD. */
-  showNetworkStats: boolean;
 }
 
 const DEFAULTS: DebugFlags = {
   debugToolsEnabled: true,
   cellBoundaries: false,
-  showNetworkStats: false,
 };
 
 /** Load persisted settings from localStorage, falling back to defaults. */
@@ -35,7 +32,6 @@ function load(): DebugFlags {
         debugToolsEnabled:
           parsed.debugToolsEnabled ?? parsed.masterEnabled ?? DEFAULTS.debugToolsEnabled,
         cellBoundaries: parsed.cellBoundaries ?? DEFAULTS.cellBoundaries,
-        showNetworkStats: parsed.showNetworkStats ?? DEFAULTS.showNetworkStats,
       };
     }
   } catch {

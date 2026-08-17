@@ -509,6 +509,14 @@ uWS
             break;
           }
 
+          case MessageType.DebugSetNetworkStats: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) room.handleDebugSetNetworkStats(data.id, msg);
+            }
+            break;
+          }
+
           default:
             console.warn(`[WS] Unknown message type from ${data.id}`);
         }

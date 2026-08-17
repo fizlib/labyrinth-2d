@@ -33,6 +33,7 @@ import {
   type EscapePortalMessage,
   type DebugTeleportMessage,
   type DebugSetMatchTimeMessage,
+  type DebugSetNetworkStatsMessage,
   type DebugPlayerAction,
   type DebugPlayerActionMessage,
   type ServerToClientMessage,
@@ -632,6 +633,15 @@ export class NetworkManager {
     const msg: DebugSetMatchTimeMessage = {
       type: MessageType.DebugSetMatchTime,
       remainingMs,
+    };
+    this.send(msg);
+  }
+
+  /** Set room-wide in-match network-stat visibility. */
+  sendDebugSetNetworkStats(enabled: boolean): void {
+    const msg: DebugSetNetworkStatsMessage = {
+      type: MessageType.DebugSetNetworkStats,
+      enabled,
     };
     this.send(msg);
   }

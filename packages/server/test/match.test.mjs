@@ -217,6 +217,49 @@ test('debug timer changes the authoritative deadline and zero triggers timeout',
   assert.equal(room.state.match.remainingMs, 0);
 });
 
+test('admins can show network stats to every player and the room defaults to hidden', (t) => {
+  const { room, sockets } = createRoom(2);
+  t.after(() => room.destroy());
+
+  assert.equal(room.state.networkStatsVisible, false);
+  room.handleDebugSetNetworkStats('player-0', {
+    type: 'DEBUG_SET_NETWORK_STATS',
+    enabled: true,
+  });
+  assert.equal(
+    room.state.networkStatsVisible,
+    false,
+    'regular players cannot change room-wide network stats',
+  );
+
+  sockets[0].data.isAdmin = true;
+  room.seats.get('player-0').isAdmin = true;
+  room.handleDebugSetNetworkStats('player-0', {
+    type: 'DEBUG_SET_NETWORK_STATS',
+    enabled: true,
+  });
+
+  assert.equal(room.state.networkStatsVisible, true);
+  for (const socket of sockets) {
+    const latestTick = socket.sent.findLast(
+      (message) => message.type === 'TICK_UPDATE',
+    );
+    assert.ok(latestTick);
+    assert.equal(latestTick.gameState.networkStatsVisible, true);
+  }
+
+  room.handleDebugSetNetworkStats('player-0', {
+    type: 'DEBUG_SET_NETWORK_STATS',
+    enabled: false,
+  });
+  assert.equal(room.state.networkStatsVisible, false);
+  assert.equal(
+    sockets[1].sent.findLast((message) => message.type === 'TICK_UPDATE').gameState
+      .networkStatsVisible,
+    false,
+  );
+});
+
 test('authenticated public starting rosters emit one Elo result', (t) => {
   const records = [];
   const room = new Room(`ranked-${Math.random()}`, true, {
