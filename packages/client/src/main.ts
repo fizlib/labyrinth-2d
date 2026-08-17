@@ -743,6 +743,7 @@ class AppController {
             <button id="quick-play" class="pixel-button pixel-button--primary" type="button">Quick Play</button>
             <button id="create-game" class="pixel-button" type="button">Create Private Game</button>
             <button id="join-game" class="pixel-button" type="button">Join with Code</button>
+            ${this.profile.is_admin ? '<a id="open-style-editor" class="pixel-button" href="/style-editor.html" target="_blank" rel="noopener">Style Editor</a>' : ''}
             <button class="pixel-button menu-button--coming-soon" type="button" disabled>Leaderboard</button>
             <button class="pixel-button menu-button--coming-soon" type="button" disabled>Settings</button>
             <button id="sign-out" class="menu-sign-out" type="button">${isGuest ? 'Leave Guest Session' : 'Sign Out'}</button>

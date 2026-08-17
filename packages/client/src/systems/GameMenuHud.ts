@@ -4,7 +4,7 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 // then reduce it to its native size on whole-pixel coordinates.
 const TEXT_RENDER_SCALE = 8;
 const PANEL_WIDTH = 224;
-const PANEL_HEIGHT = 184;
+const PANEL_HEIGHT = 206;
 const DIVIDER_Y = 45;
 const BUTTON_WIDTH = 132;
 const BUTTON_HEIGHT = 25;
@@ -14,6 +14,7 @@ type MenuPage = 'main' | 'controls' | 'exit-confirmation';
 
 export interface GameMenuActions {
   onVisibilityChange: (visible: boolean) => void;
+  onOpenAdminPanel: () => void;
   onExitMatch: () => void;
 }
 
@@ -24,7 +25,11 @@ export class GameMenuHud {
   private readonly mainPage = new Container();
   private readonly controlsPage = new Container();
   private readonly exitConfirmationPage = new Container();
+  private readonly adminButton: Container;
+  private readonly controlsButton: Container;
+  private readonly exitButton: Container;
   private available = false;
+  private adminAvailable = false;
   private page: MenuPage = 'main';
 
   constructor(
@@ -53,7 +58,11 @@ export class GameMenuHud {
     this.title.y = 25;
     panel.addChild(this.title, this.createDivider());
 
-    this.buildMainPage();
+    const mainPageButtons = this.buildMainPage();
+    this.adminButton = mainPageButtons.admin;
+    this.controlsButton = mainPageButtons.controls;
+    this.exitButton = mainPageButtons.exit;
+    this.layoutMainPage();
     this.buildControlsPage();
     this.buildExitConfirmationPage();
     panel.addChild(this.mainPage, this.controlsPage, this.exitConfirmationPage);
@@ -69,6 +78,11 @@ export class GameMenuHud {
   setAvailable(available: boolean): void {
     this.available = available;
     if (!available) this.close();
+  }
+
+  setAdminAvailable(available: boolean): void {
+    this.adminAvailable = available;
+    this.layoutMainPage();
   }
 
   isOpen(): boolean {
@@ -112,20 +126,45 @@ export class GameMenuHud {
     this.container.destroy({ children: true });
   }
 
-  private buildMainPage(): void {
+  private buildMainPage(): {
+    admin: Container;
+    controls: Container;
+    exit: Container;
+  } {
+    const resumeButton = this.createButton('Resume game', MAIN_BUTTON_X, 58, () =>
+      this.close(),
+    );
+    const adminButton = this.createButton(
+      'Admin panel',
+      MAIN_BUTTON_X,
+      87,
+      this.actions.onOpenAdminPanel,
+    );
+    const controlsButton = this.createButton('Controls', MAIN_BUTTON_X, 92, () =>
+      this.showPage('controls'),
+    );
+    const exitButton = this.createButton('Exit match', MAIN_BUTTON_X, 126, () =>
+      this.showPage('exit-confirmation'),
+    );
     this.mainPage.addChild(
-      this.createButton('Resume game', MAIN_BUTTON_X, 58, () => this.close()),
-      this.createButton('Controls', MAIN_BUTTON_X, 92, () => this.showPage('controls')),
-      this.createButton('Exit match', MAIN_BUTTON_X, 126, () =>
-        this.showPage('exit-confirmation'),
-      ),
+      resumeButton,
+      adminButton,
+      controlsButton,
+      exitButton,
     );
 
     const hint = this.createText('[Esc] Resume', 8, '#b8c1bd');
     hint.anchor.set(0.5);
     hint.x = PANEL_WIDTH / 2;
-    hint.y = 168;
+    hint.y = PANEL_HEIGHT - 15;
     this.mainPage.addChild(hint);
+    return { admin: adminButton, controls: controlsButton, exit: exitButton };
+  }
+
+  private layoutMainPage(): void {
+    this.adminButton.visible = this.adminAvailable;
+    this.controlsButton.y = this.adminAvailable ? 116 : 92;
+    this.exitButton.y = this.adminAvailable ? 145 : 126;
   }
 
   private buildControlsPage(): void {
@@ -169,8 +208,8 @@ export class GameMenuHud {
     message.y = 58;
     this.exitConfirmationPage.addChild(
       message,
-      this.createButton('Stay', 18, 140, () => this.showPage('main'), 90),
-      this.createButton('Exit match', 116, 140, this.actions.onExitMatch, 90, true),
+      this.createButton('Stay', 18, 162, () => this.showPage('main'), 90),
+      this.createButton('Exit match', 116, 162, this.actions.onExitMatch, 90, true),
     );
   }
 

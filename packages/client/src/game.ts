@@ -802,10 +802,13 @@ function setRoundedPosition(
 
 interface DebugUiDom {
   root: HTMLDivElement;
+  panel: HTMLDivElement;
+  closeButton: HTMLButtonElement;
+  statsHud: HTMLElement;
   status: HTMLDivElement;
-  tick: HTMLSpanElement;
-  pending: HTMLSpanElement;
-  snapshot: HTMLSpanElement;
+  tick: HTMLElement;
+  pending: HTMLElement;
+  snapshot: HTMLElement;
   matchTimerForm: HTMLFormElement;
   matchTimerMinutes: HTMLInputElement;
   matchTimerSeconds: HTMLInputElement;
@@ -846,117 +849,106 @@ function getSquadDisplayName(teamId: number): string {
 
 function createDebugUI(): DebugUiDom {
   const debugDiv = document.createElement('div');
-  debugDiv.id = 'debug-ui';
+  debugDiv.id = 'admin-ui';
 
   const flags = DebugSettings.getFlags();
-  if (flags.minimized) {
-    debugDiv.classList.add('minimized');
-  }
 
   debugDiv.innerHTML = `
-    <div class="debug-header">
-      <h1>🏹 False Arrow — Network Debug</h1>
-      <button id="debug-minimize-btn" title="Toggle Minimize">${flags.minimized ? '+' : '−'}</button>
-    </div>
-    <div class="debug-content">
-      <div class="status" id="connection-status">⏳ Connecting...</div>
-      <div class="stats">
-        <div class="stat-card">
-          <span class="stat-label">Tick</span>
-          <span class="stat-value" id="tick-counter">—</span>
+    <aside class="debug-stats-hud" id="debug-stats-hud" aria-label="Network statistics" ${flags.showNetworkStats ? '' : 'hidden'}>
+      <span>Tick <strong id="tick-counter">—</strong></span>
+      <span>Pending <strong id="pending-count">0</strong></span>
+      <span>Snaps <strong id="snapshot-count">0</strong></span>
+    </aside>
+    <div class="admin-panel" id="admin-panel" role="dialog" aria-modal="true" aria-labelledby="admin-panel-title" aria-hidden="true" hidden>
+      <section class="admin-panel__window">
+        <header class="admin-panel__header">
+          <h1 id="admin-panel-title">Admin panel</h1>
+          <button class="admin-panel__back" id="admin-panel-close" type="button">Back</button>
+        </header>
+        <div class="admin-panel__divider" aria-hidden="true"><span>◇</span></div>
+        <div class="admin-connection-status" id="connection-status">Connecting…</div>
+        <div class="admin-panel__content">
+          <section class="admin-panel__section" aria-labelledby="admin-match-heading">
+            <h2 id="admin-match-heading">Match timer</h2>
+            <form class="debug-match-timer" id="debug-match-timer">
+              <label>
+                <span>Min</span>
+                <input id="debug-match-minutes" type="number" min="0" max="1439" step="1" value="10" inputmode="numeric" aria-label="Match timer minutes">
+              </label>
+              <span class="debug-time-separator">:</span>
+              <label>
+                <span>Sec</span>
+                <input id="debug-match-seconds" type="number" min="0" max="59" step="1" value="0" inputmode="numeric" aria-label="Match timer seconds">
+              </label>
+              <button id="debug-set-match-timer" type="submit">Set</button>
+            </form>
+            <h2 id="admin-settings-heading">Debug settings</h2>
+            <div class="debug-toggles" aria-labelledby="admin-settings-heading">
+              <label class="debug-toggle" id="toggle-debug-tools">
+                <input type="checkbox" ${flags.debugToolsEnabled ? 'checked' : ''} data-flag="debugToolsEnabled">
+                <span>Enable debug tools</span>
+              </label>
+              <label class="debug-toggle" id="toggle-network-stats">
+                <input type="checkbox" ${flags.showNetworkStats ? 'checked' : ''} data-flag="showNetworkStats">
+                <span>Show network stats</span>
+              </label>
+              <label class="debug-toggle" id="toggle-cell-boundaries">
+                <input type="checkbox" ${flags.cellBoundaries ? 'checked' : ''} data-flag="cellBoundaries">
+                <span>Show cell boundaries</span>
+              </label>
+            </div>
+          </section>
+          <section class="admin-panel__section" aria-labelledby="admin-players-heading">
+            <h2 id="admin-players-heading">Players</h2>
+            <ul id="player-list"></ul>
+            <div class="debug-player-actions" id="debug-player-actions" hidden>
+              <div class="debug-player-actions-header">
+                <div>
+                  <strong id="debug-player-action-name">Player</strong>
+                  <span id="debug-player-action-meta"></span>
+                </div>
+                <button type="button" id="debug-player-actions-close" title="Close player menu" aria-label="Close player menu">×</button>
+              </div>
+              <div class="debug-player-action-grid">
+                <button type="button" id="debug-teleport-to" data-player-action="teleport-to">Teleport to them</button>
+                <button type="button" id="debug-teleport-here" data-player-action="teleport-here">Teleport them to me</button>
+                <label class="debug-player-select-control">
+                  <span>Character skin</span>
+                  <select id="debug-player-skin-select">
+                    ${PLAYER_CHARACTER_NAMES.map((name, index) => `<option value="${index}">${name}</option>`).join('')}
+                  </select>
+                </label>
+                <label class="debug-player-select-control">
+                  <span>Squad</span>
+                  <select id="debug-player-squad-select">
+                    ${SQUAD_COLORS.map((_, index) => `<option value="${index}">${getSquadDisplayName(index)}</option>`).join('')}
+                  </select>
+                </label>
+                <label class="debug-player-select-control">
+                  <span>Role</span>
+                  <select id="debug-player-role-select">
+                    <option value="" disabled>Loading…</option>
+                    <option value="survivor">Survivor</option>
+                    <option value="warden">Warden</option>
+                  </select>
+                </label>
+                <button type="button" id="debug-toggle-dead" class="danger" data-player-action="toggle-dead">Make dead</button>
+              </div>
+            </div>
+          </section>
         </div>
-        <div class="stat-card">
-          <span class="stat-label">Pending</span>
-          <span class="stat-value" id="pending-count">0</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Snaps</span>
-          <span class="stat-value" id="snapshot-count">0</span>
-        </div>
-      </div>
-      <h2>Match Timer</h2>
-      <form class="debug-match-timer" id="debug-match-timer">
-        <label>
-          <span>Min</span>
-          <input id="debug-match-minutes" type="number" min="0" max="1439" step="1" value="10" inputmode="numeric" aria-label="Match timer minutes">
-        </label>
-        <span class="debug-time-separator">:</span>
-        <label>
-          <span>Sec</span>
-          <input id="debug-match-seconds" type="number" min="0" max="59" step="1" value="0" inputmode="numeric" aria-label="Match timer seconds">
-        </label>
-        <button id="debug-set-match-timer" type="submit">Set</button>
-      </form>
-      <h2>Players</h2>
-      <ul id="player-list"></ul>
-      <div class="debug-player-actions" id="debug-player-actions" hidden>
-        <div class="debug-player-actions-header">
-          <div>
-            <strong id="debug-player-action-name">Player</strong>
-            <span id="debug-player-action-meta"></span>
-          </div>
-          <button type="button" id="debug-player-actions-close" title="Close player menu" aria-label="Close player menu">×</button>
-        </div>
-        <div class="debug-player-action-grid">
-          <button type="button" id="debug-teleport-to" data-player-action="teleport-to">Teleport to them</button>
-          <button type="button" id="debug-teleport-here" data-player-action="teleport-here">Teleport them to me</button>
-          <label class="debug-player-select-control">
-            <span>Character skin</span>
-            <select id="debug-player-skin-select">
-              ${PLAYER_CHARACTER_NAMES.map((name, index) => `<option value="${index}">${name}</option>`).join('')}
-            </select>
-          </label>
-          <label class="debug-player-select-control">
-            <span>Squad</span>
-            <select id="debug-player-squad-select">
-              ${SQUAD_COLORS.map((_, index) => `<option value="${index}">${getSquadDisplayName(index)}</option>`).join('')}
-            </select>
-          </label>
-          <label class="debug-player-select-control">
-            <span>Role</span>
-            <select id="debug-player-role-select">
-              <option value="" disabled>Loading…</option>
-              <option value="survivor">Survivor</option>
-              <option value="warden">Warden</option>
-            </select>
-          </label>
-          <button type="button" id="debug-toggle-dead" class="danger" data-player-action="toggle-dead">Make dead</button>
-        </div>
-      </div>
-      <h2>Debug Settings</h2>
-      <a class="debug-editor-link" href="/style-editor.html" target="_blank" rel="noopener">
-        <span>🎨</span> Open Style Editor
-      </a>
-      <div class="debug-toggles">
-        <label class="debug-toggle" id="toggle-master">
-          <input type="checkbox" ${flags.masterEnabled ? 'checked' : ''} data-flag="masterEnabled">
-          <span>Master Enable</span>
-        </label>
-        <label class="debug-toggle" id="toggle-scroll-zoom">
-          <input type="checkbox" ${flags.scrollZoom ? 'checked' : ''} data-flag="scrollZoom">
-          <span>Scroll Zoom</span>
-        </label>
-        <label class="debug-toggle" id="toggle-zoom-toggle">
-          <input type="checkbox" ${flags.zoomToggle ? 'checked' : ''} data-flag="zoomToggle">
-          <span>Zoom Toggle (−)</span>
-        </label>
-        <label class="debug-toggle" id="toggle-click-teleport">
-          <input type="checkbox" ${flags.clickTeleport ? 'checked' : ''} data-flag="clickTeleport">
-          <span>Click Teleport</span>
-        </label>
-        <label class="debug-toggle" id="toggle-cell-boundaries">
-          <input type="checkbox" ${flags.cellBoundaries ? 'checked' : ''} data-flag="cellBoundaries">
-          <span>Cell Boundaries</span>
-        </label>
-      </div>
+      </section>
     </div>
   `;
   document.body.appendChild(debugDiv);
 
+  const panel = debugDiv.querySelector<HTMLDivElement>('#admin-panel');
+  const closeButton = debugDiv.querySelector<HTMLButtonElement>('#admin-panel-close');
+  const statsHud = debugDiv.querySelector<HTMLElement>('#debug-stats-hud');
   const status = debugDiv.querySelector<HTMLDivElement>('#connection-status');
-  const tick = debugDiv.querySelector<HTMLSpanElement>('#tick-counter');
-  const pending = debugDiv.querySelector<HTMLSpanElement>('#pending-count');
-  const snapshot = debugDiv.querySelector<HTMLSpanElement>('#snapshot-count');
+  const tick = debugDiv.querySelector<HTMLElement>('#tick-counter');
+  const pending = debugDiv.querySelector<HTMLElement>('#pending-count');
+  const snapshot = debugDiv.querySelector<HTMLElement>('#snapshot-count');
   const matchTimerForm = debugDiv.querySelector<HTMLFormElement>('#debug-match-timer');
   const matchTimerMinutes =
     debugDiv.querySelector<HTMLInputElement>('#debug-match-minutes');
@@ -990,6 +982,9 @@ function createDebugUI(): DebugUiDom {
     debugDiv.querySelector<HTMLButtonElement>('#debug-toggle-dead');
 
   if (
+    !panel ||
+    !closeButton ||
+    !statsHud ||
     !status ||
     !tick ||
     !pending ||
@@ -1019,6 +1014,9 @@ function createDebugUI(): DebugUiDom {
 
   return {
     root: debugDiv,
+    panel,
+    closeButton,
+    statsHud,
     status,
     tick,
     pending,
@@ -1042,25 +1040,26 @@ function createDebugUI(): DebugUiDom {
 
 function setupDebugToggles(debugUi: DebugUiDom): void {
   const debugUI = debugUi.root;
-  // Allow pointer events on the toggles area
-  debugUI.style.pointerEvents = 'auto';
-
-  // Toggle flags
   debugUI.addEventListener('change', (e: Event) => {
     const target = e.target as HTMLInputElement;
     const flag = target.dataset.flag as keyof ReturnType<typeof DebugSettings.getFlags>;
     if (!flag) return;
     DebugSettings.setFlag(flag, target.checked);
+    if (flag === 'showNetworkStats') {
+      debugUi.statsHud.hidden = !target.checked;
+    }
   });
 
-  // Minimize button
-  const minimizeBtn = debugUI.querySelector<HTMLButtonElement>('#debug-minimize-btn');
-  if (minimizeBtn) {
-    minimizeBtn.addEventListener('click', () => {
-      const isMinimized = debugUI.classList.toggle('minimized');
-      DebugSettings.setFlag('minimized', isMinimized);
-      minimizeBtn.textContent = isMinimized ? '+' : '−';
-    });
+  debugUi.closeButton.addEventListener('click', () => {
+    setAdminPanelOpen(debugUi, false);
+  });
+}
+
+function setAdminPanelOpen(debugUi: DebugUiDom, open: boolean): void {
+  debugUi.panel.hidden = !open;
+  debugUi.panel.setAttribute('aria-hidden', String(!open));
+  if (!open && debugUi.panel.contains(document.activeElement)) {
+    (document.activeElement as HTMLElement).blur();
   }
 }
 
@@ -1707,6 +1706,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   DebugSettings.setAdminAccess(false);
   let debugUi: DebugUiDom | null = null;
   let statusEl: HTMLDivElement | null = null;
+  let isAdminSession = false;
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
@@ -2257,6 +2257,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const net = new NetworkManager({
     onLobbyJoined: (playerId, lobby, isAdmin, resumed) => {
       DebugSettings.setAdminAccess(isAdmin);
+      isAdminSession = isAdmin;
+      gameMenuHud?.setAdminAvailable(isAdmin);
       if (isAdmin && !debugUi) {
         debugUi = createDebugUI();
         statusEl = debugUi.status;
@@ -2272,6 +2274,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         debugUi = null;
         statusEl = null;
       }
+      if (debugUi) setAdminPanelOpen(debugUi, false);
       const fullscreenToggle =
         document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
       if (fullscreenToggle) fullscreenToggle.hidden = true;
@@ -2332,6 +2335,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       showLoadingScreen(0.92, 'Carving your path through the maze…');
       runAfterLoadingScreenPaint(() => {
         DebugSettings.setAdminAccess(isAdmin);
+        isAdminSession = isAdmin;
+        gameMenuHud?.setAdminAvailable(isAdmin);
         if (isAdmin && !debugUi) {
           debugUi = createDebugUI();
           statusEl = debugUi.status;
@@ -2342,6 +2347,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
             () => latestServerState,
             () => net.playerId,
           );
+        } else if (!isAdmin && debugUi) {
+          debugUi.root.remove();
+          debugUi = null;
+          statusEl = null;
         }
         const fullscreenToggle =
           document.querySelector<HTMLButtonElement>('#fullscreen-toggle');
@@ -2437,8 +2446,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         syncCageVisuals(gameState.cageStates, false);
 
         if (statusEl) {
-          statusEl.textContent = '🟢 Connected';
+          statusEl.textContent = 'Connected';
           statusEl.classList.add('connected');
+          statusEl.classList.remove('error');
         }
 
         const me = gameState.players.find((p) => p.id === playerId);
@@ -2832,8 +2842,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       console.error(`[Main] Server error [${code}]: ${message}`);
       if (!code.startsWith('RECONNECT_')) showLoadingError(message);
       if (statusEl) {
-        statusEl.textContent = `🔴 Error: ${message}`;
+        statusEl.textContent = `Error: ${message}`;
         statusEl.classList.add('error');
+        statusEl.classList.remove('connected');
       }
     },
 
@@ -2915,8 +2926,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       reconnectOverlay?.update(state);
       if (state.status === 'connected') {
         if (statusEl) {
-          statusEl.textContent = '🟢 Connected';
+          statusEl.textContent = 'Connected';
           statusEl.classList.add('connected');
+          statusEl.classList.remove('error');
         }
         return;
       }
@@ -2931,8 +2943,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       if (interactPrompt) interactPrompt.visible = false;
       if (statusEl) {
         statusEl.textContent =
-          state.status === 'failed' ? '🔴 Disconnected' : '🟠 Reconnecting';
+          state.status === 'failed' ? 'Disconnected' : 'Reconnecting…';
         statusEl.classList.remove('connected');
+        statusEl.classList.toggle('error', state.status === 'failed');
       }
     },
   });
@@ -3208,6 +3221,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   gameMenuHud = new GameMenuHud(INTERNAL_WIDTH, INTERNAL_HEIGHT, {
     onVisibilityChange: (visible) => {
       gameMenuOpen = visible;
+      if (!visible && debugUi) setAdminPanelOpen(debugUi, false);
       gameMenuToggle?.setAttribute('aria-expanded', String(visible));
       resetAllInput();
       if (visible) {
@@ -3216,8 +3230,17 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
       syncLocalInputAvailability();
     },
+    onOpenAdminPanel: () => {
+      if (!isAdminSession || !debugUi) return;
+      if (latestServerState) {
+        updateDebugUI(debugUi, latestServerState, net.playerId, true);
+      }
+      setAdminPanelOpen(debugUi, true);
+      debugUi.closeButton.focus();
+    },
     onExitMatch: returnToMainMenu,
   });
+  gameMenuHud.setAdminAvailable(isAdminSession);
   gameMenuHud.addToStage(app.stage);
 
   setGameMenuAvailable = (available) => {
@@ -3890,6 +3913,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       latestServerState?.match.status === 'running'
     ) {
       e.preventDefault();
+      if (debugUi && !debugUi.panel.hidden) {
+        if (!e.repeat) setAdminPanelOpen(debugUi, false);
+        return;
+      }
       if (!e.repeat) gameMenuHud?.handleEscape();
       return;
     }

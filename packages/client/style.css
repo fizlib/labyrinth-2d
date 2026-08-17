@@ -805,6 +805,7 @@ body {
   font-weight: 600;
   letter-spacing: -0.015em;
   text-shadow: none;
+  text-decoration: none;
 }
 
 .app-panel--menu .menu-actions .pixel-button:hover:not(:disabled) {
@@ -2440,20 +2441,6 @@ body {
   display: block;
 }
 
-/* Keep the debug panel's expand/collapse control left of the game HUD buttons. */
-body:has(#fullscreen-toggle:not([hidden])) #debug-ui {
-  top: var(--fullscreen-toggle-top);
-  right: calc(
-    var(--fullscreen-toggle-right) + var(--fullscreen-toggle-size) + 8px
-  );
-}
-
-body:has(#game-menu-toggle:not([hidden])) #debug-ui {
-  right: calc(
-    var(--fullscreen-toggle-right) + var(--fullscreen-toggle-size) * 2 + 16px
-  );
-}
-
 .fullscreen-help {
   position: fixed;
   inset: 0;
@@ -2901,166 +2888,7 @@ canvas {
   visibility: hidden;
 }
 
-/* ── Debug UI — overlay on top of the canvas ───────────────────────────── */
-
-#debug-ui {
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  width: 320px;
-  padding: 16px;
-  background: rgba(14, 14, 26, 0.92);
-  border: 1px solid #2a2a4a;
-  border-radius: 10px;
-  box-shadow:
-    0 0 30px rgba(106, 90, 205, 0.15),
-    0 0 60px rgba(106, 90, 205, 0.05);
-  z-index: 1000;
-  pointer-events: none;
-  /* Don't block game interaction */
-  font-size: 0.8rem;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-#debug-ui.minimized {
-  width: auto;
-  min-width: 240px;
-  padding: 10px 14px;
-}
-
-#debug-ui.minimized .debug-content {
-  display: none;
-}
-
-#debug-ui .debug-content {
-  max-height: calc(100vh - 90px);
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-#debug-ui .debug-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-#debug-ui.minimized .debug-header {
-  margin-bottom: 0;
-}
-
-#debug-ui h1 {
-  font-size: 0.95rem;
-  color: #f0e68c;
-  margin-bottom: 0;
-  text-align: left;
-  letter-spacing: 1px;
-  flex-grow: 1;
-}
-
-#debug-minimize-btn {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid #2a2a4a;
-  color: #7f8fa6;
-  border-radius: 4px;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 16px;
-  line-height: 1;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: auto;
-  margin-left: 12px;
-}
-
-#debug-minimize-btn:hover {
-  background: rgba(106, 90, 205, 0.2);
-  color: #ffffff;
-  border-color: #6a5acd;
-  box-shadow: 0 0 10px rgba(106, 90, 205, 0.3);
-  transform: scale(1.05);
-}
-
-#debug-minimize-btn:active {
-  transform: scale(0.95);
-}
-
-#debug-ui h2 {
-  font-size: 0.75rem;
-  color: #7f8fa6;
-  margin-top: 14px;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-}
-
-/* ── Connection Status ─────────────────────────────────────────────────── */
-
-.status {
-  text-align: center;
-  font-size: 0.78rem;
-  padding: 6px 10px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.04);
-  margin-bottom: 12px;
-  color: #f5a623;
-  transition: all 0.3s ease;
-}
-
-.status.connected {
-  color: #2ecc71;
-  background: rgba(46, 204, 113, 0.08);
-}
-
-.status.error {
-  color: #e74c3c;
-  background: rgba(231, 76, 60, 0.08);
-}
-
-/* ── Stat Cards ────────────────────────────────────────────────────────── */
-
-.stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 8px;
-}
-
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 4px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid #2a2a4a;
-  border-radius: 6px;
-}
-
-.stat-label {
-  font-size: 0.55rem;
-  color: #7f8fa6;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 4px;
-}
-
-.stat-value {
-  font-size: 0.85rem;
-  color: #dfe6e9;
-  font-weight: bold;
-  word-break: break-all;
-  text-align: center;
-}
-
-#tick-counter {
-  color: #74b9ff;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Match Timer Debug Control ────────────────────────────────────────── */
+/* ── Admin panel controls ─────────────────────────────────────────────── */
 
 .debug-match-timer {
   display: grid;
@@ -3300,27 +3128,6 @@ canvas {
   opacity: 0.6;
 }
 
-/* ── Debug Settings Toggles ────────────────────────────────────────────── */
-
-.debug-editor-link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 9px 12px;
-  color: #f2f7e8;
-  background: linear-gradient(180deg, #3d704d, #264c34);
-  border: 1px solid #70a36e;
-  border-radius: 5px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.debug-editor-link:hover {
-  background: linear-gradient(180deg, #4b865d, #315f40);
-}
-
 .debug-toggles {
   display: flex;
   flex-direction: column;
@@ -3379,14 +3186,360 @@ canvas {
   user-select: none;
 }
 
-/* Master toggle gets a subtle accent */
-#toggle-master {
-  border-color: #4a3a6a;
+/* ── In-game admin panel ──────────────────────────────────────────────── */
+
+#admin-ui {
+  font-family: 'PixelOperator8', 'Courier New', Courier, monospace;
 }
 
-#toggle-master span {
-  color: #f0e68c;
-  font-weight: bold;
+.admin-panel {
+  position: fixed;
+  z-index: 5000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding:
+    max(18px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
+  background: rgba(5, 7, 10, 0.72);
+  pointer-events: auto;
+}
+
+.admin-panel__window {
+  display: flex;
+  width: min(700px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  padding: 18px 20px 20px;
+  border: 4px solid #b16d39;
+  outline: 2px solid #5c341d;
+  background: rgba(17, 26, 32, 0.98);
+  box-shadow:
+    5px 5px 0 rgba(0, 0, 0, 0.7),
+    inset 0 0 0 2px #313d40;
+  color: #d6cfbd;
+  text-shadow: 2px 2px 0 #000;
+}
+
+.admin-panel__header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+}
+
+.admin-panel__header h1 {
+  grid-column: 2;
+  color: #fff5cf;
+  font-size: 1.15rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.admin-panel__back {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.admin-panel__back,
+#admin-ui .debug-match-timer button,
+#admin-ui .debug-player-action-grid > button {
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 2px solid #907a55;
+  border-radius: 0;
+  background: #1b2830;
+  color: #fff5cf;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  text-shadow: 1px 1px 0 #000;
+}
+
+.admin-panel__back:hover,
+#admin-ui .debug-match-timer button:hover:not(:disabled),
+#admin-ui .debug-player-action-grid > button:hover:not(:disabled) {
+  border-color: #d0b16e;
+  background: #263640;
+}
+
+.admin-panel__back:active,
+#admin-ui .debug-match-timer button:active:not(:disabled),
+#admin-ui .debug-player-action-grid > button:active:not(:disabled) {
+  box-shadow: none;
+  transform: translate(2px, 2px);
+}
+
+.admin-panel__back:focus-visible,
+#admin-ui button:focus-visible,
+#admin-ui input:focus-visible,
+#admin-ui select:focus-visible {
+  outline: 2px solid #d0b16e;
+  outline-offset: 2px;
+}
+
+.admin-panel__divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 10px;
+  color: #8a704e;
+  font-size: 0.65rem;
+}
+
+.admin-panel__divider::before,
+.admin-panel__divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, #66533c);
+}
+
+.admin-panel__divider::after {
+  background: linear-gradient(90deg, #66533c, transparent);
+}
+
+.admin-connection-status {
+  align-self: center;
+  margin-bottom: 12px;
+  color: #d0b16e;
+  font-size: 0.7rem;
+}
+
+.admin-connection-status.connected {
+  color: #86ce78;
+}
+
+.admin-connection-status.error {
+  color: #ef715c;
+}
+
+.admin-panel__content {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(210px, 0.8fr) minmax(280px, 1.2fr);
+  gap: 18px;
+  overflow: auto;
+  scrollbar-color: #907a55 #111a20;
+}
+
+.admin-panel__section {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #4c514b;
+  background: rgba(8, 13, 16, 0.48);
+}
+
+#admin-ui .admin-panel__section h2 {
+  margin: 0 0 10px;
+  color: #d0b16e;
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#admin-ui #admin-settings-heading {
+  margin-top: 20px;
+}
+
+#admin-ui .debug-match-timer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 6px;
+}
+
+#admin-ui .debug-match-timer label {
+  color: #9ba7a2;
+  font-size: 0.62rem;
+}
+
+#admin-ui .debug-match-timer input,
+#admin-ui .debug-player-select-control select {
+  min-height: 32px;
+  border: 1px solid #66533c;
+  border-radius: 0;
+  background: #111a20;
+  color: #fff5cf;
+  font-family: inherit;
+  font-size: 0.72rem;
+}
+
+#admin-ui .debug-match-timer input {
+  padding: 5px 7px;
+}
+
+#admin-ui .debug-time-separator {
+  padding-bottom: 7px;
+  color: #907a55;
+}
+
+#admin-ui #player-list {
+  max-height: 150px;
+  overflow-y: auto;
+  scrollbar-color: #907a55 #111a20;
+}
+
+#admin-ui #player-list li {
+  margin-bottom: 4px;
+}
+
+#admin-ui .debug-player-row {
+  padding: 7px 8px;
+  border: 1px solid #4c514b;
+  border-radius: 0;
+  background: #111a20;
+  color: #d6cfbd;
+  font-family: inherit;
+  font-size: 0.68rem;
+  text-shadow: 1px 1px 0 #000;
+}
+
+#admin-ui .debug-player-row:hover,
+#admin-ui .debug-player-row.selected {
+  border-color: #d0b16e;
+  background: #263640;
+}
+
+#admin-ui .player-name,
+#admin-ui .debug-player-actions-header strong {
+  color: #fff5cf;
+}
+
+#admin-ui .player-pos,
+#admin-ui .debug-player-actions-header span {
+  color: #9ba7a2;
+}
+
+#admin-ui .you-badge {
+  color: #d0b16e;
+}
+
+#admin-ui .debug-player-actions {
+  padding: 10px;
+  border: 1px solid #80694a;
+  border-radius: 0;
+  background: #172229;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+}
+
+#admin-ui #debug-player-actions-close {
+  border: 1px solid #66533c;
+  border-radius: 0;
+  background: #111a20;
+  color: #d6cfbd;
+}
+
+#admin-ui .debug-player-action-grid > button,
+#admin-ui .debug-player-select-control select {
+  font-size: 0.62rem;
+}
+
+#admin-ui .debug-player-action-grid > button.danger {
+  border-color: #a44c42;
+  color: #ff9686;
+}
+
+#admin-ui .debug-player-action-grid > button.danger.revive {
+  border-color: #56834d;
+  color: #9fe094;
+}
+
+#admin-ui .debug-player-select-control {
+  color: #9ba7a2;
+}
+
+#admin-ui .debug-player-select-control select {
+  padding: 5px 7px;
+}
+
+#admin-ui .debug-toggles {
+  gap: 6px;
+}
+
+#admin-ui .debug-toggle {
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid #4c514b;
+  border-radius: 0;
+  background: #111a20;
+  color: #d6cfbd;
+  font-size: 0.68rem;
+}
+
+#admin-ui .debug-toggle:hover {
+  border-color: #907a55;
+  background: #172229;
+}
+
+#admin-ui .debug-toggle input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  border: 1px solid #907a55;
+  border-radius: 0;
+  background: #080d10;
+}
+
+#admin-ui .debug-toggle input[type='checkbox']:checked {
+  border-color: #d0b16e;
+  background: #907a55;
+}
+
+#admin-ui .debug-toggle input[type='checkbox']:checked::after {
+  top: -2px;
+  left: 2px;
+  color: #fff5cf;
+  font-size: 0.68rem;
+}
+
+#toggle-debug-tools {
+  border-color: #80694a !important;
+}
+
+#toggle-debug-tools span {
+  color: #fff5cf;
+}
+
+.debug-stats-hud {
+  position: fixed;
+  z-index: 3000;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  display: flex;
+  gap: 12px;
+  padding: 7px 9px;
+  border: 2px solid #907a55;
+  background: rgba(17, 26, 32, 0.9);
+  color: #b8c1bd;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.65);
+  font-size: 0.65rem;
+  line-height: 1;
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+
+.debug-stats-hud strong {
+  color: #fff5cf;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 660px) {
+  .admin-panel__window {
+    padding: 14px;
+  }
+
+  .admin-panel__content {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-stats-hud {
+    flex-direction: column;
+    gap: 5px;
+  }
 }
 
 /* Mobile touch controls */

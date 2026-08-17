@@ -1,49 +1,26 @@
 // packages/client/src/config/DebugSettings.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Centralized debug feature flags. Flip the master switch or individual
-// toggles to enable/disable debug-only features at runtime.
+// Centralized admin-only debug settings. The three direct manipulation tools
+// intentionally share one switch so an administrator cannot end up with a
+// partially enabled toolset.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'labyrinth-debug-settings';
-const MOBILE_POINTER_QUERY = '(hover: none) and (pointer: coarse)';
-
-function hasDebugOverride(): boolean {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('debug') === '1';
-}
-
-function isCoarsePointerDevice(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return false;
-  }
-  return window.matchMedia(MOBILE_POINTER_QUERY).matches;
-}
-
-const SESSION_DEBUG_ENABLED = hasDebugOverride() || (import.meta.env.DEV && !isCoarsePointerDevice());
 let adminAccess = false;
 
 export interface DebugFlags {
-  /** Master switch — when false, ALL debug features are disabled. */
-  masterEnabled: boolean;
-  /** Scroll-wheel zoom in/out */
-  scrollZoom: boolean;
-  /** Minus-key zoom toggle (zoom-out → zoom-in cycle) */
-  zoomToggle: boolean;
-  /** Click anywhere on the map to teleport the local player there */
-  clickTeleport: boolean;
+  /** Scroll zoom, minus-key zoom toggling, and click teleport. */
+  debugToolsEnabled: boolean;
   /** Draw the logical maze-cell boundaries over the world. */
   cellBoundaries: boolean;
-  /** Whether the network debug window is minimized */
-  minimized: boolean;
+  /** Show Tick, Pending, and Snaps in the top-left gameplay HUD. */
+  showNetworkStats: boolean;
 }
 
 const DEFAULTS: DebugFlags = {
-  masterEnabled: SESSION_DEBUG_ENABLED,
-  scrollZoom: SESSION_DEBUG_ENABLED,
-  zoomToggle: SESSION_DEBUG_ENABLED,
-  clickTeleport: SESSION_DEBUG_ENABLED,
+  debugToolsEnabled: true,
   cellBoundaries: false,
-  minimized: false,
+  showNetworkStats: false,
 };
 
 /** Load persisted settings from localStorage, falling back to defaults. */
@@ -51,8 +28,15 @@ function load(): DebugFlags {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<DebugFlags>;
-      return { ...DEFAULTS, ...parsed };
+      const parsed = JSON.parse(raw) as Partial<DebugFlags> & {
+        masterEnabled?: boolean;
+      };
+      return {
+        debugToolsEnabled:
+          parsed.debugToolsEnabled ?? parsed.masterEnabled ?? DEFAULTS.debugToolsEnabled,
+        cellBoundaries: parsed.cellBoundaries ?? DEFAULTS.cellBoundaries,
+        showNetworkStats: parsed.showNetworkStats ?? DEFAULTS.showNetworkStats,
+      };
     }
   } catch {
     /* ignore corrupt data */
@@ -84,21 +68,14 @@ export const DebugSettings = {
     return adminAccess;
   },
 
-  /** Check if a specific debug feature is currently active. */
-  isEnabled(feature: keyof Omit<DebugFlags, 'masterEnabled'>): boolean {
-    return adminAccess && flags.masterEnabled && flags[feature];
-  },
-
-  /** Check if the master debug switch is on. */
-  get masterEnabled(): boolean {
-    return adminAccess && flags.masterEnabled;
-  },
-
-  /** Toggle the master debug switch. */
-  setMasterEnabled(value: boolean): void {
-    if (!adminAccess) return;
-    flags.masterEnabled = value;
-    save(flags);
+  /** Check if a debug feature is currently active. */
+  isEnabled(
+    feature: 'scrollZoom' | 'zoomToggle' | 'clickTeleport' | 'cellBoundaries',
+  ): boolean {
+    if (!adminAccess) return false;
+    return feature === 'cellBoundaries'
+      ? flags.cellBoundaries
+      : flags.debugToolsEnabled;
   },
 
   /** Toggle an individual feature flag. */

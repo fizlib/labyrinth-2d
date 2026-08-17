@@ -508,8 +508,8 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
 - Sword-field clear: survivors use the wisdom-orb controls while `[ Q ]` is visible; wardens use `E` or the mobile `E` button while their red `[ E ]` is visible
 - Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.
-- Debug-only tools can enable scroll zoom, zoom toggling, and click teleport. The debug panel can also replace the authoritative running-match timer using minute/second inputs; setting it to zero immediately resolves a Warden timeout win.
-- The debug player menu privately fetches a selected player's current role and can authoritatively change it. The server updates that seat and privately rebuilds the affected player's role-specific HUD and inventory.
+- Server-verified admins can open the in-game admin panel from the game menu. One default-on setting enables scroll zoom, zoom toggling, and click teleport together; separate settings control cell boundaries and an optional top-left Tick/Pending/Snaps HUD. The panel can also replace the authoritative running-match timer using minute/second inputs; setting it to zero immediately resolves a Warden timeout win.
+- The admin player menu privately fetches a selected player's current role and can authoritatively change it. The server updates that seat and privately rebuilds the affected player's role-specific HUD and inventory.
 
 ## Monorepo Structure
 
