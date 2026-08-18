@@ -79,7 +79,7 @@ import {
   type TimestampedSnapshot,
 } from './net/SnapshotBuffer';
 import { MovementInputScheduler } from './net/MovementInputScheduler';
-import { loadAssets, type GameAssets } from './assets/AssetLoader';
+import { loadAssets, preloadAssets, type GameAssets } from './assets/AssetLoader';
 import { DebugSettings } from './config/DebugSettings';
 import { Minimap } from './systems/Minimap';
 import { TilemapRenderer } from './systems/TilemapRenderer';
@@ -4756,6 +4756,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   );
   console.info(`  Display name: ${displayName}`);
   console.info('─────────────────────────────────────────────────');
+}
+
+/** Warm runtime textures while the player is still on the lightweight menu. */
+export function preloadGameAssets(): Promise<void> {
+  return preloadAssets();
 }
 
 export async function startGame(options: GameLaunchOptions): Promise<void> {

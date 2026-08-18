@@ -40,6 +40,28 @@ const DEPLOYMENT_RELOAD_STORAGE_KEY = 'labyrinth-deployment-reload-at';
 const DEPLOYMENT_RELOAD_COOLDOWN_MS = 60_000;
 
 let deploymentReloadScheduled = false;
+let gameModulePromise: Promise<typeof import('./game')> | null = null;
+let gameWarmupScheduled = false;
+
+function loadGameModule(): Promise<typeof import('./game')> {
+  gameModulePromise ??= import('./game');
+  return gameModulePromise;
+}
+
+function scheduleGameWarmup(): void {
+  if (gameWarmupScheduled) return;
+  gameWarmupScheduled = true;
+
+  window.setTimeout(() => {
+    void loadGameModule()
+      .then((gameModule) => gameModule.preloadGameAssets())
+      .catch((error: unknown) => {
+        // launchGame owns the user-facing recovery flow if the cached import
+        // also fails when the player actually starts a game.
+        console.warn('[App] Game warmup did not finish', error);
+      });
+  }, 250);
+}
 
 type AppView =
   | 'restoring'
@@ -793,6 +815,8 @@ class AppController {
         void this.signOut();
       });
 
+    scheduleGameWarmup();
+
     if (playAgain) {
       window.setTimeout(() => void this.launchGame('quick'), 0);
     }
@@ -1020,7 +1044,7 @@ class AppController {
 
     let gameModule: typeof import('./game');
     try {
-      gameModule = await import('./game');
+      gameModule = await loadGameModule();
       clearDeploymentReloadAttempt();
     } catch (error) {
       console.error('[App] Failed to load the game module:', error);

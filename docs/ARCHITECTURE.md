@@ -381,9 +381,13 @@ The client first runs a lightweight DOM app shell with these states:
 4. load or create the signed-in user's `public.profiles` row and require a new
    account to choose its display name once;
 5. show Main Menu, Join by Code, or Profile;
-6. dynamically import PixiJS after Quick Play, Create Private Game, or Join Room is selected;
-7. start runtime-asset loading and the authoritative waiting-room connection in
-   parallel, showing the DOM lobby overlay as soon as admission succeeds; and
+6. after Main Menu renders, lazily import PixiJS and prime the runtime texture
+   cache during idle menu time; all small authored texture requests begin as one
+   batch so a cold cache does not create a category-by-category waterfall;
+7. after Quick Play, Create Private Game, or Join Room is selected, initialize
+   the Pixi application and start the authoritative waiting-room connection,
+   reusing any warmed assets and showing the DOM lobby overlay as soon as
+   admission succeeds; and
 8. show **Game is starting…** for every player when the server locks the roster,
    build the maze after `ROOM_JOINED`, send `GAME_READY`, and keep the loading
    screen visible until the server releases the fully ready roster with
@@ -397,11 +401,13 @@ Authenticated profiles persist completion in `display_name_chosen`; migrations
 mark pre-existing profiles complete, while newly created profiles receive an
 empty naming form before the menu or an invited lobby can open.
 
-Auth, Main Menu, Profile, and Join by Code do not initialize Pixi, load runtime
-game assets, construct `NetworkManager`, or open a WebSocket. The selected
-Quick Play/private-room connection begins inside `startGame()` and uses the
-profile display name. Asset progress continues in the background while the
-player can vote, chat, and inspect the lobby. If a countdown completes first,
+Auth and display-name screens retain the lightweight DOM-only path. After Main
+Menu first renders, a delayed warmup imports the game module and starts the
+aggregate runtime asset request, but it does not create a Pixi application or
+canvas, construct `NetworkManager`, or open a WebSocket. The selected Quick
+Play/private-room connection begins inside `startGame()` and uses the profile
+display name. Any remaining asset progress continues in the background while
+the player can vote, chat, and inspect the lobby. If a countdown completes first,
 the client restores the loading screen, retains the latest authoritative match
 snapshot and match events, and applies them after asset loading finishes. It
 does not expose the maze or begin local input until every client is ready and

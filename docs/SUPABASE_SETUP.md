@@ -152,9 +152,11 @@ profile counters to update.
    Main Menu without prompting again.
 5. Edit the display name and an optional HTTPS avatar URL, then reload to
    confirm persistence.
-6. Select Join Game and confirm it only shows the lobby placeholder.
-7. Select Create Game and confirm this is the first point at which PixiJS loads
-   and the `/ws` connection opens.
+6. Select Join Game and confirm it only shows the join-by-code form. The menu may
+   warm PixiJS and runtime assets in the background, but it must not create a
+   canvas or open a WebSocket.
+7. Select Create Game and confirm this is the first point at which the Pixi
+   application creates its canvas and the `/ws` connection opens.
 8. Sign out from Main Menu and confirm the Auth screen returns.
 9. Continue as a guest, choose a display name, and confirm no Supabase profile
    is created. Edit the guest profile, reload the tab to confirm it is restored,
