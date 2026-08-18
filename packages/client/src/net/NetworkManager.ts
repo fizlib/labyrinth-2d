@@ -14,6 +14,7 @@ import {
   type LobbyChatMessageKind,
   type MatchResultPlayer,
   type PlayerRole,
+  type TrapActivationFailureReason,
   type WisdomOrbHint,
   type JoinRoomMessage,
   type ReconnectRoomMessage,
@@ -97,7 +98,12 @@ export interface NetworkCallbacks {
   onPlayerRoleChanged: (role: PlayerRole, wisdomOrbs: number) => void;
   onDebugPlayerRole: (playerId: string, role: PlayerRole) => void;
   onGateStateChanged: (gateIndex: number, open: boolean) => void;
-  onTrapActivationResult: (trapCellIndex: number, capturedCount: number) => void;
+  onTrapActivationResult: (
+    trapCellIndex: number,
+    capturedCount: number,
+    failureReason: TrapActivationFailureReason | null,
+  ) => void;
+  onPlayerTrapped: (cageId: number) => void;
   onChatMessage: (
     playerId: string,
     displayName: string,
@@ -505,7 +511,15 @@ export class NetworkManager {
         break;
 
       case MessageType.TrapActivationResult:
-        this.callbacks.onTrapActivationResult(msg.trapCellIndex, msg.capturedCount);
+        this.callbacks.onTrapActivationResult(
+          msg.trapCellIndex,
+          msg.capturedCount,
+          msg.failureReason,
+        );
+        break;
+
+      case MessageType.PlayerTrapped:
+        this.callbacks.onPlayerTrapped(msg.cageId);
         break;
 
       case MessageType.ChatMessage:

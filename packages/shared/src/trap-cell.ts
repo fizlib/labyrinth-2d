@@ -3,6 +3,9 @@ import { CELL_SIZE, type TrapCellPlacement } from './maps/level1.js';
 /** Distance outside a 6x6 trap-cell edge at which a warden may activate it. */
 export const TRAP_CELL_INTERACTION_RANGE = 20;
 
+/** Grace period after a cage opens during which its trap cell cannot capture anyone. */
+export const TRAP_CELL_RELEASE_COOLDOWN_MS = 10_000;
+
 export interface TrapCellWorldBounds {
   left: number;
   top: number;

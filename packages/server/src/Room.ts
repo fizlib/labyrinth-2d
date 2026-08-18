@@ -55,6 +55,7 @@ import {
   findSwordFieldWisdomTarget,
   findTrapCellInteractionTarget,
   isPlayerInTrapCell,
+  TRAP_CELL_RELEASE_COOLDOWN_MS,
   findActivePlayerCage,
   findOpenableCage,
   getCageSeparationPositions,
@@ -154,6 +155,7 @@ import {
   type DebugPlayerRoleMessage,
   type GateStateChangedMessage,
   type TrapActivationResultMessage,
+  type PlayerTrappedMessage,
   type ChatMessage,
   type PlayerEscapedMessage,
   type MatchEndedMessage,
@@ -529,6 +531,9 @@ export class Room {
 
   private nextCageId = 0;
 
+  /** Per-cell grace deadlines started when a prisoner is released. */
+  private readonly trapCellCooldownEndsAtMs: number[];
+
   /** Shared, server-authoritative missing-stone masks. */
   private readonly bridgeStates: BridgeState[];
 
@@ -595,6 +600,7 @@ export class Room {
     this.swordFields = layout.swordFields;
     this.spikeGateObstacles = layout.spikeGateObstacles;
     this.trapCells = layout.trapCells;
+    this.trapCellCooldownEndsAtMs = new Array(this.trapCells.length).fill(0);
     this.tIntersectionDecorations = layout.tIntersectionDecorations;
     this.decoratedVerticalPassages = layout.decoratedVerticalPassages;
     this.swordFieldStates = this.swordFields.map((_, swordFieldIndex) => ({
@@ -2087,15 +2093,22 @@ export class Room {
     );
     if (!nearby) return;
 
+    const now = Date.now();
     let capturedCount = 0;
+    let cooldownBlockedCount = 0;
     const spawnedCages: CageState[] = [];
     for (const survivor of this.state.players) {
       if (survivor.role !== 'survivor' || !survivor.connected) continue;
       if (findActivePlayerCage(this.cageStates, survivor.id)) continue;
-      const occupiedTrapCell = this.trapCells.find((trapCell) =>
+      const occupiedTrapCellIndex = this.trapCells.findIndex((trapCell) =>
         isPlayerInTrapCell(trapCell, survivor.x, survivor.y, this.map.tileSize),
       );
-      if (!occupiedTrapCell) continue;
+      if (occupiedTrapCellIndex < 0) continue;
+      if (this.trapCellCooldownEndsAtMs[occupiedTrapCellIndex] > now) {
+        cooldownBlockedCount++;
+        continue;
+      }
+      const occupiedTrapCell = this.trapCells[occupiedTrapCellIndex];
 
       // Re-capturing the same survivor in the same trap cell replaces their
       // vacated cage instead of accumulating permanent duplicate colliders.
@@ -2128,6 +2141,15 @@ export class Room {
       this.cageStates.push(cage);
       spawnedCages.push(cage);
       capturedCount++;
+
+      const prisonerSocket = this.sockets.get(survivor.id);
+      if (prisonerSocket) {
+        const trappedMessage: PlayerTrappedMessage = {
+          type: MessageType.PlayerTrapped,
+          cageId: cage.cageId,
+        };
+        this.send(prisonerSocket, trappedMessage);
+      }
     }
 
     if (spawnedCages.length > 0) {
@@ -2140,6 +2162,12 @@ export class Room {
         type: MessageType.TrapActivationResult,
         trapCellIndex: msg.trapCellIndex,
         capturedCount,
+        failureReason:
+          capturedCount > 0
+            ? null
+            : cooldownBlockedCount > 0
+              ? 'release-cooldown'
+              : 'no-survivors',
       };
       this.send(requesterSocket, result);
     }
@@ -2214,6 +2242,13 @@ export class Room {
     if (!findOpenableCage([cage], playerId, player.x, player.y)) return;
 
     cage.opened = true;
+    const trapCellIndex = this.trapCells.findIndex((trapCell) =>
+      isPlayerInTrapCell(trapCell, cage.x, cage.y, this.map.tileSize),
+    );
+    if (trapCellIndex >= 0) {
+      this.trapCellCooldownEndsAtMs[trapCellIndex] =
+        Date.now() + TRAP_CELL_RELEASE_COOLDOWN_MS;
+    }
     console.info(
       `[Room:${this.id}] Player ${playerId} opened cage ${cage.cageId} for ${cage.prisonerPlayerId}`,
     );

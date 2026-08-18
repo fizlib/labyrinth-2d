@@ -131,9 +131,12 @@ Traps and other hazards can delay or temporarily imprison players, but they do n
 - Every room deterministically places 6-10 trap cells on otherwise empty 6x6 maze cells. They avoid all spawns, the hub, gates, solid authored obstacles, treasure cells, and the portal platform, but may share cells with visual T-junction decorations.
 - Wardens see trap cells as translucent red floor regions in the world and as red cells on both versions of their minimap. Survivors do not see either indicator.
 - A warden inside or within 20 pixels of a trap cell sees a red `[ E ]` above their head. Keyboard/mobile `E`, or clicking the prompt, asks the server to activate that nearby cell.
-- One activation checks every trap cell simultaneously. Each uncaged survivor currently standing in any trap cell receives a cage at their exact position.
+- One activation checks every trap cell simultaneously. Each uncaged survivor currently standing in an available trap cell receives a cage at their exact position; wardens are never valid cage targets.
 - A closed cage completely immobilizes its survivor without freezing their character animation: movement input changes facing and plays the walk cycle in place. The visual uses `birdCage1` behind the character and `birdCage2` in front, with a short magical materialization effect.
+- A newly trapped survivor immediately receives a private bottom typewriter dialogue explaining that a Warden trapped them and another player must release them.
 - A different, non-imprisoned player within 28 pixels sees `[ E ]` and can open the gate, swapping the front art to `birdCage3`. The prisoner may then move only up or down until they clear the cage.
+- Opening a cage disables captures in that trap cell for 10 seconds, giving released survivors time to leave. Other trap cells remain active.
+- If an activation captures nobody, the Warden receives the same bottom dialogue used for their role introduction. The message distinguishes an empty trap network from a survivor protected by a cell's release cooldown.
 - Once vacated, the empty cage remains a permanent solid collider and cannot be entered again.
 - If the same survivor is trapped again in the same trap cell, their previous cage in that cell disappears as the new cage materializes. Cages belonging to other players or other cells remain in place.
 

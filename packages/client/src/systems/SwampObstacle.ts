@@ -38,19 +38,22 @@ export class SwampObstacleVisual {
     this.container.visible = false;
 
     for (const tile of getSwampFirmGroundTiles(swamp)) {
+      // Terrain extends south for player classification, but the revealed path
+      // keeps the original square tile footprint.
+      const visualSize = (AUTHORING_TILE_SIZE - 2) * scale;
       const graphic = new Graphics()
         .rect(
           (tile.x + 1) * scale,
           (tile.y + 1) * scale,
-          (tile.width - 2) * scale,
-          (tile.height - 2) * scale,
+          visualSize,
+          visualSize,
         )
         .fill({ color: 0xffd85c, alpha: 0.12 })
         .rect(
           (tile.x + 1) * scale,
           (tile.y + 1) * scale,
-          (tile.width - 2) * scale,
-          (tile.height - 2) * scale,
+          visualSize,
+          visualSize,
         )
         .stroke({ color: 0xffdd72, alpha: 0.68, width: Math.max(1, scale) });
       graphic.alpha = 0;

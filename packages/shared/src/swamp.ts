@@ -11,6 +11,8 @@ const SWAMP_AUTHORING_HEIGHT = 96;
 
 /** Deep mud moves at one eighth of normal speed; firm ground remains full speed. */
 export const SWAMP_SPEED_MULTIPLIER = 0.125;
+/** Authoring-space pixels hidden from the bottom of a player standing in deep mud. */
+export const SWAMP_DEEP_MUD_SUBMERGE_DEPTH = 6;
 
 export type SwampTerrain = 'dry' | 'firm-ground' | 'deep-mud';
 
@@ -237,11 +239,15 @@ export function getSwampTerrainAtAuthoringPoint(
   const widthTiles =
     getSwampAuthoringWidth(swamp.lengthCells) / SWAMP_AUTHORING_TILE_SIZE;
   const tileX = Math.floor(x / SWAMP_AUTHORING_TILE_SIZE);
-  const tileY = Math.floor(y / SWAMP_AUTHORING_TILE_SIZE);
   if (isFirmPathGap(swamp, tileX, widthTiles)) return 'deep-mud';
 
   return getFirmPathCoordinates(swamp).some(
-    (coordinate) => coordinate.tileX === tileX && coordinate.tileY === tileY,
+    (coordinate) =>
+      coordinate.tileX === tileX &&
+      y >= coordinate.tileY * SWAMP_AUTHORING_TILE_SIZE &&
+      y <
+        (coordinate.tileY + 1) * SWAMP_AUTHORING_TILE_SIZE +
+          SWAMP_DEEP_MUD_SUBMERGE_DEPTH,
   )
     ? 'firm-ground'
     : 'deep-mud';
@@ -270,7 +276,7 @@ export function getSwampFirmGroundTiles(
       x: coordinate.tileX * SWAMP_AUTHORING_TILE_SIZE,
       y: coordinate.tileY * SWAMP_AUTHORING_TILE_SIZE,
       width: SWAMP_AUTHORING_TILE_SIZE,
-      height: SWAMP_AUTHORING_TILE_SIZE,
+      height: SWAMP_AUTHORING_TILE_SIZE + SWAMP_DEEP_MUD_SUBMERGE_DEPTH,
     });
   }
 

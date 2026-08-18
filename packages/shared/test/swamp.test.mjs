@@ -8,6 +8,7 @@ import {
   MAX_SWAMP_LENGTH_CELLS,
   MIN_SWAMP_LENGTH_CELLS,
   PLAYER_SPEED,
+  SWAMP_DEEP_MUD_SUBMERGE_DEPTH,
   SWAMP_SPEED_MULTIPLIER,
   TILE_FLOOR,
   WALL_HEIGHT,
@@ -86,7 +87,7 @@ test('firm-ground reveal geometry follows the route and preserves mud gaps', () 
   );
   for (const tile of tiles) {
     assert.equal(tile.width, 16);
-    assert.equal(tile.height, 16);
+    assert.equal(tile.height, 16 + SWAMP_DEEP_MUD_SUBMERGE_DEPTH);
     assert.ok(
       Array.from({ length: tile.height }, (_, offset) => tile.y + offset).some(
         (sampleY) =>
@@ -96,6 +97,49 @@ test('firm-ground reveal geometry follows the route and preserves mud gaps', () 
       'every revealed route tile must overlap firm ground',
     );
   }
+
+  const southExtendedTile = tiles.find(
+    (tile) =>
+      !tiles.some(
+        (candidate) =>
+          candidate.tileX === tile.tileX && candidate.tileY === tile.tileY + 1,
+      ) &&
+      getSwampTerrainAtAuthoringPoint(
+        swamp,
+        tile.x + tile.width / 2,
+        tile.y + 16 + SWAMP_DEEP_MUD_SUBMERGE_DEPTH - 1,
+      ) !== 'dry',
+  );
+  assert.ok(southExtendedTile, 'the fixture needs a route tile above open swamp water');
+  assert.equal(
+    getSwampTerrainAtAuthoringPoint(
+      swamp,
+      southExtendedTile.x + southExtendedTile.width / 2,
+      southExtendedTile.y + 16 + SWAMP_DEEP_MUD_SUBMERGE_DEPTH - 1,
+    ),
+    'firm-ground',
+    'firm ground must continue south by the deep-mud player submerge depth',
+  );
+  assert.equal(
+    getPlayerSwampTerrain(
+      [swamp],
+      southExtendedTile.x + southExtendedTile.width / 2,
+      southExtendedTile.y + 16 + SWAMP_DEEP_MUD_SUBMERGE_DEPTH,
+      16,
+    ),
+    'firm-ground',
+    'the player must remain on firm ground while the clipped body overlaps the tile',
+  );
+  assert.equal(
+    getPlayerSwampTerrain(
+      [swamp],
+      southExtendedTile.x + southExtendedTile.width / 2,
+      southExtendedTile.y + 16 + SWAMP_DEEP_MUD_SUBMERGE_DEPTH + 1,
+      16,
+    ),
+    'deep-mud',
+    'the southern extension must end exactly at the clipped-body depth',
+  );
   for (let index = 1; index < tiles.length; index++) {
     const previous = tiles[index - 1];
     const tile = tiles[index];

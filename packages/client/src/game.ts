@@ -30,6 +30,7 @@ import {
   GRID_CELLS,
   SPAWN_DISTANCE,
   MAX_WISDOM_ORBS,
+  SWAMP_DEEP_MUD_SUBMERGE_DEPTH,
   CHEST_INTERACTION_RANGE,
   PRESSURE_PLATE_INTERACTION_RANGE,
   PLAYER_CHARACTER_NAMES,
@@ -113,6 +114,18 @@ function getWardstoneActivatedChatMessage(
 const WARDEN_SPAWN_DIALOGUE_PAGES = [
   "You're a <warden>warden</warden>. Keep your role hidden from the survivors.",
   'Your goal is to delay and misdirect the survivors until time runs out. Use your complete map to lead them into traps.',
+];
+
+const EMPTY_TRAP_DIALOGUE_PAGES = [
+  'There are no free survivors in this trap cell.',
+];
+
+const TRAP_RELEASE_COOLDOWN_DIALOGUE_PAGES = [
+  'You must wait 10 seconds before trapping someone in this trap cell again.',
+];
+
+const SURVIVOR_TRAPPED_DIALOGUE_PAGES = [
+  "You've been trapped by a <warden>Warden</warden>. Wait for another player to release you from the cage.",
 ];
 
 const SWORD_FIELD_WISDOM_REQUIRED_DIALOGUE_PAGES = [
@@ -1878,7 +1891,6 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
-  const PLAYER_DEEP_MUD_SUBMERGE_DEPTH = 6;
   const PLAYER_FIRM_GROUND_SUBMERGE_DEPTH = 3;
   const PLAYER_NAME_TAG_OFFSET_Y = 1;
   const PLAYER_NAME_TAG_SCALE = 0.125;
@@ -1957,7 +1969,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       .ellipse(0, -2, 7, 3)
       .fill({ color: 0x16220d, alpha: 0.55 });
     const swampMask = new Graphics()
-      .rect(-40, -64, 80, 64 - PLAYER_DEEP_MUD_SUBMERGE_DEPTH)
+      .rect(-40, -64, 80, 64 - SWAMP_DEEP_MUD_SUBMERGE_DEPTH)
       .fill({ color: 0xffffff });
     const container = new Container();
     container.addChild(shadow, sprite);
@@ -2046,7 +2058,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       const submergeDepth =
         terrain === 'firm-ground'
           ? PLAYER_FIRM_GROUND_SUBMERGE_DEPTH
-          : PLAYER_DEEP_MUD_SUBMERGE_DEPTH;
+          : SWAMP_DEEP_MUD_SUBMERGE_DEPTH;
       data.swampMask
         .clear()
         .rect(-40, -64, 80, 64 - submergeDepth)
@@ -3166,17 +3178,34 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
     },
 
-    onTrapActivationResult: (trapCellIndex, capturedCount) => {
+    onTrapActivationResult: (trapCellIndex, capturedCount, failureReason) => {
       if (
         deferMatchEvent(() =>
-          networkCallbacks.onTrapActivationResult(trapCellIndex, capturedCount),
+          networkCallbacks.onTrapActivationResult(
+            trapCellIndex,
+            capturedCount,
+            failureReason,
+          ),
         )
       )
         return;
       if (capturedCount > 0) return;
-      console.info(`[Main] Trap cell ${trapCellIndex} found no free survivors`);
+      console.info(
+        `[Main] Trap cell ${trapCellIndex} activation failed: ${failureReason}`,
+      );
       emptyTrapPromptShakeRemaining = EMPTY_TRAP_PROMPT_SHAKE_DURATION;
       emptyTrapPromptShakeElapsed = 0;
+      showDialoguePages(
+        failureReason === 'release-cooldown'
+          ? TRAP_RELEASE_COOLDOWN_DIALOGUE_PAGES
+          : EMPTY_TRAP_DIALOGUE_PAGES,
+      );
+    },
+
+    onPlayerTrapped: (cageId) => {
+      if (deferMatchEvent(() => networkCallbacks.onPlayerTrapped(cageId))) return;
+      console.info(`[Main] Local survivor trapped in cage ${cageId}`);
+      showDialoguePages(SURVIVOR_TRAPPED_DIALOGUE_PAGES);
     },
 
     onChatMessage: (playerId, displayName, teamId, text) => {

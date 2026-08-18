@@ -117,6 +117,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
 | `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
 | `TRAP_ACTIVATION_RESULT` | Private result used for the activating Warden's empty-room feedback |
+| `PLAYER_TRAPPED` | Private cage ID notification that opens the captured Survivor's instructional typewriter dialogue |
 | `CHAT_MESSAGE` | Transient message with the sender's public squad ID, delivered to players within 10 tiles at send time |
 | `PLAYER_ESCAPED` | Room-wide authoritative escape notification with portal coordinates and current victory progress |
 | `MATCH_ENDED` | Immutable survivor/warden result with final escape progress, remaining time, and the role-revealing final roster |
@@ -289,10 +290,11 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 
 - Each generated room deterministically selects 6-10 well-spaced, obstacle-free 6x6 maze cells after all other objective and obstacle placement. Trap cells never overlap the hub, team spawns, gates, bridges, swamps, sword fields, treasure cells, or the portal platform.
 - Only wardens render the translucent red in-world cell overlays and matching red minimap cells. A warden anywhere inside or just outside one sees a red `[ E ]` above their character.
-- Activating one nearby trap cell atomically checks the whole trap network and cages every uncaged survivor whose feet are currently inside any trap cell.
-- A valid activation that finds no uncaged survivors returns private feedback to the Warden and briefly shakes the red `[ E ]` prompt. If a newly materialized cage overlaps the activating Warden, the server moves them to the nearest collision-free side with a two-pixel gap.
+- Activating one nearby trap cell atomically checks the whole trap network and cages every uncaged survivor whose feet are currently inside an available trap cell. Wardens are excluded server-side.
+- A valid activation that captures nobody returns a private `no-survivors` or `release-cooldown` reason to the Warden. The client shows the reason in the bottom typewriter dialogue used by the role introduction and briefly shakes the red `[ E ]` prompt. If a newly materialized cage overlaps the activating Warden, the server moves them to the nearest collision-free side with a two-pixel gap.
 - Cage state is server-authoritative and replicated through normal snapshots. The client materializes the supplied six-piece 48x32 dark-grass base below all entities, the `birdCage1` back layer below the player, and the `birdCage2` closed front layer above the player, then swaps the front to `birdCage3` when another nearby outside player opens it.
-- The prisoner cannot open their own cage, and another imprisoned player does not count as outside. After the gate opens, the prisoner may leave north or south; once clear, that cage becomes an empty permanent collider.
+- Each captured survivor also receives an immediate private `PLAYER_TRAPPED` event so their client opens the bottom typewriter dialogue explaining that another player must release them.
+- The prisoner cannot open their own cage, and another imprisoned player does not count as outside. Opening the gate starts a server-authoritative 10-second capture cooldown for that trap cell without disabling other cells. The prisoner may leave north or south; once clear, that cage becomes an empty permanent collider.
 - If the same survivor is later captured again in the same trap cell, their previous cage in that cell disappears before the replacement cage materializes. Their cages in other trap cells and other players' cages are unaffected.
 
 ## Map System

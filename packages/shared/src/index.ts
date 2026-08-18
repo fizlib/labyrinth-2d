@@ -106,6 +106,7 @@ export {
 } from './bridge.js';
 
 export {
+  SWAMP_DEEP_MUD_SUBMERGE_DEPTH,
   SWAMP_SPEED_MULTIPLIER,
   findSwampWisdomHintTarget,
   getPlayerSwampTerrain,
@@ -190,6 +191,7 @@ export {
 
 export {
   TRAP_CELL_INTERACTION_RANGE,
+  TRAP_CELL_RELEASE_COOLDOWN_MS,
   getTrapCellWorldBounds,
   isPlayerInTrapCell,
   findTrapCellInteractionTarget,
@@ -440,6 +442,7 @@ export enum MessageType {
   DebugPlayerRole = 'DEBUG_PLAYER_ROLE',
   GateStateChanged = 'GATE_STATE_CHANGED',
   TrapActivationResult = 'TRAP_ACTIVATION_RESULT',
+  PlayerTrapped = 'PLAYER_TRAPPED',
   ChatMessage = 'CHAT_MESSAGE',
   PlayerEscaped = 'PLAYER_ESCAPED',
   MatchEnded = 'MATCH_ENDED',
@@ -800,11 +803,21 @@ export interface GateStateChangedMessage {
   open: boolean;
 }
 
+export type TrapActivationFailureReason = 'no-survivors' | 'release-cooldown';
+
 /** Private acknowledgement of one valid warden trap activation. */
 export interface TrapActivationResultMessage {
   type: MessageType.TrapActivationResult;
   trapCellIndex: number;
   capturedCount: number;
+  /** Present only when the activation did not capture anyone. */
+  failureReason: TrapActivationFailureReason | null;
+}
+
+/** Private notification sent to a survivor when a Warden cages them. */
+export interface PlayerTrappedMessage {
+  type: MessageType.PlayerTrapped;
+  cageId: number;
 }
 
 /** Transient server-authored chat event delivered only to nearby players. */
@@ -970,6 +983,7 @@ export type ServerToClientMessage =
   | DebugPlayerRoleMessage
   | GateStateChangedMessage
   | TrapActivationResultMessage
+  | PlayerTrappedMessage
   | ChatMessage
   | PlayerEscapedMessage
   | MatchEndedMessage
