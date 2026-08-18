@@ -689,11 +689,14 @@ export interface LobbyUpdatedMessage {
   lobby: LobbyState;
 }
 
+export type LobbyChatMessageKind = 'chat' | 'join' | 'leave';
+
 export interface LobbyChatMessage {
   type: MessageType.LobbyChatMessage;
   playerId: string;
   displayName: string;
   text: string;
+  kind: LobbyChatMessageKind;
   sentAt: number;
 }
 

@@ -11,6 +11,7 @@ import {
   MessageType,
   type GameState,
   type LobbyState,
+  type LobbyChatMessageKind,
   type MatchResultPlayer,
   type PlayerRole,
   type WisdomOrbHint,
@@ -71,6 +72,7 @@ export interface NetworkCallbacks {
     playerId: string,
     displayName: string,
     text: string,
+    kind: LobbyChatMessageKind,
     sentAt: number,
   ) => void;
   onLobbyKicked: (message: string) => void;
@@ -399,6 +401,7 @@ export class NetworkManager {
           msg.playerId,
           msg.displayName,
           msg.text,
+          msg.kind,
           msg.sentAt,
         );
         break;

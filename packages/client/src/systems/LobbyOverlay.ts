@@ -1,4 +1,8 @@
-import { CHAT_MAX_LENGTH, type LobbyState } from '@labyrinth/shared';
+import {
+  CHAT_MAX_LENGTH,
+  type LobbyChatMessageKind,
+  type LobbyState,
+} from '@labyrinth/shared';
 
 interface LobbyOverlayOptions {
   parent: HTMLElement;
@@ -16,6 +20,7 @@ interface LobbyChatEntry {
   playerId: string;
   displayName: string;
   text: string;
+  kind: LobbyChatMessageKind;
   sentAt: number;
 }
 
@@ -152,9 +157,15 @@ export class LobbyOverlay {
     if (this.messages.length > 30) this.messages.shift();
 
     const entry = document.createElement('p');
+    entry.className = 'lobby-chat__message';
+    if (message.kind === 'join' || message.kind === 'leave') {
+      entry.classList.add(
+        'lobby-chat__message--announcement',
+        `lobby-chat__message--${message.kind}`,
+      );
+    }
     const name = document.createElement('strong');
-    name.textContent =
-      message.playerId === this.localPlayerId ? 'You' : message.displayName;
+    name.textContent = message.displayName;
     const body = document.createElement('span');
     body.textContent = message.text;
     entry.append(name, body);

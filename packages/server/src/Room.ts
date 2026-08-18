@@ -139,6 +139,7 @@ import {
   type LobbyJoinedMessage,
   type LobbyUpdatedMessage,
   type LobbyChatMessage,
+  type LobbyChatMessageKind,
   type LobbyKickedMessage,
   type LobbyState,
   type LobbyStartReason,
@@ -760,6 +761,12 @@ export class Room {
 
     this.sendLobbyJoined(ws, playerId);
     this.broadcastLobbyState();
+    this.broadcastLobbyChatMessage(
+      playerId,
+      displayName,
+      'joined the lobby.',
+      'join',
+    );
 
     console.info(
       `[Room:${this.id}] Lobby player joined: ${displayName} (${playerId}) — ${this.playerCount} player(s)`,
@@ -884,6 +891,12 @@ export class Room {
     if (wasWaiting) {
       this.cancelLobbyCountdown();
       this.broadcastLobbyState();
+      this.broadcastLobbyChatMessage(
+        playerId,
+        seat.displayName,
+        'left the lobby.',
+        'leave',
+      );
     }
 
     if (this.state.match.status === 'running') {
@@ -1042,12 +1055,23 @@ export class Room {
     if (now - lastSentAt < CHAT_SEND_COOLDOWN_MS) return;
     this.lastChatSentAt.set(playerId, now);
 
+    this.broadcastLobbyChatMessage(playerId, sender.displayName, text, 'chat', now);
+  }
+
+  private broadcastLobbyChatMessage(
+    playerId: string,
+    displayName: string,
+    text: string,
+    kind: LobbyChatMessageKind = 'chat',
+    sentAt = Date.now(),
+  ): void {
     const chatMessage: LobbyChatMessage = {
       type: MessageType.LobbyChatMessage,
       playerId,
-      displayName: sender.displayName,
+      displayName,
       text,
-      sentAt: now,
+      kind,
+      sentAt,
     };
     this.broadcast(chatMessage);
   }

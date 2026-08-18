@@ -2187,13 +2187,43 @@ body {
   overflow-wrap: anywhere;
 }
 
+.lobby-chat__log p.lobby-chat__message--announcement {
+  margin-bottom: 9px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-weight: 400;
+  font-style: italic;
+}
+
 .lobby-chat__log strong {
   margin-right: 7px;
   color: #24883e;
 }
 
+.lobby-chat__log p.lobby-chat__message--announcement strong {
+  color: inherit;
+  font-weight: inherit;
+}
+
 .lobby-chat__log span {
   color: #30484d;
+}
+
+.lobby-chat__log p.lobby-chat__message--announcement span {
+  color: inherit;
+}
+
+.lobby-chat__log p.lobby-chat__message--join {
+  border-color: rgba(66, 143, 73, 0.46);
+  background: rgba(219, 241, 214, 0.44);
+  color: #347044;
+}
+
+.lobby-chat__log p.lobby-chat__message--leave {
+  border-color: rgba(168, 91, 79, 0.46);
+  background: rgba(244, 219, 207, 0.48);
+  color: #91564e;
 }
 
 .lobby-chat__form {

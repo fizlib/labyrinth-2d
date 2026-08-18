@@ -11,6 +11,62 @@ const BUTTON_SLOT_WIDTH = 28;
 // Adjusted scale to drastically reduce texture memory / bandwidth on mobile devices
 const TEXT_SCALE = 0.5;
 const TYPEWRITER_CHARS_PER_SECOND = 72;
+const ROLE_TAG_STYLES = {
+  survivor: { fill: '#70d486' },
+  warden: { fill: '#ef715c' },
+} as const;
+
+function getVisibleTextLength(markup: string): number {
+  return markup.replace(/<[^>]*>/g, '').length;
+}
+
+/** Return a typewriter-safe prefix while keeping any completed rich-text tags intact. */
+function getVisibleMarkupPrefix(markup: string, visibleCharacters: number): string {
+  if (visibleCharacters <= 0) return '';
+
+  let result = '';
+  let consumedCharacters = 0;
+  let index = 0;
+
+  while (index < markup.length) {
+    if (markup[index] === '<') {
+      const closeIndex = markup.indexOf('>', index);
+      if (closeIndex === -1) {
+        result += markup[index];
+        consumedCharacters += 1;
+        index += 1;
+        continue;
+      }
+
+      const tag = markup.slice(index, closeIndex + 1);
+      if (tag.startsWith('</')) {
+        if (consumedCharacters <= visibleCharacters) result += tag;
+      } else if (consumedCharacters < visibleCharacters) {
+        result += tag;
+      }
+      index = closeIndex + 1;
+      continue;
+    }
+
+    const nextTagIndex = markup.indexOf('<', index);
+    const textEnd = nextTagIndex === -1 ? markup.length : nextTagIndex;
+    const text = markup.slice(index, textEnd);
+    const remainingCharacters = visibleCharacters - consumedCharacters;
+    if (remainingCharacters <= 0) break;
+
+    if (text.length <= remainingCharacters) {
+      result += text;
+      consumedCharacters += text.length;
+      index = textEnd;
+      continue;
+    }
+
+    result += text.slice(0, remainingCharacters);
+    break;
+  }
+
+  return result;
+}
 
 export interface IntroDialogueExclusion {
   left: number;
@@ -58,6 +114,7 @@ export class IntroDialogueHud {
         wordWrap: true,
         wordWrapWidth: (PANEL_WIDTH - PANEL_PADDING_X * 2 - BUTTON_SLOT_WIDTH) / TEXT_SCALE,
         lineHeight: 18,
+        tagStyles: ROLE_TAG_STYLES,
         dropShadow: {
           alpha: 1,
           blur: 0,
@@ -94,7 +151,7 @@ export class IntroDialogueHud {
     if (!this.visible || this.isCurrentPageFullyRevealed()) return;
 
     this.revealedChars = Math.min(
-      this.getCurrentPage().length,
+      getVisibleTextLength(this.getCurrentPage()),
       this.revealedChars + TYPEWRITER_CHARS_PER_SECOND * dtSeconds,
     );
     this.updateDisplayedText();
@@ -201,11 +258,11 @@ export class IntroDialogueHud {
 
   private updateDisplayedText(): void {
     const currentPage = this.getCurrentPage();
-    this.messageText.text = currentPage.slice(0, Math.floor(this.revealedChars));
+    this.messageText.text = getVisibleMarkupPrefix(currentPage, Math.floor(this.revealedChars));
   }
 
   private revealCurrentPage(): void {
-    this.revealedChars = this.getCurrentPage().length;
+    this.revealedChars = getVisibleTextLength(this.getCurrentPage());
     this.updateDisplayedText();
   }
 
@@ -223,6 +280,6 @@ export class IntroDialogueHud {
   }
 
   private isCurrentPageFullyRevealed(): boolean {
-    return Math.floor(this.revealedChars) >= this.getCurrentPage().length;
+    return Math.floor(this.revealedChars) >= getVisibleTextLength(this.getCurrentPage());
   }
 }

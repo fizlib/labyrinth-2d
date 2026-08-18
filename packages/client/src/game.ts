@@ -92,7 +92,7 @@ import { ReconnectOverlay } from './systems/ReconnectOverlay';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
-  'You have been cast into the Maze. Scattered and alone, find your way to the heart of the labyrinth — where other survivors await.',
+  "You're a <survivor>survivor</survivor>. Work together to find your way to the center of the Maze, where you will meet the other survivors.",
   'Together, activate the three ancient runes to unlock the portal and escape… before the Maze claims you forever.',
 ];
 
@@ -111,8 +111,8 @@ function getWardstoneActivatedChatMessage(
 }
 
 const WARDEN_SPAWN_DIALOGUE_PAGES = [
-  'You are a Warden. Keep your role hidden from the survivors.',
-  'Your goal is to delay and misdirect the survivors until time runs out. Use your complete map to lead them astray.',
+  "You're a <warden>warden</warden>. Keep your role hidden from the survivors.",
+  'Your goal is to delay and misdirect the survivors until time runs out. Use your complete map to lead them into traps.',
 ];
 
 const SWORD_FIELD_WISDOM_REQUIRED_DIALOGUE_PAGES = [
@@ -2499,8 +2499,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
     },
 
-    onLobbyChatMessage: (playerId, displayName, text, sentAt) => {
-      lobbyOverlay?.addMessage({ playerId, displayName, text, sentAt });
+    onLobbyChatMessage: (playerId, displayName, text, kind, sentAt) => {
+      lobbyOverlay?.addMessage({ playerId, displayName, text, kind, sentAt });
     },
 
     onLobbyKicked: (message) => {

@@ -71,6 +71,40 @@ test('players remain in an event-driven lobby until a start condition is met', (
   assert.equal(latest.lobby.players.length, 2);
 });
 
+test('announces new players in the room-wide lobby chat', (t) => {
+  const { room, sockets } = createLobby(2);
+  t.after(() => room.destroy());
+
+  const secondPlayerJoinMessages = sockets.flatMap((socket) =>
+    socket.sent.filter(
+      (message) =>
+        message.type === 'LOBBY_CHAT_MESSAGE' && message.playerId === 'player-1',
+    ),
+  );
+
+  assert.equal(secondPlayerJoinMessages.length, 2);
+  assert.ok(secondPlayerJoinMessages.every((message) => message.displayName === 'player-1'));
+  assert.ok(secondPlayerJoinMessages.every((message) => message.text === 'joined the lobby.'));
+  assert.ok(secondPlayerJoinMessages.every((message) => message.kind === 'join'));
+});
+
+test('announces players leaving the waiting lobby', (t) => {
+  const { room, sockets } = createLobby(2);
+  t.after(() => room.destroy());
+  for (const socket of sockets) socket.sent.length = 0;
+
+  assert.equal(room.removePlayer('player-1'), true);
+
+  const leaveMessages = sockets[0].sent.filter(
+    (message) =>
+      message.type === 'LOBBY_CHAT_MESSAGE' && message.playerId === 'player-1',
+  );
+  assert.equal(leaveMessages.length, 1);
+  assert.equal(leaveMessages[0].displayName, 'player-1');
+  assert.equal(leaveMessages[0].text, 'left the lobby.');
+  assert.equal(leaveMessages[0].kind, 'leave');
+});
+
 test('only admins can bypass lobby population and voting requirements', (t) => {
   const regularRoom = new Room(`regular-${Math.random()}`);
   const regularSocket = new FakeSocket('regular-player');
@@ -255,6 +289,7 @@ test('loading timeout removes only unready clients before releasing the match', 
 test('lobby chat is room-wide, normalized, and rate limited', (t) => {
   const { room, sockets } = createLobby(3);
   t.after(() => room.destroy());
+  for (const socket of sockets) socket.sent.length = 0;
 
   room.handleSendLobbyChatMessage('player-0', {
     type: 'SEND_LOBBY_CHAT',
@@ -271,6 +306,7 @@ test('lobby chat is room-wide, normalized, and rate limited', (t) => {
     );
     assert.equal(messages.length, 1);
     assert.equal(messages[0].text, 'hello explorers');
+    assert.equal(messages[0].kind, 'chat');
   }
 });
 
