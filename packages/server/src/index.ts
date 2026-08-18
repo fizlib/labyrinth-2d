@@ -538,6 +538,14 @@ uWS
             break;
           }
 
+          case MessageType.DebugSetToolsEnabled: {
+            if (data.roomId) {
+              const room = rooms.get(data.roomId);
+              if (room) room.handleDebugSetToolsEnabled(data.id, msg);
+            }
+            break;
+          }
+
           default:
             console.warn(`[WS] Unknown message type from ${data.id}`);
         }

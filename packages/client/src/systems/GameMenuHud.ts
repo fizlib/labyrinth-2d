@@ -139,6 +139,7 @@ export class GameMenuHud {
       MAIN_BUTTON_X,
       87,
       this.actions.onOpenAdminPanel,
+      { labelFill: '#ef715c' },
     );
     const controlsButton = this.createButton('Controls', MAIN_BUTTON_X, 92, () =>
       this.showPage('controls'),
@@ -208,8 +209,11 @@ export class GameMenuHud {
     message.y = 58;
     this.exitConfirmationPage.addChild(
       message,
-      this.createButton('Stay', 18, 162, () => this.showPage('main'), 90),
-      this.createButton('Exit match', 116, 162, this.actions.onExitMatch, 90, true),
+      this.createButton('Stay', 18, 162, () => this.showPage('main'), { width: 90 }),
+      this.createButton('Exit match', 116, 162, this.actions.onExitMatch, {
+        width: 90,
+        dangerous: true,
+      }),
     );
   }
 
@@ -263,9 +267,13 @@ export class GameMenuHud {
     x: number,
     y: number,
     onPress: () => void,
-    width = BUTTON_WIDTH,
-    dangerous = false,
+    options: {
+      width?: number;
+      dangerous?: boolean;
+      labelFill?: string;
+    } = {},
   ): Container {
+    const { width = BUTTON_WIDTH, dangerous = false, labelFill = '#fff5cf' } = options;
     const button = new Container();
     button.x = x;
     button.y = y;
@@ -289,7 +297,7 @@ export class GameMenuHud {
     drawBackground(false);
     button.addChild(background);
 
-    const text = this.createText(label, 8, '#fff5cf');
+    const text = this.createText(label, 8, labelFill);
     text.anchor.set(0.5);
     text.x = Math.round(width / 2);
     text.y = Math.round(BUTTON_HEIGHT / 2) + 1;

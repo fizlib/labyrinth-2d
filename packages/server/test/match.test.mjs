@@ -384,6 +384,86 @@ test('admins can show network stats to every player and the room defaults to hid
   );
 });
 
+test('debug-enabled admins receive and send chat room-wide', (t) => {
+  const { room, sockets } = createRoom(3);
+  t.after(() => room.destroy());
+  room.stopLoop();
+
+  sockets[0].data.isAdmin = true;
+  room.seats.get('player-0').isAdmin = true;
+  const admin = room.state.players.find((player) => player.id === 'player-0');
+  const distantPlayer = room.state.players.find((player) => player.id === 'player-1');
+  const otherPlayer = room.state.players.find((player) => player.id === 'player-2');
+  assert.ok(admin && distantPlayer && otherPlayer);
+  admin.x = 0;
+  admin.y = 0;
+  distantPlayer.x = 1_000;
+  distantPlayer.y = 0;
+  otherPlayer.x = 2_000;
+  otherPlayer.y = 0;
+
+  for (const socket of sockets) socket.sent.length = 0;
+  room.handleSendChatMessage(distantPlayer.id, {
+    type: 'SEND_CHAT_MESSAGE',
+    text: 'ordinary proximity message',
+  });
+  assert.equal(
+    sockets[0].sent.some((message) => message.type === 'CHAT_MESSAGE'),
+    false,
+    'a distant admin does not receive chat while debug tools are disabled',
+  );
+
+  room.handleDebugSetToolsEnabled(distantPlayer.id, {
+    type: 'DEBUG_SET_TOOLS_ENABLED',
+    enabled: true,
+  });
+  assert.equal(
+    room.debugToolsEnabledPlayerIds.has(distantPlayer.id),
+    false,
+    'regular players cannot enable global chat',
+  );
+
+  room.handleDebugSetToolsEnabled(admin.id, {
+    type: 'DEBUG_SET_TOOLS_ENABLED',
+    enabled: true,
+  });
+  room.lastChatSentAt.clear();
+  for (const socket of sockets) socket.sent.length = 0;
+  room.handleSendChatMessage(distantPlayer.id, {
+    type: 'SEND_CHAT_MESSAGE',
+    text: 'admin can hear this',
+  });
+  assert.equal(
+    sockets[0].sent.filter((message) => message.type === 'CHAT_MESSAGE').length,
+    1,
+  );
+  assert.equal(
+    sockets[2].sent.filter((message) => message.type === 'CHAT_MESSAGE').length,
+    0,
+    'other distant players retain ordinary proximity routing',
+  );
+
+  otherPlayer.escaped = true;
+  room.lastChatSentAt.clear();
+  for (const socket of sockets) socket.sent.length = 0;
+  room.handleSendChatMessage(admin.id, {
+    type: 'SEND_CHAT_MESSAGE',
+    text: 'global admin message',
+  });
+  for (const socket of sockets) {
+    assert.equal(
+      socket.sent.filter((message) => message.type === 'CHAT_MESSAGE').length,
+      1,
+    );
+  }
+
+  room.handleDebugSetToolsEnabled(admin.id, {
+    type: 'DEBUG_SET_TOOLS_ENABLED',
+    enabled: false,
+  });
+  assert.equal(room.debugToolsEnabledPlayerIds.has(admin.id), false);
+});
+
 test('authenticated public starting rosters emit one Elo result', (t) => {
   const records = [];
   const room = new Room(`ranked-${Math.random()}`, true, {

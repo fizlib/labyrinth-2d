@@ -3159,7 +3159,7 @@ canvas {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   text-align: left;
   transition:
     border-color 0.15s ease,
@@ -3173,8 +3173,39 @@ canvas {
 }
 
 .player-name {
+  min-width: 0;
+  overflow: hidden;
   color: #dfe6e9;
   font-weight: bold;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: #9ba7a2;
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.player-role {
+  color: #9ba7a2;
+}
+
+.player-role--survivor {
+  color: #86ce78;
+}
+
+.player-role--warden {
+  color: #ff9686;
+}
+
+.player-squad {
+  color: #9ba7a2;
 }
 
 .player-id {

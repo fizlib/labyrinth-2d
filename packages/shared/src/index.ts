@@ -417,6 +417,7 @@ export enum MessageType {
   DebugPlayerAction = 'DEBUG_PLAYER_ACTION',
   DebugSetMatchTime = 'DEBUG_SET_MATCH_TIME',
   DebugSetNetworkStats = 'DEBUG_SET_NETWORK_STATS',
+  DebugSetToolsEnabled = 'DEBUG_SET_TOOLS_ENABLED',
   SendChatMessage = 'SEND_CHAT_MESSAGE',
   EscapePortal = 'ESCAPE_PORTAL',
   VoteToStart = 'VOTE_TO_START',
@@ -585,6 +586,12 @@ export interface DebugSetMatchTimeMessage {
 export interface DebugSetNetworkStatsMessage {
   type: MessageType.DebugSetNetworkStats;
   /** Whether every participant should see the in-match network statistics HUD. */
+  enabled: boolean;
+}
+
+export interface DebugSetToolsEnabledMessage {
+  type: MessageType.DebugSetToolsEnabled;
+  /** Whether this verified admin may use debug-only global chat routing. */
   enabled: boolean;
 }
 
@@ -820,7 +827,7 @@ export interface PlayerTrappedMessage {
   cageId: number;
 }
 
-/** Transient server-authored chat event delivered only to nearby players. */
+/** Transient server-authored chat event delivered by authoritative chat routing. */
 export interface ChatMessage {
   type: MessageType.ChatMessage;
   playerId: string;
@@ -963,6 +970,7 @@ export type ClientToServerMessage =
   | DebugTeleportMessage
   | DebugSetMatchTimeMessage
   | DebugSetNetworkStatsMessage
+  | DebugSetToolsEnabledMessage
   | DebugPlayerActionMessage;
 
 export type ServerToClientMessage =

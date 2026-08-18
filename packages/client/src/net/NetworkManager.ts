@@ -38,6 +38,7 @@ import {
   type DebugTeleportMessage,
   type DebugSetMatchTimeMessage,
   type DebugSetNetworkStatsMessage,
+  type DebugSetToolsEnabledMessage,
   type DebugPlayerAction,
   type DebugPlayerActionMessage,
   type TickUpdateMessage,
@@ -721,6 +722,15 @@ export class NetworkManager {
   sendDebugSetNetworkStats(enabled: boolean): void {
     const msg: DebugSetNetworkStatsMessage = {
       type: MessageType.DebugSetNetworkStats,
+      enabled,
+    };
+    this.send(msg);
+  }
+
+  /** Sync this verified admin's local debug-tools switch for chat routing. */
+  sendDebugSetToolsEnabled(enabled: boolean): void {
+    const msg: DebugSetToolsEnabledMessage = {
+      type: MessageType.DebugSetToolsEnabled,
       enabled,
     };
     this.send(msg);

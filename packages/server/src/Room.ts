@@ -134,6 +134,7 @@ import {
   type DebugTeleportMessage,
   type DebugSetMatchTimeMessage,
   type DebugSetNetworkStatsMessage,
+  type DebugSetToolsEnabledMessage,
   type DebugPlayerActionMessage,
   type RoomJoinedMessage,
   type MatchStartedMessage,
@@ -424,6 +425,7 @@ export class Room {
   private nextSnapshotId = 1;
   private readonly lastMovementInputAt = new Map<string, number>();
   private readonly lastChatSentAt = new Map<string, number>();
+  private readonly debugToolsEnabledPlayerIds = new Set<string>();
   private loopHandle: ReturnType<typeof setInterval> | null = null;
   private countdownHandle: ReturnType<typeof setTimeout> | null = null;
   private matchLoadingTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
@@ -872,6 +874,7 @@ export class Room {
     this.inFlightSnapshotIds.delete(playerId);
     this.lastMovementInputAt.delete(playerId);
     this.lastChatSentAt.delete(playerId);
+    this.debugToolsEnabledPlayerIds.delete(playerId);
     this.bridgeTraversals.delete(playerId);
     this.bridgeRepairOccupancy.delete(playerId);
     this.revealedWisdomBridges.delete(playerId);
@@ -1114,7 +1117,7 @@ export class Room {
     if (inFlight.length === 0) this.inFlightSnapshotIds.delete(playerId);
   }
 
-  /** Validate and deliver one transient message to players near the sender. */
+  /** Validate and route one transient message by proximity or admin-global chat. */
   handleSendChatMessage(playerId: string, msg: SendChatMessage): void {
     if (!this.canPlayerAct(playerId)) return;
     const sender = this.state.players.find((player) => player.id === playerId);
@@ -1134,9 +1137,16 @@ export class Room {
       text,
     };
 
+    const senderHasGlobalChat = this.debugToolsEnabledPlayerIds.has(sender.id);
     for (const recipient of this.state.players) {
-      if (recipient.escaped) continue;
-      if (!isWithinChatProximity(sender, recipient)) continue;
+      const recipientHasGlobalChat = this.debugToolsEnabledPlayerIds.has(recipient.id);
+      if (
+        !senderHasGlobalChat &&
+        !recipientHasGlobalChat &&
+        (recipient.escaped || !isWithinChatProximity(sender, recipient))
+      ) {
+        continue;
+      }
       const socket = this.sockets.get(recipient.id);
       if (socket) this.send(socket, chatMessage);
     }
@@ -1201,6 +1211,21 @@ export class Room {
     console.info(
       `[Room:${this.id}] Admin ${requesterId} ${msg.enabled ? 'enabled' : 'disabled'} network stats for all players`,
     );
+  }
+
+  /** Admin: sync the local debug-tools switch used for global chat routing. */
+  handleDebugSetToolsEnabled(
+    requesterId: string,
+    msg: DebugSetToolsEnabledMessage,
+  ): void {
+    if (!this.isAdmin(requesterId) || typeof msg.enabled !== 'boolean') return;
+
+    if (msg.enabled) {
+      this.debugToolsEnabledPlayerIds.add(requesterId);
+      this.disableRanking('administrator enabled debug tools');
+    } else {
+      this.debugToolsEnabledPlayerIds.delete(requesterId);
+    }
   }
 
   /** Debug: apply a player-menu action using authoritative room state. */
@@ -3492,6 +3517,7 @@ export class Room {
     this.inFlightSnapshotIds.clear();
     this.lastMovementInputAt.clear();
     this.lastChatSentAt.clear();
+    this.debugToolsEnabledPlayerIds.clear();
     this.bridgeTraversals.clear();
     this.revealedWisdomBridges.clear();
     this.revealedWisdomSwamps.clear();

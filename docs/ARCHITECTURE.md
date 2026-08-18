@@ -97,6 +97,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `DEBUG_TELEPORT` | Debug-only teleport helper used by developer tooling |
 | `DEBUG_SET_MATCH_TIME` | Debug-only authoritative match timer adjustment |
 | `DEBUG_SET_NETWORK_STATS` | Admin-only request that toggles the room-wide in-match network-stat HUD |
+| `DEBUG_SET_TOOLS_ENABLED` | Admin-only sync of the local debug-tools switch used for global chat routing |
 
 #### Server -> Client
 
@@ -118,7 +119,7 @@ One room owns one maze instance. The server is authoritative for player state, h
 | `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
 | `TRAP_ACTIVATION_RESULT` | Private result used for the activating Warden's empty-room feedback |
 | `PLAYER_TRAPPED` | Private cage ID notification that opens the captured Survivor's instructional typewriter dialogue |
-| `CHAT_MESSAGE` | Transient message with the sender's public squad ID, delivered to players within 10 tiles at send time |
+| `CHAT_MESSAGE` | Transient message with the sender's public squad ID, normally delivered within 10 tiles; debug-enabled admins receive every message and send room-wide |
 | `PLAYER_ESCAPED` | Room-wide authoritative escape notification with portal coordinates and current victory progress |
 | `MATCH_ENDED` | Immutable survivor/warden result with final escape progress, remaining time, and the role-revealing final roster |
 | `ERROR` | Report room-join or protocol errors |
@@ -490,6 +491,7 @@ The client currently has multiple UI subsystems, not just the minimap:
   - DOM overlay aligned to the bottom-left of the scaled Pixi canvas
   - opens with `Enter`, `T`, or its clickable prompt and uses a native single-line input on mobile
   - pauses gameplay input while typing, shows a live remaining-character counter, and colors sender names by their public squad assignment
+  - retains ordinary 10-tile routing except that a verified admin with debug tools enabled receives every message and sends messages to the full room
 - `GameMenuHud`
   - Pixi overlay matching the end-of-match panel, with Resume, Controls, and a confirmed Exit Match flow
   - freezes only the local client's input; the authoritative multiplayer match clock and other players continue
@@ -523,7 +525,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - Wisdom orb use: `Q`, the mobile `Q` button, or click a filled orb in the HUD
 - Sword-field clear: survivors use the wisdom-orb controls while `[ Q ]` is visible; wardens use `E` or the mobile `E` button while their red `[ E ]` is visible
 - Warden map: click the red minimap to open; click the map/backdrop or press `Escape` to close. Movement remains active while it is open so the local position marker can be used for navigation, while interaction and wisdom actions remain suppressed.
-- Server-verified admins can open the in-game admin panel from the game menu. One default-on setting enables scroll zoom, zoom toggling, and click teleport together and also shows the top-left Tick/Pending/Snaps HUD for that admin. Cell boundaries remain local. A separate default-off room setting broadcasts the stats HUD to every participant, including guests, only while the match is running and never in the lobby. The panel can also replace the authoritative running-match timer using minute/second inputs; setting it to zero immediately resolves a Warden timeout win.
+- Server-verified admins can open the in-game admin panel from the game menu. One default-on setting enables scroll zoom, zoom toggling, click teleport, the top-left Tick/Pending/Snaps HUD, and admin-global in-match chat: the admin receives every player message and their own messages reach the full room. Cell boundaries remain local. A separate default-off room setting broadcasts the stats HUD to every participant, including guests, only while the match is running and never in the lobby. The panel can also replace the authoritative running-match timer using minute/second inputs; setting it to zero immediately resolves a Warden timeout win.
 - The admin player menu privately fetches a selected player's current role and can authoritatively change it. The server updates that seat and privately rebuilds the affected player's role-specific HUD and inventory.
 
 ## Monorepo Structure

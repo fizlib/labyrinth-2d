@@ -1220,7 +1220,10 @@ function setupDebugToggles(
     const flag = target.dataset.flag as keyof ReturnType<typeof DebugSettings.getFlags>;
     if (!flag) return;
     DebugSettings.setFlag(flag, target.checked);
-    if (flag === 'debugToolsEnabled') syncNetworkStatsVisibility(statsHud);
+    if (flag === 'debugToolsEnabled') {
+      syncNetworkStatsVisibility(statsHud);
+      net.sendDebugSetToolsEnabled(target.checked);
+    }
   });
 
   debugUi.closeButton.addEventListener('click', () => {
@@ -1246,6 +1249,7 @@ function renderDebugPlayerActions(
   );
   if (!player) {
     selectedDebugPlayerId = null;
+    debugUi.playerList.hidden = false;
     debugUi.playerActions.hidden = true;
     return;
   }
@@ -1254,6 +1258,7 @@ function renderDebugPlayerActions(
     PLAYER_CHARACTER_NAMES[player.spriteIndex] ?? `Skin ${player.spriteIndex}`;
   const squadName = getSquadDisplayName(player.teamId);
   const isLocalPlayer = player.id === localPlayerId;
+  debugUi.playerList.hidden = true;
   debugUi.playerActions.hidden = false;
   debugUi.playerActionName.textContent = player.displayName;
   debugUi.playerActionMeta.textContent = `${skinName} · ${squadName} squad · ${player.isDead ? 'dead' : 'alive'}`;
@@ -1396,12 +1401,14 @@ function updateDebugUI(
 
   const playerListMarkup = state.players
     .map((p) => {
-      const isYou = p.id === playerId ? ' <span class="you-badge">← you</span>' : '';
-      const isSelected = p.id === selectedDebugPlayerId ? ' selected' : '';
-      const deadBadge = p.isDead ? '<span class="dead-badge">dead</span>' : '';
-      const skinName = PLAYER_CHARACTER_NAMES[p.spriteIndex] ?? `Skin ${p.spriteIndex}`;
+      const role = debugPlayerRoles.get(p.id);
+      const roleName = role
+        ? `${role[0].toUpperCase()}${role.slice(1)}`
+        : 'Loading role…';
       const squadName = getSquadDisplayName(p.teamId);
-      return `<li><button type="button" class="debug-player-row${isSelected}" data-debug-player-id="${escapeHtml(p.id)}"><span class="player-name">${escapeHtml(p.displayName)}</span><span class="player-pos">${escapeHtml(skinName)} · ${escapeHtml(squadName)} squad · (${Math.round(p.x)}, ${Math.round(p.y)}) ${p.facing}</span>${deadBadge}${isYou}</button></li>`;
+      const accessibleSuffix = p.id === playerId ? ', you' : '';
+      const roleClass = role ? ` player-role--${role}` : '';
+      return `<li><button type="button" class="debug-player-row" data-debug-player-id="${escapeHtml(p.id)}" aria-label="Open settings for ${escapeHtml(p.displayName)}, ${escapeHtml(roleName)}, ${escapeHtml(squadName)} squad${accessibleSuffix}"><span class="player-name">${escapeHtml(p.displayName)}</span><span class="player-meta"><span class="player-role${roleClass}">${escapeHtml(roleName)}</span><span aria-hidden="true">·</span><span class="player-squad">${escapeHtml(squadName)} squad</span></span></button></li>`;
     })
     .join('');
 
@@ -2570,6 +2577,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         DebugSettings.setAdminAccess(isAdmin);
         isAdminSession = isAdmin;
         gameMenuHud?.setAdminAvailable(isAdmin);
+        if (isAdmin) {
+          net.sendDebugSetToolsEnabled(DebugSettings.getFlags().debugToolsEnabled);
+        }
         if (isAdmin && !debugUi) {
           debugUi = createDebugUI();
           statusEl = debugUi.status;
@@ -3605,6 +3615,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     onOpenAdminPanel: () => {
       if (!isAdminSession || !debugUi) return;
       if (latestServerState) {
+        for (const player of latestServerState.players) {
+          net.sendDebugPlayerAction(player.id, 'get-role');
+        }
         updateDebugUI(debugUi, latestServerState, net.playerId, true);
       }
       setAdminPanelOpen(debugUi, true);
