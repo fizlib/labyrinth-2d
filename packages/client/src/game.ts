@@ -38,6 +38,12 @@ import {
   generateMazeLayout,
   applyInputWithCollision,
   getPlayerSwampTerrain,
+  getBridgeWalkwayTileAtPoint,
+  getHubTileBounds,
+  getSpikeGateCollisionBounds,
+  SPIKE_GATES_PER_OBSTACLE,
+  SWORD_FIELD_WIDTH,
+  SWORD_FIELD_HEIGHT,
   findSwordFieldWisdomTarget,
   findTrapCellInteractionTarget,
   findActivePlayerCage,
@@ -95,6 +101,7 @@ import {
   saveAudioMutedPreference,
   syncAudioToggleState,
 } from './systems/AudioToggle';
+import { GameAudio, type AudioPoint, type FootstepSurface } from './systems/GameAudio';
 import { ReconnectOverlay } from './systems/ReconnectOverlay';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
@@ -1611,6 +1618,7 @@ const PREGAME_THEME_FADE_MS = 1200;
 let pregameThemeUnlockCleanup: (() => void) | null = null;
 let pregameThemeFadeFrame: number | null = null;
 let audioMuted = loadAudioMutedPreference();
+let gameAudio: GameAudio | null = null;
 let audioToggleListenerInstalled = false;
 let loadingScreenDismissTimer: number | null = null;
 
@@ -1620,6 +1628,7 @@ function getPregameTheme(): HTMLAudioElement | null {
 
 function setAudioMuted(muted: boolean, persist: boolean): void {
   audioMuted = muted;
+  gameAudio?.setMuted(muted);
   const theme = getPregameTheme();
   if (theme) theme.muted = muted;
   syncAudioToggleState(document, muted);
@@ -1830,6 +1839,9 @@ const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 async function initializeGame(options: GameLaunchOptions): Promise<void> {
   setupAudioToggle();
   startPregameTheme();
+  gameAudio?.destroy();
+  const worldAudio = new GameAudio(audioMuted);
+  gameAudio = worldAudio;
   updateLoadingProgress(0.06, 'Lighting the first torch…');
   const app = new Application();
 
@@ -2129,6 +2141,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   function removePlayerSprite(playerId: string): void {
     portalEscapeAnimations.delete(playerId);
+    worldAudio.removePlayer(playerId);
     const data = playerSprites.get(playerId);
     if (data) {
       data.sprite.mask = null;
@@ -2458,6 +2471,210 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
   }
 
+  function getAudioListener(): AudioPoint {
+    return { x: localX, y: localY };
+  }
+
+  function getFootstepSurface(x: number, y: number): FootstepSurface {
+    const tileSize = currentMap?.tileSize ?? TILE_SIZE;
+    const swampTerrain = getPlayerSwampTerrain(currentLayout?.swamps ?? [], x, y, tileSize);
+    if (swampTerrain === 'deep-mud') return 'splash';
+    if (swampTerrain === 'firm-ground') return 'mud';
+
+    if (
+      currentLayout?.bridges.some(
+        (bridge) => getBridgeWalkwayTileAtPoint(bridge, x, y, tileSize) !== null,
+      )
+    ) {
+      return 'wood';
+    }
+
+    if (currentMap) {
+      const hub = getHubTileBounds(currentMap.width, currentMap.height);
+      const tileX = Math.floor(x / tileSize);
+      const tileY = Math.floor(y / tileSize);
+      if (
+        tileX >= hub.left &&
+        tileX <= hub.right &&
+        tileY >= hub.top &&
+        tileY <= hub.bottom
+      ) {
+        return 'stone';
+      }
+    }
+
+    return 'grass';
+  }
+
+  function getGateAudioPoint(gate: GatePlacement): AudioPoint {
+    const tileSize = currentMap?.tileSize ?? TILE_SIZE;
+    return gate.orientation === 'horizontal'
+      ? {
+          x: (gate.tileX + CELL_SIZE / 2) * tileSize,
+          y: (gate.tileY + 0.5) * tileSize,
+        }
+      : {
+          x: (gate.tileX + 0.5) * tileSize,
+          y: (gate.tileY + CELL_SIZE / 2) * tileSize,
+        };
+  }
+
+  function getBridgeAudioPoint(bridgeIndex: number): AudioPoint | null {
+    const bridge = currentLayout?.bridges[bridgeIndex];
+    if (!bridge) return null;
+    const tileSize = currentMap?.tileSize ?? TILE_SIZE;
+    return {
+      x: (bridge.tileX + 3) * tileSize,
+      y: (bridge.tileY + 5) * tileSize,
+    };
+  }
+
+  function getSwordFieldAudioPoint(swordFieldIndex: number): AudioPoint | null {
+    const field = currentLayout?.swordFields[swordFieldIndex];
+    if (!field) return null;
+    const tileSize = currentMap?.tileSize ?? TILE_SIZE;
+    const scale = tileSize / TILE_SIZE;
+    return {
+      x: field.tileX * tileSize + (SWORD_FIELD_WIDTH * scale) / 2,
+      y: field.tileY * tileSize + (SWORD_FIELD_HEIGHT * scale) / 2,
+    };
+  }
+
+  function getChestAudioPoint(chestIndex: number): AudioPoint | null {
+    const visual = tilemapRenderer?.chestDeadEndVisuals.find(
+      (candidate) => candidate.index === chestIndex,
+    );
+    return visual ? { x: visual.interactionX, y: visual.interactionY } : null;
+  }
+
+  function syncWorldAudio(previous: GameState | null, next: GameState): void {
+    if (
+      !previous ||
+      !currentLayout ||
+      !currentMap ||
+      next.match.status !== 'running'
+    ) {
+      return;
+    }
+
+    const listener = getAudioListener();
+    const tileSize = currentMap.tileSize;
+
+    for (const plate of next.pressurePlateStates) {
+      const before = previous.pressurePlateStates.find(
+        (candidate) => candidate.plateId === plate.plateId,
+      );
+      if (!before) continue;
+      const placement = currentLayout.pressurePlates.find(
+        (candidate) => candidate.id === plate.plateId,
+      );
+      if (!placement) continue;
+      const source = {
+        x: (placement.tileX + 0.5) * tileSize,
+        y: (placement.tileY + 0.5) * tileSize,
+      };
+      if (plate.latched && !before.latched) {
+        worldAudio.playPressurePlate('latched', source, listener);
+      } else if (plate.pressed !== before.pressed) {
+        worldAudio.playPressurePlate(
+          plate.pressed ? 'pressed' : 'released',
+          source,
+          listener,
+        );
+      }
+    }
+
+    for (const gate of next.spikeGateStates) {
+      const before = previous.spikeGateStates.find(
+        (candidate) => candidate.spikeGateIndex === gate.spikeGateIndex,
+      );
+      if (!before || before.open === gate.open) continue;
+      const obstacleIndex = Math.floor(gate.spikeGateIndex / SPIKE_GATES_PER_OBSTACLE);
+      const gateIndex = gate.spikeGateIndex % SPIKE_GATES_PER_OBSTACLE;
+      const obstacle = currentLayout.spikeGateObstacles[obstacleIndex];
+      if (!obstacle || gateIndex >= obstacle.gateCount) continue;
+      const bounds = getSpikeGateCollisionBounds(obstacle, gateIndex, tileSize);
+      worldAudio.playGate(
+        gate.open,
+        { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 },
+        listener,
+      );
+    }
+
+    for (const plate of next.spikePlateStates) {
+      const before = previous.spikePlateStates.find(
+        (candidate) => candidate.spikePlateIndex === plate.spikePlateIndex,
+      );
+      if (!before) continue;
+      let placement: SpikePlatePlacement | undefined;
+      for (
+        let obstacleIndex = 0;
+        obstacleIndex < currentLayout.spikeGateObstacles.length && !placement;
+        obstacleIndex++
+      ) {
+        placement = getSpikeGatePlatePlacements(
+          currentLayout.spikeGateObstacles[obstacleIndex],
+          obstacleIndex,
+          tileSize,
+        ).find((candidate) => candidate.spikePlateIndex === plate.spikePlateIndex);
+      }
+      if (!placement) continue;
+      const source = {
+        x: placement.x + placement.width / 2,
+        y: placement.y + placement.height / 2,
+      };
+      if (plate.latched && !before.latched) {
+        worldAudio.playPressurePlate('latched', source, listener);
+      } else if (plate.pressed !== before.pressed) {
+        worldAudio.playPressurePlate(
+          plate.pressed ? 'pressed' : 'released',
+          source,
+          listener,
+        );
+      }
+    }
+
+    for (const state of next.swordFieldStates) {
+      const before = previous.swordFieldStates.find(
+        (candidate) => candidate.swordFieldIndex === state.swordFieldIndex,
+      );
+      if (!before || before.loweringStartedTick !== null || state.loweringStartedTick === null) {
+        continue;
+      }
+      const source = getSwordFieldAudioPoint(state.swordFieldIndex);
+      if (source) worldAudio.playSwordField(state.swordFieldIndex, source, listener);
+    }
+
+    for (const state of next.cageStates) {
+      const before = previous.cageStates.find(
+        (candidate) => candidate.cageId === state.cageId,
+      );
+      const source = { x: state.x, y: state.y };
+      if (!before) {
+        worldAudio.playCageMaterialize(state.cageId, source, listener);
+      } else if (!before.opened && state.opened) {
+        worldAudio.playCageOpen(state.cageId, source, listener);
+      }
+    }
+
+    for (const state of next.bridgeStates) {
+      const before = previous.bridgeStates.find(
+        (candidate) => candidate.bridgeIndex === state.bridgeIndex,
+      );
+      if (!before) continue;
+      const source = getBridgeAudioPoint(state.bridgeIndex);
+      if (!source) continue;
+      const newlyCollapsed = state.collapsedTileMask & ~before.collapsedTileMask;
+      const newlyRestored = before.collapsedTileMask & ~state.collapsedTileMask;
+      if (newlyCollapsed !== 0) {
+        worldAudio.playBridgeCollapse(state.bridgeIndex, source, listener);
+      }
+      if (newlyRestored !== 0 || (state.repairActive && !before.repairActive)) {
+        worldAudio.playBridgeRepair(state.bridgeIndex, source, listener);
+      }
+    }
+  }
+
   let applyLocalRoleUi: (
     role: PlayerRole,
     wisdomOrbs: number,
@@ -2668,6 +2885,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         emptyTrapPromptShakeRemaining = 0;
         emptyTrapPromptShakeElapsed = 0;
         portalEscapeAnimations.clear();
+        worldAudio.resetWorld();
 
         if (!reuseExistingWorld) {
           gateSlideStates.clear();
@@ -2926,6 +3144,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         deferredTickUpdate = gameState;
         return;
       }
+      syncWorldAudio(latestServerState, gameState);
       syncActivatedWardstoneIndexes(gameState);
       const localPlayerId = net.playerId;
       matchHud.sync(gameState.match);
@@ -3084,6 +3303,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         rsData.sprite.texture = assets.runestoneTextures[runestoneIndex][1];
       }
 
+      if (rsData) {
+        worldAudio.playWardstone(
+          runestoneIndex,
+          { x: rsData.sprite.x, y: rsData.sprite.y },
+          getAudioListener(),
+        );
+      }
+
       if (!wasAlreadyActivated) {
         const message = getWardstoneActivatedChatMessage(
           runestoneIndex,
@@ -3099,6 +3326,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       )
         return;
       console.info(`[Main] Chest ${chestIndex} opened by ${playerId}`);
+      const source = getChestAudioPoint(chestIndex);
+      if (source) worldAudio.playChestOpen(chestIndex, source, getAudioListener());
       tilemapRenderer?.chestDeadEndVisuals
         .find((visual) => visual.index === chestIndex)
         ?.syncOpened(true, true);
@@ -3113,6 +3342,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         return;
       localWisdomOrbs = wisdomOrbs;
       wisdomOrbHud?.setRemaining(wisdomOrbs);
+      const source = getChestAudioPoint(chestIndex);
+      if (source) worldAudio.playOrbGrant(source, getAudioListener());
       console.info(
         `[WisdomOrb] Chest ${chestIndex} reward received; inventory=${wisdomOrbs}`,
       );
@@ -3162,6 +3393,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       } else if (hint.kind === 'sword-field') {
         wisdomArrow?.hide();
         tilemapRenderer?.beginSwordFieldLowering(hint.swordFieldIndex);
+        const source = getSwordFieldAudioPoint(hint.swordFieldIndex);
+        if (source) {
+          worldAudio.playSwordField(
+            hint.swordFieldIndex,
+            source,
+            getAudioListener(),
+          );
+        }
         console.info(
           `[WisdomOrb][Response] Server accepted sword field ${hint.swordFieldIndex}; remaining=${remainingWisdomOrbs}`,
         );
@@ -3213,6 +3452,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         return;
       console.info(`[Main] Gate ${gateIndex} ${open ? 'OPENED' : 'CLOSED'}`);
       if (currentLayout && currentMap && tilemapRenderer) {
+        const gate = currentLayout.gates[gateIndex];
+        if (gate) {
+          worldAudio.playGate(open, getGateAudioPoint(gate), getAudioListener());
+        }
         applyGateState(
           gateIndex,
           open,
@@ -3291,6 +3534,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       chatHud?.addSystemMessage(
         `${displayName} has escaped the maze via portal. ${remainingToEscape} more ${noun} need to escape.`,
       );
+      worldAudio.playTeleport(
+        { x: portalX, y: portalY },
+        getAudioListener(),
+      );
       startPortalEscapeAnimation(playerId, portalX, portalY);
       if (playerId === net.playerId) {
         resetAllInput();
@@ -3318,6 +3565,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         return;
       resetAllInput();
       clearPendingMovementInputs();
+      worldAudio.setAmbience(false, false);
       minimap?.closeExpanded();
       introDialogueHud?.destroy();
       introDialogueHud = null;
@@ -3762,6 +4010,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   window.addEventListener(
     'beforeunload',
     () => {
+      worldAudio.destroy();
+      if (gameAudio === worldAudio) gameAudio = null;
       chatHud?.destroy();
       matchHud.destroy();
       gameMenuHud?.destroy();
@@ -3775,10 +4025,22 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   // ── 60 FPS Game Loop ──────────────────────────────────────────────────
   app.ticker.add((ticker) => {
     matchHud.update();
+    const dtSeconds = Math.min(ticker.deltaMS / 1000, 0.1);
+    const matchAudioActive =
+      net.isConnected && latestServerState?.match.status === 'running';
+    const localSwampTerrain = matchAudioActive
+      ? getPlayerSwampTerrain(
+          currentLayout?.swamps ?? [],
+          localX,
+          localY,
+          currentMap?.tileSize ?? TILE_SIZE,
+        )
+      : 'dry';
+    worldAudio.setAmbience(matchAudioActive, localSwampTerrain !== 'dry');
+    worldAudio.update(dtSeconds);
     if (!net.isConnected || !localPlayerInitialized || !net.playerId) return;
 
     // Cap dt to prevent massive physics jumps when mobile browsers drop frames
-    const dtSeconds = Math.min(ticker.deltaMS / 1000, 0.1);
     const now = performance.now();
     if (latestServerState) {
       updateNetworkStatsHud(
@@ -3869,6 +4131,15 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
       const localAnimKey = getAnimationKey(localFacing, isMoving, isLocalDead);
       setPlayerAnimation(localData, localAnimKey);
+      worldAudio.updateFootstep({
+        playerId: net.playerId,
+        x: localX,
+        y: localY,
+        moving: isMoving && !isLocalDead,
+        surface: getFootstepSurface(localX, localY),
+        listener: getAudioListener(),
+        local: true,
+      });
     }
 
     // ── 2. Remote player interpolation ────────────────────────────
@@ -3891,6 +4162,15 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           interp.isDead,
         );
         setPlayerAnimation(data, remoteAnimKey);
+        worldAudio.updateFootstep({
+          playerId: remoteId,
+          x: interp.x,
+          y: interp.y,
+          moving: interp.isMoving && !interp.isDead,
+          surface: getFootstepSurface(interp.x, interp.y),
+          listener: getAudioListener(),
+          local: false,
+        });
       }
     }
     updatePortalEscapeAnimations(dtSeconds);
@@ -3994,6 +4274,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           );
         }
         portal.activate();
+        worldAudio.playPortalActivation(pendingPortalPos, getAudioListener());
         minimap?.setPortalPosition(pendingPortalPos.x, pendingPortalPos.y);
         // Instant camera jump to portal (no directional clues)
         cinematicPhase = 'watch_portal';
