@@ -89,6 +89,12 @@ import { ProximityChatHud } from './systems/ProximityChatHud';
 import { MatchHud } from './systems/MatchHud';
 import { GameMenuHud } from './systems/GameMenuHud';
 import { LobbyOverlay } from './systems/LobbyOverlay';
+import {
+  AUDIO_TOGGLE_SELECTOR,
+  loadAudioMutedPreference,
+  saveAudioMutedPreference,
+  syncAudioToggleState,
+} from './systems/AudioToggle';
 import { ReconnectOverlay } from './systems/ReconnectOverlay';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
@@ -1599,25 +1605,52 @@ function updatePressurePlateAnimations(
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-const LOADING_THEME_VOLUME = 0.42;
-const LOADING_THEME_START_SECONDS = 4;
-const LOADING_THEME_FADE_MS = 480;
-let loadingThemeUnlockCleanup: (() => void) | null = null;
-let loadingThemeFadeFrame: number | null = null;
+const PREGAME_THEME_VOLUME = 0.42;
+const PREGAME_THEME_START_SECONDS = 4;
+const PREGAME_THEME_FADE_MS = 1200;
+let pregameThemeUnlockCleanup: (() => void) | null = null;
+let pregameThemeFadeFrame: number | null = null;
+let audioMuted = loadAudioMutedPreference();
+let audioToggleListenerInstalled = false;
 let loadingScreenDismissTimer: number | null = null;
 
-function getLoadingTheme(): HTMLAudioElement | null {
-  return document.getElementById('loading-theme') as HTMLAudioElement | null;
+function getPregameTheme(): HTMLAudioElement | null {
+  return document.getElementById('pregame-theme') as HTMLAudioElement | null;
 }
 
-function startLoadingTheme(): void {
-  const theme = getLoadingTheme();
+function setAudioMuted(muted: boolean, persist: boolean): void {
+  audioMuted = muted;
+  const theme = getPregameTheme();
+  if (theme) theme.muted = muted;
+  syncAudioToggleState(document, muted);
+  if (persist) saveAudioMutedPreference(muted);
+
+  if (persist && !muted && theme?.paused) {
+    void theme.play().catch(() => undefined);
+  }
+}
+
+function setupAudioToggle(): void {
+  setAudioMuted(audioMuted, false);
+  if (audioToggleListenerInstalled) return;
+
+  audioToggleListenerInstalled = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest(AUDIO_TOGGLE_SELECTOR)) return;
+    setAudioMuted(!audioMuted, true);
+  });
+}
+
+function startPregameTheme(): void {
+  const theme = getPregameTheme();
   if (!theme) return;
 
-  theme.volume = LOADING_THEME_VOLUME;
+  theme.muted = audioMuted;
+  theme.volume = PREGAME_THEME_VOLUME;
   const cuePastQuietIntro = (): void => {
-    if (theme.currentTime < LOADING_THEME_START_SECONDS) {
-      theme.currentTime = LOADING_THEME_START_SECONDS;
+    if (theme.currentTime < PREGAME_THEME_START_SECONDS) {
+      theme.currentTime = PREGAME_THEME_START_SECONDS;
     }
   };
   if (theme.readyState >= 1) cuePastQuietIntro();
@@ -1625,23 +1658,23 @@ function startLoadingTheme(): void {
 
   const resumeAfterInteraction = (): void => {
     if (!document.getElementById('loading-screen')) {
-      loadingThemeUnlockCleanup?.();
+      pregameThemeUnlockCleanup?.();
       return;
     }
 
     void theme
       .play()
-      .then(() => loadingThemeUnlockCleanup?.())
+      .then(() => pregameThemeUnlockCleanup?.())
       .catch(() => undefined);
   };
   const cleanup = (): void => {
     window.removeEventListener('pointerdown', resumeAfterInteraction);
     window.removeEventListener('keydown', resumeAfterInteraction);
-    if (loadingThemeUnlockCleanup === cleanup) loadingThemeUnlockCleanup = null;
+    if (pregameThemeUnlockCleanup === cleanup) pregameThemeUnlockCleanup = null;
   };
 
-  loadingThemeUnlockCleanup?.();
-  loadingThemeUnlockCleanup = cleanup;
+  pregameThemeUnlockCleanup?.();
+  pregameThemeUnlockCleanup = cleanup;
   window.addEventListener('pointerdown', resumeAfterInteraction, { passive: true });
   window.addEventListener('keydown', resumeAfterInteraction);
 
@@ -1653,40 +1686,40 @@ function startLoadingTheme(): void {
     .catch(() => undefined);
 }
 
-function fadeOutLoadingTheme(): void {
-  const theme = getLoadingTheme();
-  loadingThemeUnlockCleanup?.();
+function fadeOutPregameTheme(): void {
+  const theme = getPregameTheme();
+  pregameThemeUnlockCleanup?.();
   if (!theme) return;
 
-  if (loadingThemeFadeFrame !== null) {
-    window.cancelAnimationFrame(loadingThemeFadeFrame);
-    loadingThemeFadeFrame = null;
+  if (pregameThemeFadeFrame !== null) {
+    window.cancelAnimationFrame(pregameThemeFadeFrame);
+    pregameThemeFadeFrame = null;
   }
 
   if (theme.paused) {
     theme.currentTime = 0;
-    theme.volume = LOADING_THEME_VOLUME;
+    theme.volume = PREGAME_THEME_VOLUME;
     return;
   }
 
   const initialVolume = theme.volume;
   const fadeStartedAt = performance.now();
   const fade = (now: number): void => {
-    const progress = Math.min(1, (now - fadeStartedAt) / LOADING_THEME_FADE_MS);
+    const progress = Math.min(1, (now - fadeStartedAt) / PREGAME_THEME_FADE_MS);
     theme.volume = initialVolume * (1 - progress);
 
     if (progress < 1) {
-      loadingThemeFadeFrame = window.requestAnimationFrame(fade);
+      pregameThemeFadeFrame = window.requestAnimationFrame(fade);
       return;
     }
 
-    loadingThemeFadeFrame = null;
+    pregameThemeFadeFrame = null;
     theme.pause();
     theme.currentTime = 0;
-    theme.volume = LOADING_THEME_VOLUME;
+    theme.volume = PREGAME_THEME_VOLUME;
   };
 
-  loadingThemeFadeFrame = window.requestAnimationFrame(fade);
+  pregameThemeFadeFrame = window.requestAnimationFrame(fade);
 }
 
 function updateLoadingProgress(progress: number, status: string): void {
@@ -1755,7 +1788,6 @@ function dismissLoadingScreen(): void {
   loadingScreenDismissTimer = window.setTimeout(() => {
     loadingScreenDismissTimer = null;
     screen.classList.add('loading-screen--complete');
-    fadeOutLoadingTheme();
   }, 240);
 }
 
@@ -1796,7 +1828,8 @@ export interface GameLaunchOptions {
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 
 async function initializeGame(options: GameLaunchOptions): Promise<void> {
-  startLoadingTheme();
+  setupAudioToggle();
+  startPregameTheme();
   updateLoadingProgress(0.06, 'Lighting the first torch…');
   const app = new Application();
 
@@ -2505,6 +2538,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
             window.location.reload();
           },
         });
+        syncAudioToggleState(document, audioMuted);
       }
       window.requestAnimationFrame(dismissLoadingScreen);
       console.info(`[Main] Joined lobby "${lobby.roomId}" as ${playerId}`);
@@ -2866,6 +2900,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           net.sendGameReady();
         } else {
           matchStartPending = false;
+          fadeOutPregameTheme();
           window.requestAnimationFrame(dismissLoadingScreen);
         }
       });
@@ -2882,6 +2917,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         applyLocalRoleUi(localPlayerRole, localWisdomOrbs, true);
       }
       updateLoadingProgress(1, 'Entering the maze…');
+      fadeOutPregameTheme();
       window.requestAnimationFrame(dismissLoadingScreen);
     },
 

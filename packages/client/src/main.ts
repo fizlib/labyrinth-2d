@@ -30,6 +30,10 @@ import {
   RELEASE_ROOM_EVENT,
   type ReconnectSession,
 } from './net/ReconnectSession';
+import {
+  audioToggleMarkup,
+  loadAudioMutedPreference,
+} from './systems/AudioToggle';
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 const DEPLOYMENT_RELOAD_STORAGE_KEY = 'labyrinth-deployment-reload-at';
@@ -191,6 +195,7 @@ function shellMarkup(content: string, modifier = ''): string {
 }
 
 function gameMarkup(): string {
+  const audioMuted = loadAudioMutedPreference();
   return `
     <div id="game-container">
       <section
@@ -202,13 +207,15 @@ function gameMarkup(): string {
         aria-label="Loading False Arrow"
       >
         <audio
-          id="loading-theme"
+          id="pregame-theme"
           src="./assets/audio/main-theme.mp3"
           preload="auto"
           autoplay
           loop
+          ${audioMuted ? 'muted' : ''}
           aria-hidden="true"
         ></audio>
+        ${audioToggleMarkup('audio-toggle--loading', audioMuted)}
         <div class="loading-screen__landscape" aria-hidden="true">
           <img class="app-parallax__layer app-parallax__layer--sky" src="/assets/home/sky.png" alt="" />
           <img class="app-parallax__layer app-parallax__layer--clouds" src="/assets/home/clouds.png" alt="" />

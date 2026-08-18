@@ -3,6 +3,7 @@ import {
   type LobbyChatMessageKind,
   type LobbyState,
 } from '@labyrinth/shared';
+import { audioToggleMarkup } from './AudioToggle';
 
 interface LobbyOverlayOptions {
   parent: HTMLElement;
@@ -61,6 +62,7 @@ export class LobbyOverlay {
       </div>
       <div class="lobby-panel">
         <header class="lobby-header">
+          ${audioToggleMarkup('audio-toggle--lobby')}
           <div class="lobby-header__title">
             <h1 id="lobby-title">Waiting Room</h1>
           </div>
