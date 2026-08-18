@@ -4,7 +4,7 @@ import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 // then reduce it to its native size on whole-pixel coordinates.
 const TEXT_RENDER_SCALE = 8;
 const PANEL_WIDTH = 224;
-const PANEL_HEIGHT = 206;
+const PANEL_HEIGHT = 236;
 const DIVIDER_Y = 45;
 const BUTTON_WIDTH = 132;
 const BUTTON_HEIGHT = 25;
@@ -15,6 +15,8 @@ type MenuPage = 'main' | 'controls' | 'exit-confirmation';
 export interface GameMenuActions {
   onVisibilityChange: (visible: boolean) => void;
   onOpenAdminPanel: () => void;
+  isSoundMuted: () => boolean;
+  onSoundMutedChange: (muted: boolean) => void;
   onExitMatch: () => void;
 }
 
@@ -27,6 +29,8 @@ export class GameMenuHud {
   private readonly exitConfirmationPage = new Container();
   private readonly adminButton: Container;
   private readonly controlsButton: Container;
+  private readonly soundButton: Container;
+  private readonly soundButtonLabel: Text;
   private readonly exitButton: Container;
   private available = false;
   private adminAvailable = false;
@@ -61,6 +65,8 @@ export class GameMenuHud {
     const mainPageButtons = this.buildMainPage();
     this.adminButton = mainPageButtons.admin;
     this.controlsButton = mainPageButtons.controls;
+    this.soundButton = mainPageButtons.sound;
+    this.soundButtonLabel = mainPageButtons.soundLabel;
     this.exitButton = mainPageButtons.exit;
     this.layoutMainPage();
     this.buildControlsPage();
@@ -91,6 +97,7 @@ export class GameMenuHud {
 
   open(): void {
     if (!this.available || this.container.visible) return;
+    this.updateSoundButtonLabel();
     this.showPage('main');
     this.container.visible = true;
     this.actions.onVisibilityChange(true);
@@ -129,6 +136,8 @@ export class GameMenuHud {
   private buildMainPage(): {
     admin: Container;
     controls: Container;
+    sound: Container;
+    soundLabel: Text;
     exit: Container;
   } {
     const resumeButton = this.createButton('Resume game', MAIN_BUTTON_X, 58, () =>
@@ -144,13 +153,23 @@ export class GameMenuHud {
     const controlsButton = this.createButton('Controls', MAIN_BUTTON_X, 92, () =>
       this.showPage('controls'),
     );
-    const exitButton = this.createButton('Exit match', MAIN_BUTTON_X, 126, () =>
+    const soundButtonView = this.createButtonView(
+      this.getSoundButtonLabel(),
+      MAIN_BUTTON_X,
+      121,
+      () => {
+        this.actions.onSoundMutedChange(!this.actions.isSoundMuted());
+        this.updateSoundButtonLabel();
+      },
+    );
+    const exitButton = this.createButton('Exit match', MAIN_BUTTON_X, 150, () =>
       this.showPage('exit-confirmation'),
     );
     this.mainPage.addChild(
       resumeButton,
       adminButton,
       controlsButton,
+      soundButtonView.container,
       exitButton,
     );
 
@@ -159,13 +178,28 @@ export class GameMenuHud {
     hint.x = PANEL_WIDTH / 2;
     hint.y = PANEL_HEIGHT - 15;
     this.mainPage.addChild(hint);
-    return { admin: adminButton, controls: controlsButton, exit: exitButton };
+    return {
+      admin: adminButton,
+      controls: controlsButton,
+      sound: soundButtonView.container,
+      soundLabel: soundButtonView.label,
+      exit: exitButton,
+    };
   }
 
   private layoutMainPage(): void {
     this.adminButton.visible = this.adminAvailable;
     this.controlsButton.y = this.adminAvailable ? 116 : 92;
-    this.exitButton.y = this.adminAvailable ? 145 : 126;
+    this.soundButton.y = this.adminAvailable ? 145 : 121;
+    this.exitButton.y = this.adminAvailable ? 174 : 150;
+  }
+
+  private getSoundButtonLabel(): string {
+    return `Sound: ${this.actions.isSoundMuted() ? 'Off' : 'On'}`;
+  }
+
+  private updateSoundButtonLabel(): void {
+    this.soundButtonLabel.text = this.getSoundButtonLabel();
   }
 
   private buildControlsPage(): void {
@@ -273,6 +307,20 @@ export class GameMenuHud {
       labelFill?: string;
     } = {},
   ): Container {
+    return this.createButtonView(label, x, y, onPress, options).container;
+  }
+
+  private createButtonView(
+    label: string,
+    x: number,
+    y: number,
+    onPress: () => void,
+    options: {
+      width?: number;
+      dangerous?: boolean;
+      labelFill?: string;
+    } = {},
+  ): { container: Container; label: Text } {
     const { width = BUTTON_WIDTH, dangerous = false, labelFill = '#fff5cf' } = options;
     const button = new Container();
     button.x = x;
@@ -306,7 +354,7 @@ export class GameMenuHud {
     button.on('pointerover', () => drawBackground(true));
     button.on('pointerout', () => drawBackground(false));
     button.on('pointertap', onPress);
-    return button;
+    return { container: button, label: text };
   }
 
   private createText(

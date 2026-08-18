@@ -3907,6 +3907,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       setAdminPanelOpen(debugUi, true);
       debugUi.closeButton.focus();
     },
+    isSoundMuted: () => audioMuted,
+    onSoundMutedChange: (muted) => setAudioMuted(muted, true),
     onExitMatch: returnToMainMenu,
   });
   gameMenuHud.setAdminAvailable(isAdminSession);
