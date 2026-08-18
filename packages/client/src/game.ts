@@ -1617,6 +1617,7 @@ const PREGAME_THEME_START_SECONDS = 4;
 const PREGAME_THEME_FADE_MS = 1200;
 let pregameThemeUnlockCleanup: (() => void) | null = null;
 let pregameThemeFadeFrame: number | null = null;
+let pregameThemeActive = false;
 let audioMuted = loadAudioMutedPreference();
 let gameAudio: GameAudio | null = null;
 let audioToggleListenerInstalled = false;
@@ -1630,11 +1631,11 @@ function setAudioMuted(muted: boolean, persist: boolean): void {
   audioMuted = muted;
   gameAudio?.setMuted(muted);
   const theme = getPregameTheme();
-  if (theme) theme.muted = muted;
+  if (theme) theme.muted = muted || !pregameThemeActive;
   syncAudioToggleState(document, muted);
   if (persist) saveAudioMutedPreference(muted);
 
-  if (persist && !muted && theme?.paused) {
+  if (persist && !muted && pregameThemeActive && theme?.paused) {
     void theme.play().catch(() => undefined);
   }
 }
@@ -1655,6 +1656,7 @@ function startPregameTheme(): void {
   const theme = getPregameTheme();
   if (!theme) return;
 
+  pregameThemeActive = true;
   theme.muted = audioMuted;
   theme.volume = PREGAME_THEME_VOLUME;
   const cuePastQuietIntro = (): void => {
@@ -1697,6 +1699,7 @@ function startPregameTheme(): void {
 
 function fadeOutPregameTheme(): void {
   const theme = getPregameTheme();
+  pregameThemeActive = false;
   pregameThemeUnlockCleanup?.();
   if (!theme) return;
 
