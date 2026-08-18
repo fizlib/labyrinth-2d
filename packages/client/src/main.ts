@@ -168,6 +168,16 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#039;');
 }
 
+function discordInviteMarkup(): string {
+  return `
+    <a class="discord-invite" href="https://discord.gg/kJYab8PbD" target="_blank" rel="noopener noreferrer" aria-label="Join the False Arrow Discord server (opens in a new tab)">
+      <svg class="discord-invite__icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M19.5 5.34A16.3 16.3 0 0 0 15.44 4l-.5 1.03a15.3 15.3 0 0 0-5.85 0L8.56 4A16.4 16.4 0 0 0 4.5 5.34C1.93 9.15 1.24 12.86 1.59 16.52a16.5 16.5 0 0 0 4.98 2.52l1.2-1.64a10.6 10.6 0 0 1-1.89-.91l.46-.35c3.64 1.69 7.58 1.69 11.18 0l.47.35c-.61.36-1.25.66-1.9.91l1.2 1.64a16.4 16.4 0 0 0 4.98-2.52c.41-4.24-.7-7.92-2.77-11.18ZM8.73 14.27c-1.1 0-2-1-2-2.22s.88-2.22 2-2.22c1.13 0 2.03 1 2 2.22 0 1.22-.88 2.22-2 2.22Zm6.55 0c-1.1 0-2-1-2-2.22s.88-2.22 2-2.22c1.12 0 2.02 1 2 2.22 0 1.22-.88 2.22-2 2.22Z" />
+      </svg>
+      <span>Join Discord</span>
+    </a>`;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -520,6 +530,7 @@ class AppController {
         </button>
         <p id="auth-status" class="app-status" aria-live="polite"></p>
         <p class="app-panel__fineprint">Guest progress won’t be saved.</p>
+        ${discordInviteMarkup()}
       </section>`,
       'app-screen--auth',
     );
@@ -776,6 +787,7 @@ class AppController {
             <button class="pixel-button menu-button--coming-soon" type="button" disabled>Leaderboard</button>
             <button class="pixel-button menu-button--coming-soon" type="button" disabled>Settings</button>
             <button id="sign-out" class="menu-sign-out" type="button">${isGuest ? 'Leave Guest Session' : 'Sign Out'}</button>
+            ${discordInviteMarkup()}
           </nav>
           <div id="menu-notice" class="app-alert app-alert--notice" role="status" aria-live="polite" hidden></div>
           <p id="menu-status" class="app-status" aria-live="polite"></p>
