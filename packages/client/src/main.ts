@@ -30,12 +30,14 @@ import {
   RELEASE_ROOM_EVENT,
   type ReconnectSession,
 } from './net/ReconnectSession';
+import { audioToggleMarkup, loadAudioMutedPreference } from './systems/AudioToggle';
 import {
-  audioToggleMarkup,
-  loadAudioMutedPreference,
-} from './systems/AudioToggle';
+  formatCommunityRoundCountdown,
+  getCommunityRoundState,
+} from './systems/CommunityRoundSchedule';
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
+const COMMUNITY_ROUND_STARTED_STORAGE_PREFIX = 'labyrinth-community-round-started';
 const DEPLOYMENT_RELOAD_STORAGE_KEY = 'labyrinth-deployment-reload-at';
 const DEPLOYMENT_RELOAD_COOLDOWN_MS = 60_000;
 
@@ -191,6 +193,36 @@ function formatDate(value: string): string {
   }).format(date);
 }
 
+function formatCommunityRoundDate(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function getCommunityRoundStorageKey(profileId: string): string {
+  return `${COMMUNITY_ROUND_STARTED_STORAGE_PREFIX}:${profileId}`;
+}
+
+function loadStartedCommunityRound(profileId: string): string | null {
+  try {
+    return window.localStorage.getItem(getCommunityRoundStorageKey(profileId));
+  } catch {
+    return null;
+  }
+}
+
+function saveStartedCommunityRound(profileId: string, occurrenceKey: string): void {
+  try {
+    window.localStorage.setItem(getCommunityRoundStorageKey(profileId), occurrenceKey);
+  } catch {
+    // The round still launches when storage is unavailable.
+  }
+}
+
 function avatarMarkup(profile: Profile, size: 'small' | 'large'): string {
   const initial = Array.from(profile.display_name.trim())[0]?.toUpperCase() ?? '?';
   const image = profile.avatar_url
@@ -336,6 +368,7 @@ class AppController {
   private sessionRevision = 0;
   private gameLaunchStarted = false;
   private restoringInitialSession = true;
+  private communityRoundTimer: number | null = null;
   private pendingRoomCode = (() => {
     const code = normalizeRoomCode(
       new URL(window.location.href).searchParams.get('room'),
@@ -719,6 +752,7 @@ class AppController {
 
   private renderMenu(): void {
     if (!this.profile || !this.identityMode) return;
+    this.stopCommunityRoundTimer();
 
     const playAgain = window.sessionStorage.getItem(PLAY_AGAIN_STORAGE_KEY) === '1';
     if (playAgain) {
@@ -763,6 +797,13 @@ class AppController {
     const ratingLabel = this.playerStats
       ? `Elo ${this.playerStats.rating} · ${this.playerStats.wins}W–${this.playerStats.losses}L`
       : 'Unranked';
+    const communityRound = getCommunityRoundState(
+      new Date(),
+      loadStartedCommunityRound(this.profile.id),
+    );
+    const communityRoundStatus = communityRound.isOpen
+      ? 'Round is open'
+      : `Starts in ${formatCommunityRoundCountdown(communityRound.remainingMs)}`;
     root.innerHTML = shellMarkup(
       `
       <div class="app-menu-shell">
@@ -780,12 +821,16 @@ class AppController {
           </header>
           <div class="menu-divider" aria-hidden="true"><span>◇</span></div>
           <nav class="menu-actions" aria-label="Main menu">
+            <section id="community-round-card" class="community-round-card${communityRound.isOpen ? ' community-round-card--open' : ''}" aria-labelledby="community-round-title">
+              <span class="community-round-card__eyebrow">Community Round</span>
+              <strong id="community-round-title" class="community-round-card__date">${escapeHtml(formatCommunityRoundDate(communityRound.occurrence))}</strong>
+              <span id="community-round-status" class="community-round-card__status" aria-live="polite">${escapeHtml(communityRoundStatus)}</span>
+              <button id="community-round-join" class="community-round-card__button" type="button" data-occurrence-key="${communityRound.occurrenceKey}" ${communityRound.isOpen ? '' : 'disabled'}>${communityRound.isOpen ? 'Join Round' : '🔒 Join Round'}</button>
+            </section>
             <button id="quick-play" class="pixel-button pixel-button--primary" type="button">Quick Play</button>
             <button id="create-game" class="pixel-button" type="button">Create Private Game</button>
             <button id="join-game" class="pixel-button" type="button">Join with Code</button>
             ${this.profile.is_admin ? '<a id="open-style-editor" class="pixel-button" href="/style-editor.html" target="_blank" rel="noopener">Style Editor</a>' : ''}
-            <button class="pixel-button menu-button--coming-soon" type="button" disabled>Leaderboard</button>
-            <button class="pixel-button menu-button--coming-soon" type="button" disabled>Settings</button>
             <button id="sign-out" class="menu-sign-out" type="button">${isGuest ? 'Leave Guest Session' : 'Sign Out'}</button>
             ${discordInviteMarkup()}
           </nav>
@@ -798,6 +843,20 @@ class AppController {
 
     this.activateAvatarFallbacks();
 
+    document
+      .querySelector<HTMLButtonElement>('#community-round-join')
+      ?.addEventListener('click', () => {
+        if (!this.profile) return;
+        const currentRound = getCommunityRoundState(
+          new Date(),
+          loadStartedCommunityRound(this.profile.id),
+        );
+        if (!currentRound.isOpen) {
+          this.updateCommunityRoundCard();
+          return;
+        }
+        void this.launchGame('quick');
+      });
     document
       .querySelector<HTMLButtonElement>('#quick-play')
       ?.addEventListener('click', () => {
@@ -828,6 +887,11 @@ class AppController {
       });
 
     scheduleGameWarmup();
+    this.updateCommunityRoundCard();
+    this.communityRoundTimer = window.setInterval(
+      () => this.updateCommunityRoundCard(),
+      1_000,
+    );
 
     if (playAgain) {
       window.setTimeout(() => void this.launchGame('quick'), 0);
@@ -1008,6 +1072,7 @@ class AppController {
   }
 
   private async signOut(statusSelector = '#menu-status'): Promise<void> {
+    this.stopCommunityRoundTimer();
     window.dispatchEvent(new Event(RELEASE_ROOM_EVENT));
     clearReconnectSession();
     if (this.identityMode === 'guest') {
@@ -1050,6 +1115,16 @@ class AppController {
     existingReconnectSession?: ReconnectSession,
   ): Promise<void> {
     if (this.gameLaunchStarted || !this.profile || !this.identityMode) return;
+    const profileId = this.profile.id;
+    const communityRound = getCommunityRoundState(
+      new Date(),
+      loadStartedCommunityRound(profileId),
+    );
+    const communityRoundOccurrenceKey =
+      joinMode === 'quick' && communityRound.isOpen
+        ? communityRound.occurrenceKey
+        : undefined;
+    this.stopCommunityRoundTimer();
     this.gameLaunchStarted = true;
     this.view = 'launching-game';
     root.innerHTML = gameMarkup();
@@ -1072,6 +1147,9 @@ class AppController {
         displayName: this.profile.display_name,
         reconnectSession,
         accessToken: this.session?.access_token,
+        onMatchStarted: communityRoundOccurrenceKey
+          ? () => saveStartedCommunityRound(profileId, communityRoundOccurrenceKey)
+          : undefined,
       });
       this.view = 'game';
     } catch {
@@ -1083,6 +1161,41 @@ class AppController {
     root.querySelectorAll<HTMLImageElement>('.profile-avatar img').forEach((image) => {
       image.addEventListener('error', () => image.remove(), { once: true });
     });
+  }
+
+  private updateCommunityRoundCard(): void {
+    if (!this.profile || this.view !== 'menu') {
+      this.stopCommunityRoundTimer();
+      return;
+    }
+
+    const card = document.querySelector<HTMLElement>('#community-round-card');
+    const date = document.querySelector<HTMLElement>('#community-round-title');
+    const status = document.querySelector<HTMLElement>('#community-round-status');
+    const button = document.querySelector<HTMLButtonElement>('#community-round-join');
+    if (!card || !date || !status || !button) {
+      this.stopCommunityRoundTimer();
+      return;
+    }
+
+    const communityRound = getCommunityRoundState(
+      new Date(),
+      loadStartedCommunityRound(this.profile.id),
+    );
+    card.classList.toggle('community-round-card--open', communityRound.isOpen);
+    date.textContent = formatCommunityRoundDate(communityRound.occurrence);
+    status.textContent = communityRound.isOpen
+      ? 'Round is open'
+      : `Starts in ${formatCommunityRoundCountdown(communityRound.remainingMs)}`;
+    button.dataset.occurrenceKey = communityRound.occurrenceKey;
+    button.disabled = !communityRound.isOpen;
+    button.textContent = communityRound.isOpen ? 'Join Round' : '🔒 Join Round';
+  }
+
+  private stopCommunityRoundTimer(): void {
+    if (this.communityRoundTimer === null) return;
+    window.clearInterval(this.communityRoundTimer);
+    this.communityRoundTimer = null;
   }
 }
 

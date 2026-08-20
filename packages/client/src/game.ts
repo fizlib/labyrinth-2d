@@ -10,6 +10,7 @@ import {
   Container,
   Text,
   TextStyle,
+  CanvasTextMetrics,
   TextureStyle,
   Graphics,
 } from 'pixi.js';
@@ -64,6 +65,7 @@ import type {
   CageState,
   SpikePlatePlacement,
   SpikePlateState,
+  PressurePlateState,
 } from '@labyrinth/shared';
 import { NetworkManager, type NetworkCallbacks } from './net/NetworkManager';
 import type { NetworkDiagnostics } from './net/NetworkDiagnosticsTracker';
@@ -103,6 +105,16 @@ import {
 } from './systems/AudioToggle';
 import { GameAudio, type AudioPoint, type FootstepSurface } from './systems/GameAudio';
 import { ReconnectOverlay } from './systems/ReconnectOverlay';
+import {
+  RecordingStudio,
+  type RecordingActorRenderState,
+  type RecordingMoveInput,
+} from './systems/RecordingStudio';
+import {
+  deriveRecordingWorldState,
+  getRecordingWorldAudioEvents,
+  type RecordingWorldState,
+} from './systems/RecordingPlateSimulation';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
@@ -129,9 +141,7 @@ const WARDEN_SPAWN_DIALOGUE_PAGES = [
   'Your goal is to delay and misdirect the survivors until time runs out. Use your complete map to lead them into traps.',
 ];
 
-const EMPTY_TRAP_DIALOGUE_PAGES = [
-  'There are no free survivors in this trap cell.',
-];
+const EMPTY_TRAP_DIALOGUE_PAGES = ['There are no free survivors in this trap cell.'];
 
 const TRAP_RELEASE_COOLDOWN_DIALOGUE_PAGES = [
   'You must wait 10 seconds before trapping someone in this trap cell again.',
@@ -1570,12 +1580,12 @@ const plateAnimTimers: Map<number, number> = new Map();
  */
 function updatePressurePlateAnimations(
   renderer: TilemapRenderer,
-  serverState: GameState,
+  pressurePlateStates: readonly PressurePlateState[],
   dt: number,
 ): void {
   const frameInterval = 1 / PLATE_ANIM_SPEED;
   const pressedPlateIds = new Set(
-    serverState.pressurePlateStates
+    pressurePlateStates
       .filter((plateState) => plateState.pressed)
       .map((plateState) => plateState.plateId),
   );
@@ -1835,6 +1845,7 @@ export interface GameLaunchOptions {
   displayName: string;
   reconnectSession: ReconnectSession;
   accessToken?: string;
+  onMatchStarted?: () => void;
 }
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
@@ -1875,15 +1886,18 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let latestAssetProgress = 0.06;
   let latestAssetStatus = 'Lighting the first torch…';
   let matchStartPending = false;
+  let matchStartReported = false;
+  const reportMatchStarted = (): void => {
+    if (matchStartReported) return;
+    matchStartReported = true;
+    options.onMatchStarted?.();
+  };
   let assets!: GameAssets;
   let assetsReady = false;
   const assetLoadPromise = loadAssets((progress, status) => {
     latestAssetProgress = progress;
     latestAssetStatus = status;
-    updateLoadingProgress(
-      progress,
-      matchStartPending ? 'Game is starting…' : status,
-    );
+    updateLoadingProgress(progress, matchStartPending ? 'Game is starting…' : status);
   });
 
   // ── World Container ───────────────────────────────────────────────────
@@ -1909,6 +1923,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const playerNameTagLayer = new Container();
   playerNameTagLayer.sortableChildren = true;
   app.stage.addChild(playerNameTagLayer);
+  // Name tags and speech bubbles are diegetic recording content, so they remain
+  // visible when clean-frame mode hides the rest of the HUD.
+  const recordingActorBubbleLayer = new Container();
+  recordingActorBubbleLayer.sortableChildren = true;
+  app.stage.addChild(recordingActorBubbleLayer);
+  const cleanUiRenderState = new Map<(typeof app.stage.children)[number], boolean>();
 
   const matchHud = new MatchHud(INTERNAL_WIDTH, INTERNAL_HEIGHT, {
     onPlayAgain: () => {
@@ -1943,6 +1963,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let debugUi: DebugUiDom | null = null;
   let statusEl: HTMLDivElement | null = null;
   let isAdminSession = false;
+  let recordingStudio: RecordingStudio | null = null;
+  let recordingStudioMapSeed: number | null = null;
+  let recordingWorldState: RecordingWorldState | null = null;
+  let currentRecordingActorStates: RecordingActorRenderState[] = [];
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
@@ -1962,7 +1986,16 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     teamId: number;
   }
 
+  interface RecordingActorBubbleData {
+    container: Container;
+    background: Graphics;
+    text: Text;
+    value: string;
+  }
+
   const playerSprites: Map<string, PlayerSpriteData> = new Map();
+  const recordingActorBubbles = new Map<string, RecordingActorBubbleData>();
+  const renderedRecordingActorIds = new Set<string>();
   const cageVisuals = new Map<number, CageVisual>();
 
   function clearCageVisuals(): void {
@@ -2159,6 +2192,90 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       data.container.destroy({ children: true });
       playerSprites.delete(playerId);
     }
+    const bubble = recordingActorBubbles.get(playerId);
+    if (bubble) {
+      bubble.container.parent?.removeChild(bubble.container);
+      bubble.container.destroy({ children: true });
+      recordingActorBubbles.delete(playerId);
+    }
+  }
+
+  function syncRecordingActorBubble(
+    actor: RecordingActorRenderState,
+    data: PlayerSpriteData,
+  ): void {
+    let bubble = recordingActorBubbles.get(actor.spriteId);
+    if (!actor.chatText) {
+      if (bubble) bubble.container.visible = false;
+      return;
+    }
+
+    if (!bubble) {
+      const container = new Container();
+      const background = new Graphics();
+      const text = new Text({
+        text: actor.chatText,
+        style: new TextStyle({
+          fontFamily: 'PixelOperator8',
+          fontSize: 64,
+          fill: '#171717',
+          align: 'center',
+          wordWrap: true,
+          wordWrapWidth: 880,
+          lineHeight: 72,
+        }),
+        roundPixels: true,
+        resolution: 2,
+      });
+      text.anchor.set(0.5, 1);
+      text.scale.set(0.125);
+      container.addChild(background, text);
+      container.eventMode = 'none';
+      recordingActorBubbleLayer.addChild(container);
+      bubble = { container, background, text, value: '' };
+      recordingActorBubbles.set(actor.spriteId, bubble);
+    }
+
+    if (bubble.value !== actor.chatText) {
+      bubble.value = actor.chatText;
+      bubble.text.text = actor.chatText;
+      // A centered, wrapped Pixi Text reports its configured wrap width rather
+      // than the width of a short line. Size from the actual line metrics so a
+      // word such as "stay" produces a compact bubble while long cues still wrap.
+      const metrics = CanvasTextMetrics.measureText(
+        actor.chatText,
+        bubble.text.style,
+        undefined,
+        true,
+      );
+      const width = Math.max(
+        26,
+        Math.min(122, metrics.maxLineWidth * bubble.text.scale.x + 10),
+      );
+      const height = Math.max(18, metrics.height * bubble.text.scale.y + 8);
+      bubble.text.y = -7;
+      bubble.background
+        .clear()
+        .roundRect(-width / 2, -height - 3, width, height, 4)
+        .fill({ color: 0xffffff, alpha: 0.98 })
+        .stroke({ color: 0x272727, width: 1 })
+        .poly([-4, -3, 0, 2, 4, -3])
+        .fill({ color: 0xffffff, alpha: 0.98 })
+        .stroke({ color: 0x272727, width: 1 });
+    }
+
+    const scaleX = worldContainer.scale.x;
+    const scaleY = worldContainer.scale.y;
+    const screenX = Math.round(worldContainer.x + data.container.x * scaleX);
+    // Anchor the pointer a couple of world pixels above this skin's actual
+    // rendered head. A fixed offset left a large gap for shorter characters,
+    // especially at the game's higher integer zoom levels.
+    const bubbleAnchorY = data.container.y - Math.max(18, data.sprite.height) - 2;
+    const screenY = Math.round(worldContainer.y + bubbleAnchorY * scaleY);
+    bubble.container.x = screenX;
+    bubble.container.y = screenY;
+    bubble.container.zIndex = 1_000_000 + screenY;
+    bubble.container.visible = true;
   }
 
   const PORTAL_ESCAPE_ANIMATION_DURATION = 0.6;
@@ -2228,6 +2345,93 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   let latestServerState: GameState | null = null;
   const activatedWardstoneIndexes = new Set<number>();
+
+  function destroyRecordingStudio(): void {
+    if (!recordingStudio) return;
+    const spriteIds = recordingStudio.getActorSpriteIds();
+    recordingStudio.destroy();
+    recordingStudio = null;
+    recordingStudioMapSeed = null;
+    recordingWorldState = null;
+    currentRecordingActorStates = [];
+    renderedRecordingActorIds.clear();
+    for (const spriteId of spriteIds) removePlayerSprite(spriteId);
+  }
+
+  function ensureRecordingStudio(mapSeed: number): void {
+    if (!isAdminSession || !currentMap || !currentLayout) {
+      destroyRecordingStudio();
+      return;
+    }
+    if (recordingStudio && recordingStudioMapSeed === mapSeed) return;
+    destroyRecordingStudio();
+
+    recordingStudioMapSeed = mapSeed;
+    recordingStudio = new RecordingStudio({
+      characterNames: PLAYER_CHARACTER_NAMES,
+      teamNames: SQUAD_COLORS.map(
+        (color) => `${color[0].toUpperCase()}${color.slice(1)} squad`,
+      ),
+      storageKey: `labyrinth-recording-studio:v1:${mapSeed}`,
+      getLocalPosition: () => ({ x: localX, y: localY, facing: localFacing }),
+      moveActor: (pose, input: RecordingMoveInput, dt) => {
+        const moving = input.up || input.down || input.left || input.right;
+        const facing = moving ? deriveFacingDirection(input, pose.facing) : pose.facing;
+        const state = latestServerState;
+        if (!state || !currentMap || !currentLayout || !moving) {
+          return { x: pose.x, y: pose.y, facing };
+        }
+        const result = applyInputWithCollision(
+          pose.x,
+          pose.y,
+          input,
+          dt,
+          currentMap,
+          state.portal,
+          currentLayout.bridges,
+          state.bridgeStates,
+          currentLayout.swamps,
+          currentLayout.chestDeadEnds,
+          currentLayout.swordFields,
+          state.swordFieldStates,
+          state.cageStates,
+          undefined,
+          currentLayout.tIntersectionDecorations,
+          currentLayout.decoratedVerticalPassages,
+          currentLayout.spikeGateObstacles,
+          recordingWorldState?.spikeGateStates ?? state.spikeGateStates,
+        );
+        return { x: result.x, y: result.y, facing };
+      },
+      getZoom: () => zoomLevel,
+      setZoom: (zoom) => {
+        zoomLevel = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+        zoomToggleState = 'default';
+      },
+      onInputCaptureChange: () => {
+        resetAllInput();
+        syncLocalInputAvailability();
+      },
+      onCleanModeChange: () => {
+        resetAllInput();
+      },
+    });
+    currentRecordingActorStates = recordingStudio.getActorStates();
+  }
+
+  function refreshRecordingWorldState(gameState: GameState): RecordingWorldState | null {
+    if (!recordingStudio || !currentLayout) {
+      recordingWorldState = null;
+      return null;
+    }
+    currentRecordingActorStates = recordingStudio.getActorStates();
+    recordingWorldState = deriveRecordingWorldState(
+      currentLayout,
+      gameState,
+      currentRecordingActorStates,
+    );
+    return recordingWorldState;
+  }
 
   function syncActivatedWardstoneIndexes(gameState: GameState): void {
     activatedWardstoneIndexes.clear();
@@ -2361,6 +2565,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
 
     if (latestServerState) {
+      const effectiveRecordingState = refreshRecordingWorldState(latestServerState);
       replacementRenderer.syncBridgeStates(latestServerState.bridgeStates, false);
       replacementRenderer.syncSwordFieldStates(
         latestServerState.swordFieldStates,
@@ -2368,8 +2573,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         false,
       );
       replacementRenderer.syncSpikeGateStates(
-        latestServerState.spikeGateStates,
-        latestServerState.spikePlateStates,
+        effectiveRecordingState?.spikeGateStates ?? latestServerState.spikeGateStates,
+        effectiveRecordingState?.spikePlateStates ?? latestServerState.spikePlateStates,
         false,
       );
       replacementRenderer.syncChestStates(latestServerState.chestStates, false);
@@ -2475,12 +2680,17 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   }
 
   function getAudioListener(): AudioPoint {
-    return { x: localX, y: localY };
+    return recordingStudio?.getCameraOverride() ?? { x: localX, y: localY };
   }
 
   function getFootstepSurface(x: number, y: number): FootstepSurface {
     const tileSize = currentMap?.tileSize ?? TILE_SIZE;
-    const swampTerrain = getPlayerSwampTerrain(currentLayout?.swamps ?? [], x, y, tileSize);
+    const swampTerrain = getPlayerSwampTerrain(
+      currentLayout?.swamps ?? [],
+      x,
+      y,
+      tileSize,
+    );
     if (swampTerrain === 'deep-mud') return 'splash';
     if (swampTerrain === 'firm-ground') return 'mud';
 
@@ -2551,12 +2761,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   }
 
   function syncWorldAudio(previous: GameState | null, next: GameState): void {
-    if (
-      !previous ||
-      !currentLayout ||
-      !currentMap ||
-      next.match.status !== 'running'
-    ) {
+    if (!previous || !currentLayout || !currentMap || next.match.status !== 'running') {
       return;
     }
 
@@ -2641,7 +2846,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       const before = previous.swordFieldStates.find(
         (candidate) => candidate.swordFieldIndex === state.swordFieldIndex,
       );
-      if (!before || before.loweringStartedTick !== null || state.loweringStartedTick === null) {
+      if (
+        !before ||
+        before.loweringStartedTick !== null ||
+        state.loweringStartedTick === null
+      ) {
         continue;
       }
       const source = getSwordFieldAudioPoint(state.swordFieldIndex);
@@ -2678,6 +2887,77 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
   }
 
+  function syncRecordingWorldAudio(
+    previous: RecordingWorldState | null,
+    next: RecordingWorldState,
+  ): void {
+    if (!previous || !currentLayout || !currentMap) return;
+    const listener = getAudioListener();
+    const tileSize = currentMap.tileSize;
+
+    for (const event of getRecordingWorldAudioEvents(previous, next)) {
+      if (event.kind === 'pressure-plate') {
+        const placement = currentLayout.pressurePlates.find(
+          (candidate) => candidate.id === event.plateId,
+        );
+        if (placement) {
+          worldAudio.playPressurePlate(
+            event.state,
+            {
+              x: (placement.tileX + 0.5) * tileSize,
+              y: (placement.tileY + 0.5) * tileSize,
+            },
+            listener,
+          );
+        }
+        continue;
+      }
+
+      if (event.kind === 'spike-plate') {
+        let placement: SpikePlatePlacement | undefined;
+        for (
+          let obstacleIndex = 0;
+          obstacleIndex < currentLayout.spikeGateObstacles.length && !placement;
+          obstacleIndex++
+        ) {
+          placement = getSpikeGatePlatePlacements(
+            currentLayout.spikeGateObstacles[obstacleIndex],
+            obstacleIndex,
+            tileSize,
+          ).find((candidate) => candidate.spikePlateIndex === event.spikePlateIndex);
+        }
+        if (placement) {
+          worldAudio.playPressurePlate(
+            event.state,
+            {
+              x: placement.x + placement.width / 2,
+              y: placement.y + placement.height / 2,
+            },
+            listener,
+          );
+        }
+        continue;
+      }
+
+      if (event.kind === 'gate') {
+        const gate = currentLayout.gates[event.gateIndex];
+        if (gate) worldAudio.playGate(event.open, getGateAudioPoint(gate), listener);
+        continue;
+      }
+
+      const obstacleIndex = Math.floor(event.spikeGateIndex / SPIKE_GATES_PER_OBSTACLE);
+      const gateIndex = event.spikeGateIndex % SPIKE_GATES_PER_OBSTACLE;
+      const obstacle = currentLayout.spikeGateObstacles[obstacleIndex];
+      if (!obstacle || gateIndex >= obstacle.gateCount) continue;
+      const bounds = getSpikeGateCollisionBounds(obstacle, gateIndex, tileSize);
+      worldAudio.playGate(
+        event.open,
+        { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 },
+        listener,
+      );
+    }
+  }
+
   let applyLocalRoleUi: (
     role: PlayerRole,
     wisdomOrbs: number,
@@ -2694,8 +2974,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let setGameMenuAvailable: (available: boolean) => void = () => {};
   let syncLocalInputAvailability: () => void = () => {};
   let matchRuntimeReady = false;
-  let deferredRoomAdmission: Parameters<NetworkCallbacks['onRoomJoined']> | null =
-    null;
+  let deferredRoomAdmission: Parameters<NetworkCallbacks['onRoomJoined']> | null = null;
   let deferredTickUpdate: GameState | null = null;
   const deferredMatchEvents: Array<() => void> = [];
 
@@ -2714,6 +2993,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       matchRuntimeReady = false;
       DebugSettings.setAdminAccess(isAdmin);
       isAdminSession = isAdmin;
+      if (!isAdmin) destroyRecordingStudio();
       setNetworkStatsState(networkStatsHud, false, false);
       gameMenuHud?.setAdminAvailable(isAdmin);
       if (isAdmin && !debugUi) {
@@ -2795,6 +3075,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       resumed,
     ) => {
       matchStartPending = gameState.match.status === 'loading';
+      if (gameState.match.status === 'running') reportMatchStarted();
       const isResumingDeferredAdmission = deferredRoomAdmission !== null;
       matchRuntimeReady = false;
       if (!isResumingDeferredAdmission) {
@@ -2823,13 +3104,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       syncActivatedWardstoneIndexes(gameState);
       showLoadingScreen(
         0.92,
-        matchStartPending
-          ? 'Game is starting…'
-          : 'Carving your path through the maze…',
+        matchStartPending ? 'Game is starting…' : 'Carving your path through the maze…',
       );
       runAfterLoadingScreenPaint(() => {
         DebugSettings.setAdminAccess(isAdmin);
         isAdminSession = isAdmin;
+        if (!isAdmin) destroyRecordingStudio();
         gameMenuHud?.setAdminAvailable(isAdmin);
         if (isAdmin) {
           net.sendDebugSetToolsEnabled(DebugSettings.getFlags().debugToolsEnabled);
@@ -2856,9 +3136,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         lobbyOverlay = null;
         updateLoadingProgress(
           0.99,
-          matchStartPending
-            ? 'Game is starting…'
-            : 'Carving your path through the maze…',
+          matchStartPending ? 'Game is starting…' : 'Carving your path through the maze…',
         );
         console.info(
           `[Main] ${resumed ? 'Resumed' : 'Joined'} room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
@@ -2934,6 +3212,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         const activeTilemapRenderer = tilemapRenderer;
         if (!activeTilemapRenderer)
           throw new Error('Missing tilemap after room admission');
+        if (isAdmin) ensureRecordingStudio(mapSeed);
+        const initialRecordingWorldState = refreshRecordingWorldState(gameState);
         activeTilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
         activeTilemapRenderer.syncSwordFieldStates(
           gameState.swordFieldStates,
@@ -2941,8 +3221,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           false,
         );
         activeTilemapRenderer.syncSpikeGateStates(
-          gameState.spikeGateStates,
-          gameState.spikePlateStates,
+          initialRecordingWorldState?.spikeGateStates ?? gameState.spikeGateStates,
+          initialRecordingWorldState?.spikePlateStates ?? gameState.spikePlateStates,
           false,
         );
         activeTilemapRenderer.syncChestStates(gameState.chestStates, false);
@@ -3114,10 +3394,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         deferredTickUpdate = null;
         if (queuedTickUpdate) networkCallbacks.onTickUpdate(queuedTickUpdate);
         if (gameState.match.status === 'loading') {
-          updateLoadingProgress(
-            1,
-            'Game is starting… Waiting for other players.',
-          );
+          updateLoadingProgress(1, 'Game is starting… Waiting for other players.');
           net.sendGameReady();
         } else {
           matchStartPending = false;
@@ -3128,11 +3405,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onMatchStarted: (gameState) => {
-      if (
-        deferMatchEvent(() => networkCallbacks.onMatchStarted(gameState))
-      )
-        return;
+      if (deferMatchEvent(() => networkCallbacks.onMatchStarted(gameState))) return;
       matchStartPending = false;
+      reportMatchStarted();
       networkCallbacks.onTickUpdate(gameState);
       if (localPlayerRole) {
         applyLocalRoleUi(localPlayerRole, localWisdomOrbs, true);
@@ -3152,6 +3427,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       const localPlayerId = net.playerId;
       matchHud.sync(gameState.match);
       snapshotBuffer.push(gameState);
+      // Keep fake-actor plate occupancy in the state applied by every server
+      // snapshot. Otherwise the 20 Hz authoritative closed state repeatedly
+      // cancels the local spike-gate opening animation before it can advance.
+      const effectiveRecordingState = refreshRecordingWorldState(gameState);
       tilemapRenderer?.syncBridgeStates(gameState.bridgeStates, true);
       tilemapRenderer?.syncSwordFieldStates(
         gameState.swordFieldStates,
@@ -3159,8 +3438,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         true,
       );
       tilemapRenderer?.syncSpikeGateStates(
-        gameState.spikeGateStates,
-        gameState.spikePlateStates,
+        effectiveRecordingState?.spikeGateStates ?? gameState.spikeGateStates,
+        effectiveRecordingState?.spikePlateStates ?? gameState.spikePlateStates,
         true,
       );
       tilemapRenderer?.syncChestStates(gameState.chestStates, true);
@@ -3262,7 +3541,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
       const activeIds = new Set(gameState.players.map((p) => p.id));
       for (const [id] of playerSprites) {
-        if (!activeIds.has(id)) {
+        if (!activeIds.has(id) && !recordingStudio?.hasActorSpriteId(id)) {
           removePlayerSprite(id);
           knownRemotePlayers.delete(id);
         }
@@ -3291,9 +3570,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onRunestoneActivated: (runestoneIndex) => {
-      if (
-        deferMatchEvent(() => networkCallbacks.onRunestoneActivated(runestoneIndex))
-      )
+      if (deferMatchEvent(() => networkCallbacks.onRunestoneActivated(runestoneIndex)))
         return;
       console.info(`[Main] Runestone ${runestoneIndex} activated!`);
       const wasAlreadyActivated = activatedWardstoneIndexes.has(runestoneIndex);
@@ -3324,9 +3601,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onChestOpened: (chestIndex, playerId) => {
-      if (
-        deferMatchEvent(() => networkCallbacks.onChestOpened(chestIndex, playerId))
-      )
+      if (deferMatchEvent(() => networkCallbacks.onChestOpened(chestIndex, playerId)))
         return;
       console.info(`[Main] Chest ${chestIndex} opened by ${playerId}`);
       const source = getChestAudioPoint(chestIndex);
@@ -3338,9 +3613,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onWisdomOrbGranted: (chestIndex, wisdomOrbs) => {
       if (
-        deferMatchEvent(() =>
-          networkCallbacks.onWisdomOrbGranted(chestIndex, wisdomOrbs),
-        )
+        deferMatchEvent(() => networkCallbacks.onWisdomOrbGranted(chestIndex, wisdomOrbs))
       )
         return;
       localWisdomOrbs = wisdomOrbs;
@@ -3354,9 +3627,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onAllRunestonesActivated: (portalX, portalY) => {
       if (
-        deferMatchEvent(() =>
-          networkCallbacks.onAllRunestonesActivated(portalX, portalY),
-        )
+        deferMatchEvent(() => networkCallbacks.onAllRunestonesActivated(portalX, portalY))
       )
         return;
       console.info(
@@ -3370,9 +3641,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     onWisdomOrbUsed: (hint, remainingWisdomOrbs) => {
       if (
-        deferMatchEvent(() =>
-          networkCallbacks.onWisdomOrbUsed(hint, remainingWisdomOrbs),
-        )
+        deferMatchEvent(() => networkCallbacks.onWisdomOrbUsed(hint, remainingWisdomOrbs))
       )
         return;
       localWisdomOrbs = remainingWisdomOrbs;
@@ -3398,11 +3667,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         tilemapRenderer?.beginSwordFieldLowering(hint.swordFieldIndex);
         const source = getSwordFieldAudioPoint(hint.swordFieldIndex);
         if (source) {
-          worldAudio.playSwordField(
-            hint.swordFieldIndex,
-            source,
-            getAudioListener(),
-          );
+          worldAudio.playSwordField(hint.swordFieldIndex, source, getAudioListener());
         }
         console.info(
           `[WisdomOrb][Response] Server accepted sword field ${hint.swordFieldIndex}; remaining=${remainingWisdomOrbs}`,
@@ -3416,11 +3681,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onPlayerRoleChanged: (role, wisdomOrbs) => {
-      if (
-        deferMatchEvent(() =>
-          networkCallbacks.onPlayerRoleChanged(role, wisdomOrbs),
-        )
-      )
+      if (deferMatchEvent(() => networkCallbacks.onPlayerRoleChanged(role, wisdomOrbs)))
         return;
       console.info(`[Main] Debug role changed to ${role}`);
       if (net.playerId) debugPlayerRoles.set(net.playerId, role);
@@ -3428,9 +3689,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onDebugPlayerRole: (playerId, role) => {
-      if (
-        deferMatchEvent(() => networkCallbacks.onDebugPlayerRole(playerId, role))
-      )
+      if (deferMatchEvent(() => networkCallbacks.onDebugPlayerRole(playerId, role)))
         return;
       debugPlayerRoles.set(playerId, role);
       if (debugUi && latestServerState) {
@@ -3449,9 +3708,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
 
     onGateStateChanged: (gateIndex, open) => {
-      if (
-        deferMatchEvent(() => networkCallbacks.onGateStateChanged(gateIndex, open))
-      )
+      if (deferMatchEvent(() => networkCallbacks.onGateStateChanged(gateIndex, open)))
         return;
       console.info(`[Main] Gate ${gateIndex} ${open ? 'OPENED' : 'CLOSED'}`);
       if (currentLayout && currentMap && tilemapRenderer) {
@@ -3537,10 +3794,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       chatHud?.addSystemMessage(
         `${displayName} has escaped the maze via portal. ${remainingToEscape} more ${noun} need to escape.`,
       );
-      worldAudio.playTeleport(
-        { x: portalX, y: portalY },
-        getAudioListener(),
-      );
+      worldAudio.playTeleport({ x: portalX, y: portalY }, getAudioListener());
       startPortalEscapeAnimation(playerId, portalX, portalY);
       if (playerId === net.playerId) {
         resetAllInput();
@@ -4015,6 +4269,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   window.addEventListener(
     'beforeunload',
     () => {
+      destroyRecordingStudio();
       worldAudio.destroy();
       if (gameAudio === worldAudio) gameAudio = null;
       chatHud?.destroy();
@@ -4066,17 +4321,32 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     const activeLocalCage = latestServerState
       ? findActivePlayerCage(latestServerState.cageStates, net.playerId)
       : null;
+    const recordingBlocksLocalMovement = recordingStudio?.blocksLocalMovement() ?? false;
     const movementInput = {
-      up: chatInputActive || gameMenuOpen || !localCanAct ? false : activeKeys.up,
-      down: chatInputActive || gameMenuOpen || !localCanAct ? false : activeKeys.down,
+      up:
+        chatInputActive || gameMenuOpen || recordingBlocksLocalMovement || !localCanAct
+          ? false
+          : activeKeys.up,
+      down:
+        chatInputActive || gameMenuOpen || recordingBlocksLocalMovement || !localCanAct
+          ? false
+          : activeKeys.down,
       // Once opened, the cage permits only its north/south escape route. A
       // closed prisoner still animates against all four sides without moving.
       left:
-        chatInputActive || gameMenuOpen || !localCanAct || activeLocalCage?.opened
+        chatInputActive ||
+        gameMenuOpen ||
+        recordingBlocksLocalMovement ||
+        !localCanAct ||
+        activeLocalCage?.opened
           ? false
           : activeKeys.left,
       right:
-        chatInputActive || gameMenuOpen || !localCanAct || activeLocalCage?.opened
+        chatInputActive ||
+        gameMenuOpen ||
+        recordingBlocksLocalMovement ||
+        !localCanAct ||
+        activeLocalCage?.opened
           ? false
           : activeKeys.right,
     };
@@ -4180,11 +4450,82 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
     updatePortalEscapeAnimations(dtSeconds);
 
+    // ── 2b. Admin recording actors + local plate simulation ─────────
+    recordingStudio?.update(dtSeconds);
+    currentRecordingActorStates = recordingStudio?.getActorStates() ?? [];
+    const activeRecordingSpriteIds = new Set(
+      currentRecordingActorStates.map((actor) => actor.spriteId),
+    );
+    const recordingAudioListener = getAudioListener();
+    for (const spriteId of renderedRecordingActorIds) {
+      if (!activeRecordingSpriteIds.has(spriteId)) removePlayerSprite(spriteId);
+    }
+    renderedRecordingActorIds.clear();
+    for (const actor of currentRecordingActorStates) {
+      renderedRecordingActorIds.add(actor.spriteId);
+      const data = ensurePlayerSprite(
+        actor.spriteId,
+        actor.spriteIndex,
+        actor.teamId,
+        actor.name,
+        true,
+      );
+      data.container.visible = true;
+      data.container.alpha = 1;
+      setPlayerPosition(data, actor.x, actor.y);
+      setPlayerAnimation(data, getAnimationKey(actor.facing, actor.isMoving, false));
+      worldAudio.updateFootstep({
+        playerId: actor.spriteId,
+        x: actor.x,
+        y: actor.y,
+        moving: actor.isMoving,
+        surface: getFootstepSurface(actor.x, actor.y),
+        listener: recordingAudioListener,
+        local: false,
+      });
+      syncRecordingActorBubble(actor, data);
+    }
+
+    if (recordingStudio && currentLayout && latestServerState) {
+      const nextRecordingWorldState = deriveRecordingWorldState(
+        currentLayout,
+        latestServerState,
+        currentRecordingActorStates,
+      );
+      syncRecordingWorldAudio(recordingWorldState, nextRecordingWorldState);
+      recordingWorldState = nextRecordingWorldState;
+      if (tilemapRenderer && currentMap) {
+        for (const gate of recordingWorldState.gateStates) {
+          applyGateState(
+            gate.gateIndex,
+            gate.open,
+            currentLayout.gates,
+            currentMap,
+            tilemapRenderer,
+            assets,
+          );
+        }
+        tilemapRenderer.syncSpikeGateStates(
+          recordingWorldState.spikeGateStates,
+          recordingWorldState.spikePlateStates,
+          true,
+        );
+      }
+    } else {
+      recordingWorldState = null;
+    }
+
     // ── 3. Camera follow + zoom ─────────────────────────────────────
     let camTargetX = localX;
     let camTargetY = localY;
 
-    if (cinematicPhase !== 'idle') {
+    const recordingCamera = recordingStudio?.getCameraOverride();
+    if (recordingCamera) {
+      camTargetX = recordingCamera.x;
+      camTargetY = recordingCamera.y;
+      bridgeCameraBlend = 0;
+      bridgeCameraFocus = null;
+    } else if (cinematicPhase !== 'idle') {
       // The portal reveal remains an instant, higher-priority camera override.
       camTargetX = cinematicTargetX;
       camTargetY = cinematicTargetY;
@@ -4218,6 +4559,28 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       worldContainer.scale.set(zoomLevel);
     }
     updateCamera(worldContainer, camTargetX, camTargetY, mapPixelW, mapPixelH, zoomLevel);
+
+    const cleanRecordingFrame = recordingStudio?.isCleanMode ?? false;
+    if (cleanRecordingFrame) {
+      for (const child of app.stage.children) {
+        if (
+          child === worldContainer ||
+          child === playerNameTagLayer ||
+          child === recordingActorBubbleLayer
+        ) {
+          continue;
+        }
+        if (!cleanUiRenderState.has(child)) {
+          cleanUiRenderState.set(child, child.renderable);
+        }
+        child.renderable = false;
+      }
+    } else if (cleanUiRenderState.size > 0) {
+      for (const [child, renderable] of cleanUiRenderState) {
+        if (!child.destroyed) child.renderable = renderable;
+      }
+      cleanUiRenderState.clear();
+    }
 
     // ── 3b. Viewport culling — hide off-screen tilemap chunks ────────
     if (tilemapRenderer) {
@@ -4521,9 +4884,17 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     // ── 6. Pressure plate animations ───────────────────────────────────
     if (tilemapRenderer && latestServerState) {
-      updatePressurePlateAnimations(tilemapRenderer, latestServerState, dtSeconds);
+      updatePressurePlateAnimations(
+        tilemapRenderer,
+        recordingWorldState?.pressurePlateStates ?? latestServerState.pressurePlateStates,
+        dtSeconds,
+      );
     }
     updatePlayerNameTagScreenPositions();
+    for (const actor of currentRecordingActorStates) {
+      const data = playerSprites.get(actor.spriteId);
+      if (data) syncRecordingActorBubble(actor, data);
+    }
   });
 
   // ── Mousewheel Zoom (debug) ───────────────────────────────────────────
@@ -4725,16 +5096,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   const pendingAdmission = getDeferredRoomAdmission();
   if (pendingAdmission) {
-    const [
-      roomId,
-      playerId,
-      mapSeed,
-      role,
-      wisdomOrbs,
-      gameState,
-      isAdmin,
-      resumed,
-    ] = pendingAdmission;
+    const [roomId, playerId, mapSeed, role, wisdomOrbs, gameState, isAdmin, resumed] =
+      pendingAdmission;
     networkCallbacks.onRoomJoined(
       roomId,
       playerId,
