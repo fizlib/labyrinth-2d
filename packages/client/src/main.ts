@@ -1,4 +1,5 @@
 import type { AuthChangeEvent } from '@supabase/supabase-js';
+import { inject } from '@vercel/analytics';
 import {
   isValidRoomCode,
   normalizeRoomCode,
@@ -35,6 +36,8 @@ import {
   formatCommunityRoundCountdown,
   getCommunityRoundState,
 } from './systems/CommunityRoundSchedule';
+
+inject();
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 const COMMUNITY_ROUND_STARTED_STORAGE_PREFIX = 'labyrinth-community-round-started';

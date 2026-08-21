@@ -17,6 +17,7 @@
   "dependencies": {
     "@labyrinth/shared": "*",
     "@supabase/supabase-js": "^2.90.1",
+    "@vercel/analytics": "^2.0.1",
     "fflate": "^0.8.3",
     "pixi.js": "^8.6.0"
   },
