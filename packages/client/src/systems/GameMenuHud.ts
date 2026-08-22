@@ -15,8 +15,10 @@ type MenuPage = 'main' | 'controls' | 'options' | 'exit-confirmation';
 export interface GameMenuActions {
   onVisibilityChange: (visible: boolean) => void;
   onOpenAdminPanel: () => void;
-  isSoundMuted: () => boolean;
-  onSoundMutedChange: (muted: boolean) => void;
+  isMusicMuted: () => boolean;
+  onMusicMutedChange: (muted: boolean) => void;
+  areSoundEffectsMuted: () => boolean;
+  onSoundEffectsMutedChange: (muted: boolean) => void;
   areChatBubblesEnabled: () => boolean;
   onChatBubblesEnabledChange: (enabled: boolean) => void;
   onExitMatch: () => void;
@@ -33,7 +35,8 @@ export class GameMenuHud {
   private readonly adminButton: Container;
   private readonly controlsButton: Container;
   private readonly optionsButton: Container;
-  private readonly soundButtonLabel: Text;
+  private readonly musicButtonLabel: Text;
+  private readonly soundEffectsButtonLabel: Text;
   private readonly chatBubblesButtonLabel: Text;
   private readonly exitButton: Container;
   private available = false;
@@ -74,7 +77,8 @@ export class GameMenuHud {
     this.layoutMainPage();
     this.buildControlsPage();
     const optionsPageButtons = this.buildOptionsPage();
-    this.soundButtonLabel = optionsPageButtons.soundLabel;
+    this.musicButtonLabel = optionsPageButtons.musicLabel;
+    this.soundEffectsButtonLabel = optionsPageButtons.soundEffectsLabel;
     this.chatBubblesButtonLabel = optionsPageButtons.chatBubblesLabel;
     this.buildExitConfirmationPage();
     panel.addChild(
@@ -197,8 +201,12 @@ export class GameMenuHud {
     this.exitButton.y = this.adminAvailable ? 174 : 150;
   }
 
-  private getSoundButtonLabel(): string {
-    return `Sound: ${this.actions.isSoundMuted() ? 'Off' : 'On'}`;
+  private getMusicButtonLabel(): string {
+    return `Music: ${this.actions.isMusicMuted() ? 'Off' : 'On'}`;
+  }
+
+  private getSoundEffectsButtonLabel(): string {
+    return `Sound effects: ${this.actions.areSoundEffectsMuted() ? 'Off' : 'On'}`;
   }
 
   private getChatBubblesButtonLabel(): string {
@@ -206,7 +214,8 @@ export class GameMenuHud {
   }
 
   private updateOptionButtonLabels(): void {
-    this.soundButtonLabel.text = this.getSoundButtonLabel();
+    this.musicButtonLabel.text = this.getMusicButtonLabel();
+    this.soundEffectsButtonLabel.text = this.getSoundEffectsButtonLabel();
     this.chatBubblesButtonLabel.text = this.getChatBubblesButtonLabel();
   }
 
@@ -236,32 +245,47 @@ export class GameMenuHud {
     );
   }
 
-  private buildOptionsPage(): { soundLabel: Text; chatBubblesLabel: Text } {
-    const soundButtonView = this.createButtonView(
-      this.getSoundButtonLabel(),
+  private buildOptionsPage(): {
+    musicLabel: Text;
+    soundEffectsLabel: Text;
+    chatBubblesLabel: Text;
+  } {
+    const musicButtonView = this.createButtonView(
+      this.getMusicButtonLabel(),
       MAIN_BUTTON_X,
-      66,
+      57,
       () => {
-        this.actions.onSoundMutedChange(!this.actions.isSoundMuted());
+        this.actions.onMusicMutedChange(!this.actions.isMusicMuted());
+        this.updateOptionButtonLabels();
+      },
+    );
+    const soundEffectsButtonView = this.createButtonView(
+      this.getSoundEffectsButtonLabel(),
+      MAIN_BUTTON_X,
+      88,
+      () => {
+        this.actions.onSoundEffectsMutedChange(!this.actions.areSoundEffectsMuted());
         this.updateOptionButtonLabels();
       },
     );
     const chatBubblesButtonView = this.createButtonView(
       this.getChatBubblesButtonLabel(),
       MAIN_BUTTON_X,
-      100,
+      119,
       () => {
         this.actions.onChatBubblesEnabledChange(!this.actions.areChatBubblesEnabled());
         this.updateOptionButtonLabels();
       },
     );
     this.optionsPage.addChild(
-      soundButtonView.container,
+      musicButtonView.container,
+      soundEffectsButtonView.container,
       chatBubblesButtonView.container,
-      this.createButton('Back', MAIN_BUTTON_X, 145, () => this.showPage('main')),
+      this.createButton('Back', MAIN_BUTTON_X, 158, () => this.showPage('main')),
     );
     return {
-      soundLabel: soundButtonView.label,
+      musicLabel: musicButtonView.label,
+      soundEffectsLabel: soundEffectsButtonView.label,
       chatBubblesLabel: chatBubblesButtonView.label,
     };
   }

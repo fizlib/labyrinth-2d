@@ -101,8 +101,10 @@ import { GameMenuHud } from './systems/GameMenuHud';
 import { LobbyOverlay } from './systems/LobbyOverlay';
 import {
   AUDIO_TOGGLE_SELECTOR,
-  loadAudioMutedPreference,
-  saveAudioMutedPreference,
+  areAllAudioMuted,
+  loadAudioPreferences,
+  saveMusicMutedPreference,
+  saveSoundEffectsMutedPreference,
   syncAudioToggleState,
 } from './systems/AudioToggle';
 import { GameAudio, type AudioPoint, type FootstepSurface } from './systems/GameAudio';
@@ -1651,7 +1653,9 @@ const PREGAME_THEME_FADE_MS = 1200;
 let pregameThemeUnlockCleanup: (() => void) | null = null;
 let pregameThemeFadeFrame: number | null = null;
 let pregameThemeActive = false;
-let audioMuted = loadAudioMutedPreference();
+const initialAudioPreferences = loadAudioPreferences();
+let musicMuted = initialAudioPreferences.musicMuted;
+let soundEffectsMuted = initialAudioPreferences.soundEffectsMuted;
 let gameAudio: GameAudio | null = null;
 let audioToggleListenerInstalled = false;
 let loadingScreenDismissTimer: number | null = null;
@@ -1679,28 +1683,48 @@ function getPregameTheme(): HTMLAudioElement | null {
   return document.getElementById('pregame-theme') as HTMLAudioElement | null;
 }
 
-function setAudioMuted(muted: boolean, persist: boolean): void {
-  audioMuted = muted;
-  gameAudio?.setMuted(muted);
+function syncMasterAudioToggle(): void {
+  syncAudioToggleState(document, areAllAudioMuted({ musicMuted, soundEffectsMuted }));
+}
+
+function setMusicMuted(muted: boolean, persist: boolean): void {
+  musicMuted = muted;
+  gameAudio?.setMusicMuted(muted);
   const theme = getPregameTheme();
   if (theme) theme.muted = muted || !pregameThemeActive;
-  syncAudioToggleState(document, muted);
-  if (persist) saveAudioMutedPreference(muted);
+  syncMasterAudioToggle();
+  if (persist) saveMusicMutedPreference(muted);
 
   if (persist && !muted && pregameThemeActive && theme?.paused) {
     void theme.play().catch(() => undefined);
   }
 }
 
+function setSoundEffectsMuted(muted: boolean, persist: boolean): void {
+  soundEffectsMuted = muted;
+  gameAudio?.setSoundEffectsMuted(muted);
+  syncMasterAudioToggle();
+  if (persist) saveSoundEffectsMutedPreference(muted);
+}
+
+function setAllAudioMuted(muted: boolean, persist: boolean): void {
+  setMusicMuted(muted, persist);
+  setSoundEffectsMuted(muted, persist);
+}
+
 function setupAudioToggle(): void {
-  setAudioMuted(audioMuted, false);
+  setMusicMuted(musicMuted, false);
+  setSoundEffectsMuted(soundEffectsMuted, false);
   if (audioToggleListenerInstalled) return;
 
   audioToggleListenerInstalled = true;
   document.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof Element) || !target.closest(AUDIO_TOGGLE_SELECTOR)) return;
-    setAudioMuted(!audioMuted, true);
+    setAllAudioMuted(
+      areAllAudioMuted({ musicMuted, soundEffectsMuted }) ? false : true,
+      true,
+    );
   });
 }
 
@@ -1709,7 +1733,7 @@ function startPregameTheme(): void {
   if (!theme) return;
 
   pregameThemeActive = true;
-  theme.muted = audioMuted;
+  theme.muted = musicMuted;
   theme.volume = PREGAME_THEME_VOLUME;
   const cuePastQuietIntro = (): void => {
     if (theme.currentTime < PREGAME_THEME_START_SECONDS) {
@@ -1896,7 +1920,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   setupAudioToggle();
   startPregameTheme();
   gameAudio?.destroy();
-  const worldAudio = new GameAudio(audioMuted);
+  const worldAudio = new GameAudio({ musicMuted, soundEffectsMuted });
   gameAudio = worldAudio;
   updateLoadingProgress(0.06, 'Lighting the first torch…');
   const app = new Application();
@@ -3143,7 +3167,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
             window.location.reload();
           },
         });
-        syncAudioToggleState(document, audioMuted);
+        syncMasterAudioToggle();
       }
       window.requestAnimationFrame(dismissLoadingScreen);
       console.info(`[Main] Joined lobby "${lobby.roomId}" as ${playerId}`);
@@ -4272,8 +4296,10 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       setAdminPanelOpen(debugUi, true);
       debugUi.closeButton.focus();
     },
-    isSoundMuted: () => audioMuted,
-    onSoundMutedChange: (muted) => setAudioMuted(muted, true),
+    isMusicMuted: () => musicMuted,
+    onMusicMutedChange: (muted) => setMusicMuted(muted, true),
+    areSoundEffectsMuted: () => soundEffectsMuted,
+    onSoundEffectsMutedChange: (muted) => setSoundEffectsMuted(muted, true),
     areChatBubblesEnabled: () => chatBubblesEnabled,
     onChatBubblesEnabledChange: setChatBubblesEnabled,
     onExitMatch: returnToMainMenu,
@@ -4431,7 +4457,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     matchHud.update();
     const dtSeconds = Math.min(ticker.deltaMS / 1000, 0.1);
     const matchAudioActive =
-      net.isConnected && latestServerState?.match.status === 'running';
+      net.isConnected &&
+      localPlayerInitialized &&
+      latestServerState?.match.status === 'running';
     const localSwampTerrain = matchAudioActive
       ? getPlayerSwampTerrain(
           currentLayout?.swamps ?? [],

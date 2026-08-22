@@ -15,6 +15,6 @@ normalized for use by the game; the audio itself is unmodified.
 | `mechanisms/chest-open.wav`                                                                                  | [Open chest SFX](https://opengameart.org/content/open-chest-sfx)                                        | spookymodem |
 | `magic/teleport.wav`                                                                                         | [Teleport spell](https://opengameart.org/content/teleport-spell)                                        | fins        |
 | `ambience/swamp.ogg`                                                                                         | [Swamp environment audio](https://opengameart.org/content/swamp-environment-audio)                      | bart        |
-| `ambience/forest.mp3`                                                                                        | [Forest ambience](https://opengameart.org/content/forest-ambience)                                      | TinyWorlds  |
+| `ambience/forest.ogg`                                                                                        | [Cathedral in the forest](https://opengameart.org/content/cathedral-in-the-forest-ambient-loop)          | congusbongus |
 
 License: [Creative Commons CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).

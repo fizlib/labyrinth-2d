@@ -31,7 +31,11 @@ import {
   RELEASE_ROOM_EVENT,
   type ReconnectSession,
 } from './net/ReconnectSession';
-import { audioToggleMarkup, loadAudioMutedPreference } from './systems/AudioToggle';
+import {
+  areAllAudioMuted,
+  audioToggleMarkup,
+  loadAudioPreferences,
+} from './systems/AudioToggle';
 import {
   formatCommunityRoundCountdown,
   getCommunityRoundState,
@@ -262,7 +266,7 @@ function shellMarkup(content: string, modifier = ''): string {
 }
 
 function gameMarkup(): string {
-  const audioMuted = loadAudioMutedPreference();
+  const audioPreferences = loadAudioPreferences();
   return `
     <div id="game-container">
       <section
@@ -279,10 +283,10 @@ function gameMarkup(): string {
           preload="auto"
           autoplay
           loop
-          ${audioMuted ? 'muted' : ''}
+          ${audioPreferences.musicMuted ? 'muted' : ''}
           aria-hidden="true"
         ></audio>
-        ${audioToggleMarkup('audio-toggle--loading', audioMuted)}
+        ${audioToggleMarkup('audio-toggle--loading', areAllAudioMuted(audioPreferences))}
         <div class="loading-screen__landscape" aria-hidden="true">
           <img class="app-parallax__layer app-parallax__layer--sky" src="/assets/home/sky.png" alt="" />
           <img class="app-parallax__layer app-parallax__layer--clouds" src="/assets/home/clouds.png" alt="" />

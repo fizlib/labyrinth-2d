@@ -47,8 +47,11 @@ const CLIPS = {
   ),
 } as const;
 
-const FOREST_AMBIENCE = `${AUDIO_ROOT}/ambience/forest.mp3`;
+const FOREST_AMBIENCE = `${AUDIO_ROOT}/ambience/forest.ogg`;
 const SWAMP_AMBIENCE = `${AUDIO_ROOT}/ambience/swamp.ogg`;
+const FOREST_AMBIENCE_VOLUME = 0.06;
+const FOREST_AMBIENCE_SWAMP_VOLUME = 0.03;
+const AMBIENCE_FADE_IN_SECONDS = 4;
 const MAX_ACTIVE_VOICES = 28;
 const FOOTSTEP_MIN_INTERVAL_MS = 320;
 
@@ -57,6 +60,11 @@ export type FootstepSurface = keyof typeof FOOTSTEP_CLIPS;
 export interface AudioPoint {
   x: number;
   y: number;
+}
+
+export interface GameAudioPreferences {
+  musicMuted: boolean;
+  soundEffectsMuted: boolean;
 }
 
 interface PlayOptions {
@@ -105,6 +113,15 @@ export function getSpatialGain(
   return 1 - (distance - fullVolumeDistance) / (maxDistance - fullVolumeDistance);
 }
 
+export function advanceAmbienceFadeGain(
+  currentGain: number,
+  dt: number,
+  durationSeconds: number,
+): number {
+  if (durationSeconds <= 0) return 1;
+  return Math.min(1, Math.max(0, currentGain) + Math.max(0, dt) / durationSeconds);
+}
+
 function choose<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)]!;
 }
@@ -131,9 +148,11 @@ function getAllOneShotUrls(): string[] {
 }
 
 export class GameAudio {
-  private muted: boolean;
+  private musicMuted: boolean;
+  private soundEffectsMuted: boolean;
   private matchActive = false;
   private swampActive = false;
+  private ambienceFadeGain = 1;
   private readonly templates = new Map<string, HTMLAudioElement>();
   private readonly voices = new Set<HTMLAudioElement>();
   private readonly footsteps = new Map<string, FootstepState>();
@@ -142,8 +161,9 @@ export class GameAudio {
   private readonly swampLoop: AmbienceLoop;
   private readonly unlock: () => void;
 
-  constructor(muted: boolean) {
-    this.muted = muted;
+  constructor(preferences: GameAudioPreferences) {
+    this.musicMuted = preferences.musicMuted;
+    this.soundEffectsMuted = preferences.soundEffectsMuted;
 
     for (const url of getAllOneShotUrls()) {
       const audio = new Audio(url);
@@ -160,23 +180,40 @@ export class GameAudio {
     window.addEventListener('keydown', this.unlock);
   }
 
-  setMuted(muted: boolean): void {
-    this.muted = muted;
-    for (const voice of this.voices) voice.muted = muted;
+  setMusicMuted(muted: boolean): void {
+    this.musicMuted = muted;
     this.forestLoop.audio.muted = muted;
     this.swampLoop.audio.muted = muted;
     if (!muted) this.ensureAmbiencePlaying();
   }
 
+  setSoundEffectsMuted(muted: boolean): void {
+    this.soundEffectsMuted = muted;
+    for (const voice of this.voices) voice.muted = muted;
+  }
+
   setAmbience(matchActive: boolean, swampActive: boolean): void {
+    const matchJustStarted = matchActive && !this.matchActive;
     this.matchActive = matchActive;
     this.swampActive = swampActive;
-    this.forestLoop.targetVolume = matchActive ? (swampActive ? 0.08 : 0.16) : 0;
+    if (matchJustStarted) this.ambienceFadeGain = 0;
+    this.forestLoop.targetVolume = matchActive
+      ? swampActive
+        ? FOREST_AMBIENCE_SWAMP_VOLUME
+        : FOREST_AMBIENCE_VOLUME
+      : 0;
     this.swampLoop.targetVolume = matchActive && swampActive ? 0.24 : 0;
     this.ensureAmbiencePlaying();
   }
 
   update(dt: number): void {
+    if (this.matchActive) {
+      this.ambienceFadeGain = advanceAmbienceFadeGain(
+        this.ambienceFadeGain,
+        dt,
+        AMBIENCE_FADE_IN_SECONDS,
+      );
+    }
     this.updateLoop(this.forestLoop, dt);
     this.updateLoop(this.swampLoop, dt);
   }
@@ -373,7 +410,7 @@ export class GameAudio {
     audio.loop = true;
     audio.preload = 'auto';
     audio.volume = 0;
-    audio.muted = this.muted;
+    audio.muted = this.musicMuted;
     return { audio, currentVolume: 0, targetVolume: 0 };
   }
 
@@ -383,7 +420,10 @@ export class GameAudio {
     if (Math.abs(loop.currentVolume - loop.targetVolume) < 0.001) {
       loop.currentVolume = loop.targetVolume;
     }
-    loop.audio.volume = Math.max(0, Math.min(1, loop.currentVolume));
+    loop.audio.volume = Math.max(
+      0,
+      Math.min(1, loop.currentVolume * this.ambienceFadeGain),
+    );
     if (loop.targetVolume > 0.001 && loop.audio.paused) {
       void loop.audio.play().catch(() => undefined);
     } else if (loop.currentVolume <= 0.001 && loop.targetVolume === 0) {
@@ -392,7 +432,7 @@ export class GameAudio {
   }
 
   private ensureAmbiencePlaying(): void {
-    if (!this.matchActive || this.muted) return;
+    if (!this.matchActive || this.musicMuted) return;
     if (this.forestLoop.targetVolume > 0 && this.forestLoop.audio.paused) {
       void this.forestLoop.audio.play().catch(() => undefined);
     }
@@ -410,7 +450,7 @@ export class GameAudio {
   }
 
   private play(url: string, options: PlayOptions = {}): void {
-    if (this.muted || this.voices.size >= MAX_ACTIVE_VOICES) return;
+    if (this.soundEffectsMuted || this.voices.size >= MAX_ACTIVE_VOICES) return;
 
     const spatialGain =
       options.source && options.listener
@@ -424,7 +464,7 @@ export class GameAudio {
       ? (template.cloneNode(true) as HTMLAudioElement)
       : new Audio(url);
     voice.preload = 'auto';
-    voice.muted = this.muted;
+    voice.muted = this.soundEffectsMuted;
     voice.volume = volume;
     voice.playbackRate = options.playbackRate ?? 1;
     this.voices.add(voice);

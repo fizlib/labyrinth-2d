@@ -1,12 +1,19 @@
-const AUDIO_MUTED_STORAGE_KEY = 'labyrinth-audio-muted';
+const LEGACY_AUDIO_MUTED_STORAGE_KEY = 'labyrinth-audio-muted';
+const MUSIC_MUTED_STORAGE_KEY = 'labyrinth-music-muted';
+const SOUND_EFFECTS_MUTED_STORAGE_KEY = 'labyrinth-sound-effects-muted';
+
+export interface AudioPreferences {
+  musicMuted: boolean;
+  soundEffectsMuted: boolean;
+}
 
 export const AUDIO_TOGGLE_SELECTOR = '[data-audio-toggle]';
 
 export function audioToggleMarkup(
   modifierClass: string,
-  muted = loadAudioMutedPreference(),
+  muted = areAllAudioMuted(loadAudioPreferences()),
 ): string {
-  const label = muted ? 'Unmute sound' : 'Mute sound';
+  const label = muted ? 'Unmute all audio' : 'Mute all audio';
   return `
     <button
       class="audio-toggle ${modifierClass}${muted ? ' is-muted' : ''}"
@@ -24,24 +31,46 @@ export function audioToggleMarkup(
     </button>`;
 }
 
-export function loadAudioMutedPreference(): boolean {
+export function loadAudioPreferences(): AudioPreferences {
   try {
-    return window.localStorage.getItem(AUDIO_MUTED_STORAGE_KEY) === '1';
+    const legacyMuted =
+      window.localStorage.getItem(LEGACY_AUDIO_MUTED_STORAGE_KEY) === '1';
+    const storedMusicMuted = window.localStorage.getItem(MUSIC_MUTED_STORAGE_KEY);
+    const storedSoundEffectsMuted = window.localStorage.getItem(
+      SOUND_EFFECTS_MUTED_STORAGE_KEY,
+    );
+    return {
+      musicMuted: storedMusicMuted === null ? legacyMuted : storedMusicMuted === '1',
+      soundEffectsMuted:
+        storedSoundEffectsMuted === null ? legacyMuted : storedSoundEffectsMuted === '1',
+    };
   } catch {
-    return false;
+    return { musicMuted: false, soundEffectsMuted: false };
   }
 }
 
-export function saveAudioMutedPreference(muted: boolean): void {
+export function areAllAudioMuted(preferences: AudioPreferences): boolean {
+  return preferences.musicMuted && preferences.soundEffectsMuted;
+}
+
+export function saveMusicMutedPreference(muted: boolean): void {
   try {
-    window.localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, muted ? '1' : '0');
+    window.localStorage.setItem(MUSIC_MUTED_STORAGE_KEY, muted ? '1' : '0');
   } catch {
-    // Muting still works for this session when storage is unavailable.
+    // The toggle still works for this session when storage is unavailable.
+  }
+}
+
+export function saveSoundEffectsMutedPreference(muted: boolean): void {
+  try {
+    window.localStorage.setItem(SOUND_EFFECTS_MUTED_STORAGE_KEY, muted ? '1' : '0');
+  } catch {
+    // The toggle still works for this session when storage is unavailable.
   }
 }
 
 export function syncAudioToggleState(root: ParentNode, muted: boolean): void {
-  const label = muted ? 'Unmute sound' : 'Mute sound';
+  const label = muted ? 'Unmute all audio' : 'Mute all audio';
   root.querySelectorAll<HTMLButtonElement>(AUDIO_TOGGLE_SELECTOR).forEach((button) => {
     button.classList.toggle('is-muted', muted);
     button.setAttribute('aria-pressed', muted.toString());
