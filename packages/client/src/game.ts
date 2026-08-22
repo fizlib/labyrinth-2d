@@ -3494,6 +3494,11 @@ async function initializeGame(
           inputSequenceNumber = me.lastProcessedInput;
           localPlayerInitialized = true;
         }
+        // Mobile input availability reads the latest authoritative state.
+        // Local tutorials begin in the running phase and do not receive the
+        // later match-start update that normally corrects an early disabled
+        // control layer, so expose this admission state before synchronizing.
+        latestServerState = gameState;
 
         const canLocalPlayerAct =
           gameState.match.status === 'running' && !(me?.escaped ?? false);
@@ -3630,7 +3635,6 @@ async function initializeGame(
           worldContainer.scale.set(zoomLevel);
         }
         updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
-        latestServerState = gameState;
         updatePlayerNameTagScreenPositions();
         updateNetworkStatsHud(
           networkStatsHud,
