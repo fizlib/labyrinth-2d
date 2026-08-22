@@ -4372,14 +4372,16 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   const syncRecordingCameraRoleUi = (): void => {
     const attachment = recordingStudio?.getCameraAttachment() ?? null;
+    const nextActorId = attachment?.actorId ?? null;
+    const nextRole = attachment?.role ?? null;
     if (
-      attachment?.actorId === displayedRecordingCameraActorId &&
-      attachment?.role === displayedRecordingCameraRole
+      nextActorId === displayedRecordingCameraActorId &&
+      nextRole === displayedRecordingCameraRole
     ) {
       return;
     }
-    displayedRecordingCameraActorId = attachment?.actorId ?? null;
-    displayedRecordingCameraRole = attachment?.role ?? null;
+    displayedRecordingCameraActorId = nextActorId;
+    displayedRecordingCameraRole = nextRole;
     if (attachment) {
       applyDisplayedRoleUi(
         attachment.role,
