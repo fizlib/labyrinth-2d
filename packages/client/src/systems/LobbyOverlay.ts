@@ -60,42 +60,44 @@ export class LobbyOverlay {
         <img class="app-parallax__layer app-parallax__layer--hills" src="/assets/home/hills.png" alt="" />
         <img class="app-parallax__layer app-parallax__layer--field" src="/assets/home/field.png" alt="" />
       </div>
-      <div class="lobby-panel">
-        <header class="lobby-header">
-          ${audioToggleMarkup('audio-toggle--lobby')}
-          <div class="lobby-header__title">
-            <h1 id="lobby-title">Waiting Room</h1>
-          </div>
-          <button class="lobby-code" type="button" title="Copy room link">
-            <span>Room Code</span><strong></strong><small>Copy link</small>
-          </button>
-        </header>
-        <div class="lobby-layout">
-          <section class="lobby-party" aria-labelledby="lobby-party-title">
-            <div class="lobby-section-heading">
-              <h2 id="lobby-party-title">Explorers</h2>
-              <span class="lobby-count" aria-live="polite"></span>
+      <div class="lobby-overlay__scroller">
+        <div class="lobby-panel">
+          <header class="lobby-header">
+            ${audioToggleMarkup('audio-toggle--lobby')}
+            <div class="lobby-header__title">
+              <h1 id="lobby-title">Waiting Room</h1>
             </div>
-            <ul class="lobby-roster" aria-label="Players in this room"></ul>
-          </section>
-          <section class="lobby-chat" aria-labelledby="lobby-chat-title">
-            <div class="lobby-section-heading"><h2 id="lobby-chat-title">Lobby chat</h2></div>
-            <div class="lobby-chat__log" role="log" aria-live="polite"></div>
-            <form class="lobby-chat__form">
-              <label class="sr-only" for="lobby-chat-input">Message the lobby</label>
-              <input id="lobby-chat-input" type="text" maxlength="${CHAT_MAX_LENGTH}" autocomplete="off" placeholder="Message the lobby…" />
-              <button type="submit" aria-label="Send message">Send</button>
-            </form>
-          </section>
-        </div>
-        <footer class="lobby-footer">
-          <p class="lobby-status" aria-live="polite"></p>
-          <div class="lobby-actions">
-            <button class="pixel-button pixel-button--quiet lobby-leave" type="button">Leave</button>
-            <button class="pixel-button pixel-button--primary lobby-admin-start" type="button" ${options.isAdmin ? '' : 'hidden'}>Start Game Now</button>
-            <button class="pixel-button pixel-button--primary lobby-vote" type="button"></button>
+            <button class="lobby-code" type="button" title="Copy room link">
+              <span>Room Code</span><strong></strong><small>Copy link</small>
+            </button>
+          </header>
+          <div class="lobby-layout">
+            <section class="lobby-party" aria-labelledby="lobby-party-title">
+              <div class="lobby-section-heading">
+                <h2 id="lobby-party-title">Explorers</h2>
+                <span class="lobby-count" aria-live="polite"></span>
+              </div>
+              <ul class="lobby-roster" aria-label="Players in this room"></ul>
+            </section>
+            <section class="lobby-chat" aria-labelledby="lobby-chat-title">
+              <div class="lobby-section-heading"><h2 id="lobby-chat-title">Lobby chat</h2></div>
+              <div class="lobby-chat__log" role="log" aria-live="polite"></div>
+              <form class="lobby-chat__form">
+                <label class="sr-only" for="lobby-chat-input">Message the lobby</label>
+                <input id="lobby-chat-input" type="text" maxlength="${CHAT_MAX_LENGTH}" autocomplete="off" placeholder="Message the lobby…" />
+                <button type="submit" aria-label="Send message">Send</button>
+              </form>
+            </section>
           </div>
-        </footer>
+          <footer class="lobby-footer">
+            <p class="lobby-status" aria-live="polite"></p>
+            <div class="lobby-actions">
+              <button class="pixel-button pixel-button--quiet lobby-leave" type="button">Leave</button>
+              <button class="pixel-button pixel-button--primary lobby-admin-start" type="button" ${options.isAdmin ? '' : 'hidden'}>Start Game Now</button>
+              <button class="pixel-button pixel-button--primary lobby-vote" type="button"></button>
+            </div>
+          </footer>
+        </div>
       </div>`;
 
     const roster = this.root.querySelector<HTMLUListElement>('.lobby-roster');

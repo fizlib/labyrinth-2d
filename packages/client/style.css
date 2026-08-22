@@ -2001,12 +2001,7 @@ body {
   position: fixed;
   z-index: 2800;
   inset: 0;
-  display: grid;
-  place-items: center;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
-    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  overflow: hidden;
   background: #64b8df;
   color: #1d3538;
   font-family:
@@ -2020,11 +2015,25 @@ body {
 }
 
 .lobby-overlay__landscape {
-  position: fixed;
+  position: absolute;
   z-index: 0;
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+}
+
+.lobby-overlay__scroller {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  -webkit-overflow-scrolling: touch;
 }
 
 .lobby-overlay__landscape::after {
@@ -2551,7 +2560,7 @@ body {
 }
 
 @media (max-width: 760px) {
-  .lobby-overlay {
+  .lobby-overlay__scroller {
     place-items: start center;
   }
 
