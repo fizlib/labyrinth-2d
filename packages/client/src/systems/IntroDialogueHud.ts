@@ -174,6 +174,12 @@ export class IntroDialogueHud {
       return;
     }
 
+    this.dismiss();
+  }
+
+  dismiss(): void {
+    if (!this.visible) return;
+
     this.visible = false;
     this.container.visible = false;
     this.advanceButton.eventMode = 'none';

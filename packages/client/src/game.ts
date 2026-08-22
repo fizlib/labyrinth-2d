@@ -171,6 +171,8 @@ const TUTORIAL_COMPLETE_DIALOGUE_PAGES = [
 const TUTORIAL_RUNESTONE_LESSON_RANGE = TILE_SIZE * 4;
 const TUTORIAL_BRIDGE_LESSON_RANGE = TILE_SIZE * 1.5;
 
+type TutorialDialogueDismissAction = 'interact' | 'wisdom';
+
 type GameSession = Pick<
   NetworkManager,
   Exclude<keyof NetworkManager, 'connect' | 'disconnect'>
@@ -3226,6 +3228,7 @@ async function initializeGame(
   let tutorialRunestoneDialogueShown = false;
   let tutorialEscapeDialogueShown = false;
   let tutorialCompletionShown = false;
+  let tutorialDialogueDismissAction: TutorialDialogueDismissAction | null = null;
   let trainingCompletePromptPending =
     !isTutorial &&
     'showTrainingCompletePrompt' in options &&
@@ -4103,7 +4106,11 @@ async function initializeGame(
             returnToMainMenu(true);
             return;
           }
-          showDialoguePages(TUTORIAL_COMPLETE_DIALOGUE_PAGES, returnToMainMenu);
+          showDialoguePages(
+            TUTORIAL_COMPLETE_DIALOGUE_PAGES,
+            returnToMainMenu,
+            'interact',
+          );
         }, 700);
       }
     },
@@ -4223,6 +4230,9 @@ async function initializeGame(
       `[WisdomOrb][${source}] Triggered. localPlayerInitialized=${localPlayerInitialized}, isConnected=${net.isConnected}`,
     );
     if (chatInputActive || gameMenuOpen) return;
+    if (isTutorial && tutorialDialogueDismissAction === 'wisdom') {
+      introDialogueHud?.dismiss();
+    }
     if (!localPlayerInitialized) {
       console.warn(`[WisdomOrb][${source}] BLOCKED: local player not initialized`);
       return;
@@ -4236,7 +4246,7 @@ async function initializeGame(
       console.warn(`[WisdomOrb][${source}] BLOCKED: local role has no wisdom orbs`);
       return;
     }
-    if (introDialogueHud?.isVisible()) return;
+    if (!isTutorial && introDialogueHud?.isVisible()) return;
     if (minimap?.isExpanded()) {
       console.warn(`[WisdomOrb][${source}] BLOCKED: warden map is open`);
       return;
@@ -4276,8 +4286,16 @@ async function initializeGame(
     }
 
     if (introDialogueHud?.isVisible()) {
-      introDialogueHud.advance();
-      return;
+      if (!isTutorial) {
+        introDialogueHud.advance();
+        return;
+      }
+      if (tutorialDialogueDismissAction === 'interact') {
+        introDialogueHud.dismiss();
+      } else {
+        introDialogueHud.advance();
+        return;
+      }
     }
 
     if (!localPlayerInitialized || !tilemapRenderer || !isLocalPlayerActionable()) return;
@@ -4514,7 +4532,10 @@ async function initializeGame(
     }
   };
   syncLocalInputAvailability = () => {
-    const canAct = net.isConnected && isLocalPlayerActionable();
+    const tutorialDialogueAllowsInput =
+      isTutorial && (introDialogueHud?.isVisible() ?? false);
+    const canAct =
+      net.isConnected && (isLocalPlayerActionable() || tutorialDialogueAllowsInput);
     setMobileInputEnabled(
       canAct &&
         !chatInputActive &&
@@ -4528,17 +4549,27 @@ async function initializeGame(
     );
   };
 
-  const showDialoguePages = (pages: readonly string[], onDismiss?: () => void): void => {
+  const showDialoguePages = (
+    pages: readonly string[],
+    onDismiss?: () => void,
+    dismissOnTutorialAction: TutorialDialogueDismissAction | null = null,
+  ): void => {
     introDialogueHud?.destroy();
+    tutorialDialogueDismissAction = isTutorial ? dismissOnTutorialAction : null;
     introDialogueHud = new IntroDialogueHud(
       INTERNAL_WIDTH,
       INTERNAL_HEIGHT,
       pages,
       (bounds) => mobileControls.setDialogueExclusion(bounds),
-      onDismiss,
+      () => {
+        tutorialDialogueDismissAction = null;
+        syncLocalInputAvailability();
+        onDismiss?.();
+      },
     );
     introDialogueHud.addToStage(app.stage);
     chatHud?.setSuppressed(true);
+    syncLocalInputAvailability();
   };
 
   const applyDisplayedRoleUi = (
@@ -4725,13 +4756,9 @@ async function initializeGame(
       ? findActivePlayerCage(latestServerState.cageStates, net.playerId)
       : null;
     const recordingBlocksLocalMovement = recordingStudio?.blocksLocalMovement() ?? false;
-    const tutorialDialogueBlocksMovement =
-      isTutorial && (introDialogueHud?.isVisible() ?? false);
     const tutorialCinematicBlocksMovement = isTutorial && cinematicPhase !== 'idle';
     const localMovementBlocked =
-      recordingBlocksLocalMovement ||
-      tutorialDialogueBlocksMovement ||
-      tutorialCinematicBlocksMovement;
+      recordingBlocksLocalMovement || tutorialCinematicBlocksMovement;
     const movementInput = {
       up:
         chatInputActive || gameMenuOpen || localMovementBlocked || !localCanAct
@@ -4838,16 +4865,14 @@ async function initializeGame(
         localY <= (tutorialIntersection.tileY + CELL_SIZE - 1) * TILE_SIZE;
       if (!tutorialIntersectionDialogueShown && walkedOneTileIntoIntersection) {
         tutorialIntersectionDialogueShown = true;
-        resetAllInput();
-        showDialoguePages(TUTORIAL_WISDOM_DIALOGUE_PAGES);
+        showDialoguePages(TUTORIAL_WISDOM_DIALOGUE_PAGES, undefined, 'wisdom');
       }
 
       const enteredTutorialSwamp =
         getPlayerSwampTerrain(tutorialLayout.swamps, localX, localY, TILE_SIZE) !== 'dry';
       if (!tutorialSwampDialogueShown && enteredTutorialSwamp) {
         tutorialSwampDialogueShown = true;
-        resetAllInput();
-        showDialoguePages(TUTORIAL_SWAMP_DIALOGUE_PAGES);
+        showDialoguePages(TUTORIAL_SWAMP_DIALOGUE_PAGES, undefined, 'wisdom');
       }
 
       const reachedTutorialBridge =
@@ -4860,8 +4885,7 @@ async function initializeGame(
         ) !== null;
       if (!tutorialBridgeDialogueShown && reachedTutorialBridge) {
         tutorialBridgeDialogueShown = true;
-        resetAllInput();
-        showDialoguePages(TUTORIAL_BRIDGE_DIALOGUE_PAGES);
+        showDialoguePages(TUTORIAL_BRIDGE_DIALOGUE_PAGES, undefined, 'wisdom');
       }
 
       const tutorialRunestone = latestServerState?.runestones.find(
@@ -4882,8 +4906,7 @@ async function initializeGame(
           TUTORIAL_RUNESTONE_LESSON_RANGE * TUTORIAL_RUNESTONE_LESSON_RANGE
       ) {
         tutorialRunestoneDialogueShown = true;
-        resetAllInput();
-        showDialoguePages(TUTORIAL_RUNESTONE_DIALOGUE_PAGES);
+        showDialoguePages(TUTORIAL_RUNESTONE_DIALOGUE_PAGES, undefined, 'interact');
       }
     }
 
@@ -5132,8 +5155,7 @@ async function initializeGame(
         updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
         if (isTutorial && !tutorialEscapeDialogueShown) {
           tutorialEscapeDialogueShown = true;
-          resetAllInput();
-          showDialoguePages(TUTORIAL_ESCAPE_DIALOGUE_PAGES);
+          showDialoguePages(TUTORIAL_ESCAPE_DIALOGUE_PAGES, undefined, 'wisdom');
         }
         syncLocalInputAvailability();
       }
