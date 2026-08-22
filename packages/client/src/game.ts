@@ -74,6 +74,7 @@ import type {
   TutorialMazeLayout,
 } from '@labyrinth/shared';
 import { NetworkManager, type NetworkCallbacks } from './net/NetworkManager';
+import { getGameServerUrl } from './net/GameServerUrl';
 import {
   LocalTutorialSession,
   TUTORIAL_WARDEN_PLAYER_ID,
@@ -117,6 +118,11 @@ import {
 } from './systems/AudioToggle';
 import { GameAudio, type AudioPoint, type FootstepSurface } from './systems/GameAudio';
 import { ReconnectOverlay } from './systems/ReconnectOverlay';
+import {
+  TrainingQueueBanner,
+  type TrainingQueueSubscription,
+} from './systems/TrainingQueueBanner';
+import { shouldShowTrainingCompletionPrompt } from './systems/TrainingCompletionPrompt';
 import {
   RecordingStudio,
   type RecordingActorRenderState,
@@ -1960,11 +1966,13 @@ export interface GameLaunchOptions {
   reconnectSession: ReconnectSession;
   accessToken?: string;
   onMatchStarted?: () => void;
+  showTrainingCompletePrompt?: boolean;
 }
 
 export interface TutorialLaunchOptions {
   displayName: string;
   isAdmin: boolean;
+  queue?: TrainingQueueSubscription;
 }
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
@@ -2005,6 +2013,10 @@ async function initializeGame(
   const container = document.getElementById('game-container');
   if (!container) throw new Error('Missing #game-container');
   container.appendChild(app.canvas);
+  const trainingQueueBanner =
+    isTutorial && 'queue' in options && options.queue
+      ? new TrainingQueueBanner(container, options.queue)
+      : null;
 
   fullscreenCanvasScale = getSavedIosFullscreenScale();
   resizeCanvas(app);
@@ -3214,6 +3226,10 @@ async function initializeGame(
   let tutorialRunestoneDialogueShown = false;
   let tutorialEscapeDialogueShown = false;
   let tutorialCompletionShown = false;
+  let trainingCompletePromptPending =
+    !isTutorial &&
+    'showTrainingCompletePrompt' in options &&
+    options.showTrainingCompletePrompt === true;
   let matchRuntimeReady = false;
   let deferredRoomAdmission: Parameters<NetworkCallbacks['onRoomJoined']> | null = null;
   let deferredTickUpdate: GameState | null = null;
@@ -3263,6 +3279,10 @@ async function initializeGame(
         lobbyOverlay.update(lobby);
       } else {
         lobbyOverlay?.destroy();
+        const showTrainingCompletePrompt =
+          trainingCompletePromptPending &&
+          shouldShowTrainingCompletionPrompt(lobby, playerId);
+        trainingCompletePromptPending = false;
         lobbyOverlay = new LobbyOverlay({
           parent: container,
           localPlayerId: playerId,
@@ -3278,6 +3298,7 @@ async function initializeGame(
             net.leaveRoom();
             window.location.reload();
           },
+          trainingComplete: showTrainingCompletePrompt,
         });
         syncMasterAudioToggle();
       }
@@ -3914,6 +3935,7 @@ async function initializeGame(
         return;
       localWisdomOrbs = remainingWisdomOrbs;
       wisdomOrbHud?.setRemaining(remainingWisdomOrbs);
+      worldAudio.playWisdomOrbUse();
       if (hint.kind === 'bridge') {
         wisdomArrow?.hide();
         console.info(
@@ -4077,6 +4099,10 @@ async function initializeGame(
       if (isTutorial && playerId === net.playerId && !tutorialCompletionShown) {
         tutorialCompletionShown = true;
         window.setTimeout(() => {
+          if ('queue' in options && options.queue) {
+            returnToMainMenu(true);
+            return;
+          }
           showDialoguePages(TUTORIAL_COMPLETE_DIALOGUE_PAGES, returnToMainMenu);
         }, 700);
       }
@@ -4415,8 +4441,14 @@ async function initializeGame(
   mobileControls.setWisdomAvailable(false);
 
   const gameMenuToggle = document.querySelector<HTMLButtonElement>('#game-menu-toggle');
-  const returnToMainMenu = (): void => {
+  const returnToMainMenu = (trainingComplete = false): void => {
     net.leaveRoom();
+    trainingQueueBanner?.destroy();
+    if ('queue' in options && options.queue) {
+      if (trainingComplete) options.queue.onTrainingComplete();
+      else options.queue.onReturnToLobby();
+      return;
+    }
     const url = new URL(window.location.href);
     url.searchParams.delete('room');
     window.location.href = url.toString();
@@ -4430,6 +4462,7 @@ async function initializeGame(
     {
       onVisibilityChange: (visible) => {
         gameMenuOpen = visible;
+        trainingQueueBanner?.setCoveredByGameMenu(visible);
         if (!visible && debugUi) setAdminPanelOpen(debugUi, false);
         gameMenuToggle?.setAttribute('aria-expanded', String(visible));
         resetAllInput();
@@ -4458,7 +4491,13 @@ async function initializeGame(
       onChatBubblesEnabledChange: setChatBubblesEnabled,
       onExitMatch: returnToMainMenu,
     },
-    isTutorial ? { exitLabel: 'Exit tutorial', confirmExit: false } : undefined,
+    isTutorial
+      ? {
+          exitLabel:
+            'queue' in options && options.queue ? 'Back to lobby' : 'Exit tutorial',
+          confirmExit: false,
+        }
+      : undefined,
   );
   gameMenuHud.setAdminAvailable(isAdminSession);
   gameMenuHud.addToStage(app.stage);
@@ -5496,26 +5535,9 @@ async function initializeGame(
   });
 
   // ── Connect to Server ─────────────────────────────────────────────────
-  const envUrl = import.meta.env.VITE_SERVER_URL;
-  // Use the page origin for the game socket in every environment. Vite proxies
-  // /ws to the local game server during development, so LAN clients need access
-  // only to the same port that already serves the page.
-  const defaultWsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
-  let wsUrl = envUrl?.trim() || defaultWsUrl;
-
-  if (envUrl && !['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) {
-    try {
-      const configuredHostname = new URL(envUrl).hostname;
-      if (['localhost', '127.0.0.1', '[::1]'].includes(configuredHostname)) {
-        console.warn(
-          `[Main] Ignoring loopback-only VITE_SERVER_URL on LAN; using ${defaultWsUrl}`,
-        );
-        wsUrl = defaultWsUrl;
-      }
-    } catch {
-      // Let WebSocket report malformed explicit overrides with its normal error.
-    }
-  }
+  // Vite proxies /ws to the local game server during development, so LAN
+  // clients need access only to the same port that already serves the page.
+  const wsUrl = getGameServerUrl();
   const displayName = options.displayName;
 
   if (localTutorialSession) {

@@ -36,6 +36,7 @@ const CLIPS = {
   swordField: `${AUDIO_ROOT}/magic/sword-field.ogg`,
   cageMaterialize: `${AUDIO_ROOT}/magic/cage-materialize.ogg`,
   orbGrant: `${AUDIO_ROOT}/magic/orb-grant.ogg`,
+  wisdomOrbUse: `${AUDIO_ROOT}/magic/wisdom-orb-use.wav`,
   teleport: `${AUDIO_ROOT}/magic/teleport.wav`,
   bridgeRepair: Array.from(
     { length: 5 },
@@ -141,6 +142,7 @@ function getAllOneShotUrls(): string[] {
     CLIPS.swordField,
     CLIPS.cageMaterialize,
     CLIPS.orbGrant,
+    CLIPS.wisdomOrbUse,
     CLIPS.teleport,
     ...CLIPS.bridgeRepair,
     ...CLIPS.bridgeCollapse,
@@ -345,6 +347,11 @@ export class GameAudio {
 
   playOrbGrant(source: AudioPoint, listener: AudioPoint): void {
     this.play(CLIPS.orbGrant, { source, listener, volume: 0.56, maxDistance: 300 });
+  }
+
+  playWisdomOrbUse(): void {
+    if (!this.canPlay('wisdom-orb-use', 250)) return;
+    this.play(CLIPS.wisdomOrbUse, { volume: 0.48 });
   }
 
   playPortalActivation(source: AudioPoint, listener: AudioPoint): void {

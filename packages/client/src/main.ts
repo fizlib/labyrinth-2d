@@ -35,17 +35,34 @@ import {
   areAllAudioMuted,
   audioToggleMarkup,
   loadAudioPreferences,
+  saveMusicMutedPreference,
+  saveSoundEffectsMutedPreference,
+  syncAudioToggleState,
 } from './systems/AudioToggle';
 import {
+  COMMUNITY_ROUND_TIME_ZONE,
   formatCommunityRoundCountdown,
   getCommunityRoundState,
 } from './systems/CommunityRoundSchedule';
 import { shouldWarmGameAssetsInBackground } from './assets/AssetPreloadPolicy';
+import { NetworkManager, type NetworkCallbacks } from './net/NetworkManager';
+import { getGameServerUrl } from './net/GameServerUrl';
+import { LobbyOverlay } from './systems/LobbyOverlay';
+import { ReconnectOverlay } from './systems/ReconnectOverlay';
+import {
+  getFirstTimeTrainingPromptStorageKey,
+  shouldOfferFirstTimeTrainingPrompt,
+} from './systems/FirstTimeTrainingPrompt';
+import type {
+  TrainingQueueStatus,
+  TrainingQueueSubscription,
+} from './systems/TrainingQueueBanner';
 
 inject();
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 const COMMUNITY_ROUND_STARTED_STORAGE_PREFIX = 'labyrinth-community-round-started';
+const TRAINING_COMPLETE_RETURN_STORAGE_KEY = 'labyrinth-training-complete-return-v1';
 const DEPLOYMENT_RELOAD_STORAGE_KEY = 'labyrinth-deployment-reload-at';
 const DEPLOYMENT_RELOAD_COOLDOWN_MS = 60_000;
 
@@ -213,6 +230,7 @@ function formatDate(value: string): string {
 
 function formatCommunityRoundDate(date: Date): string {
   return new Intl.DateTimeFormat(undefined, {
+    timeZone: COMMUNITY_ROUND_TIME_ZONE,
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -238,6 +256,26 @@ function saveStartedCommunityRound(profileId: string, occurrenceKey: string): vo
     window.localStorage.setItem(getCommunityRoundStorageKey(profileId), occurrenceKey);
   } catch {
     // The round still launches when storage is unavailable.
+  }
+}
+
+function markTrainingCompleteReturn(profileId: string): void {
+  try {
+    window.sessionStorage.setItem(TRAINING_COMPLETE_RETURN_STORAGE_KEY, profileId);
+  } catch {
+    // The queue still returns to the lobby when per-tab storage is unavailable.
+  }
+}
+
+function consumeTrainingCompleteReturn(profileId: string): boolean {
+  try {
+    const completedProfileId = window.sessionStorage.getItem(
+      TRAINING_COMPLETE_RETURN_STORAGE_KEY,
+    );
+    window.sessionStorage.removeItem(TRAINING_COMPLETE_RETURN_STORAGE_KEY);
+    return completedProfileId === profileId;
+  } catch {
+    return false;
   }
 }
 
@@ -330,6 +368,7 @@ function gameMarkup(): string {
       aria-label="Enter fullscreen"
       aria-pressed="false"
       title="Enter fullscreen"
+      hidden
     >
       <svg class="fullscreen-toggle__icon fullscreen-toggle__icon--enter" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />
@@ -385,6 +424,15 @@ class AppController {
   private profileNotice: string | null = null;
   private sessionRevision = 0;
   private gameLaunchStarted = false;
+  private firstTimeQueue: NetworkManager | null = null;
+  private firstTimeLobbyOverlay: LobbyOverlay | null = null;
+  private firstTimeReconnectOverlay: ReconnectOverlay | null = null;
+  private queuedTutorialStarted = false;
+  private queuedMatchTransitionStarted = false;
+  private trainingQueueStatus: TrainingQueueStatus = { matchReady: false };
+  private readonly trainingQueueListeners = new Set<
+    (status: TrainingQueueStatus) => void
+  >();
   private restoringInitialSession = true;
   private communityRoundTimer: number | null = null;
   private pendingRoomCode = (() => {
@@ -879,6 +927,10 @@ class AppController {
     document
       .querySelector<HTMLButtonElement>('#quick-play')
       ?.addEventListener('click', () => {
+        if (this.shouldOfferFirstTimeTraining()) {
+          void this.launchFirstTimeQuickPlay();
+          return;
+        }
         void this.launchGame('quick');
       });
     document
@@ -1148,6 +1200,10 @@ class AppController {
       joinMode === 'quick' && communityRound.isOpen
         ? communityRound.occurrenceKey
         : undefined;
+    const showTrainingCompletePrompt =
+      joinMode === 'quick' &&
+      existingReconnectSession !== undefined &&
+      consumeTrainingCompleteReturn(profileId);
     this.stopCommunityRoundTimer();
     this.gameLaunchStarted = true;
     this.view = 'launching-game';
@@ -1171,6 +1227,7 @@ class AppController {
         displayName: this.profile.display_name,
         reconnectSession,
         accessToken: this.session?.access_token,
+        showTrainingCompletePrompt,
         onMatchStarted: communityRoundOccurrenceKey
           ? () => saveStartedCommunityRound(profileId, communityRoundOccurrenceKey)
           : undefined,
@@ -1179,6 +1236,241 @@ class AppController {
     } catch {
       // The game module owns the loading-screen error presentation.
     }
+  }
+
+  private shouldOfferFirstTimeTraining(): boolean {
+    if (!this.profile) return false;
+    let hasSeenPrompt = false;
+    try {
+      hasSeenPrompt =
+        window.localStorage.getItem(
+          getFirstTimeTrainingPromptStorageKey(this.profile.id),
+        ) === '1';
+    } catch {
+      // If durable storage is unavailable, the active controller still guards
+      // against reopening the flow more than once in this page session.
+      hasSeenPrompt = this.queuedTutorialStarted || this.firstTimeQueue !== null;
+    }
+    return shouldOfferFirstTimeTrainingPrompt(
+      this.playerStats?.matches_played ?? null,
+      hasSeenPrompt,
+    );
+  }
+
+  private markFirstTimeTrainingPromptSeen(): void {
+    if (!this.profile) return;
+    try {
+      window.localStorage.setItem(
+        getFirstTimeTrainingPromptStorageKey(this.profile.id),
+        '1',
+      );
+    } catch {
+      // The in-memory queue guard still prevents duplicate prompts in this tab.
+    }
+  }
+
+  private async launchFirstTimeQuickPlay(): Promise<void> {
+    if (this.gameLaunchStarted || !this.profile || !this.identityMode) return;
+    this.stopCommunityRoundTimer();
+    this.gameLaunchStarted = true;
+    this.view = 'launching-game';
+    root.innerHTML = gameMarkup();
+    this.setupQueueAudioToggle();
+
+    const container = document.querySelector<HTMLElement>('#game-container');
+    if (!container) return;
+
+    const leaveQueue = (): void => {
+      this.firstTimeQueue?.leaveRoom();
+      window.location.reload();
+    };
+    this.firstTimeReconnectOverlay = new ReconnectOverlay({
+      parent: container,
+      onLeave: leaveQueue,
+    });
+
+    const noop = (): void => undefined;
+    const callbacks: NetworkCallbacks = {
+      onLobbyJoined: (playerId, lobby, isAdmin) => {
+        this.markFirstTimeTrainingPromptSeen();
+        this.publishTrainingQueueStatus({
+          matchReady: lobby.phase === 'countdown' || lobby.phase === 'loading',
+        });
+        if (this.queuedTutorialStarted) return;
+
+        if (this.firstTimeLobbyOverlay) {
+          this.firstTimeLobbyOverlay.update(lobby);
+          return;
+        }
+        this.firstTimeLobbyOverlay = new LobbyOverlay({
+          parent: container,
+          localPlayerId: playerId,
+          initialState: lobby,
+          isAdmin,
+          onVote: (vote) => this.firstTimeQueue?.sendLobbyVote(vote),
+          onStartNow: () => this.firstTimeQueue?.sendAdminStartGame(),
+          onKick: (targetPlayerId) =>
+            this.firstTimeQueue?.sendAdminKickPlayer(targetPlayerId),
+          onSendChat: (text) => this.firstTimeQueue?.sendLobbyChatMessage(text),
+          onLeave: leaveQueue,
+          firstTimeTraining: {
+            onStart: () => void this.startTrainingWhileQueued(),
+          },
+        });
+        this.setupQueueAudioToggle('.audio-toggle--lobby');
+        document
+          .querySelector<HTMLElement>('#loading-screen')
+          ?.classList.add('loading-screen--complete');
+        this.view = 'game';
+      },
+      onLobbyUpdated: (lobby) => {
+        this.firstTimeLobbyOverlay?.update(lobby);
+        this.publishTrainingQueueStatus({
+          matchReady: lobby.phase === 'countdown' || lobby.phase === 'loading',
+        });
+      },
+      onLobbyChatMessage: (playerId, displayName, text, kind, sentAt) => {
+        this.firstTimeLobbyOverlay?.addMessage({
+          playerId,
+          displayName,
+          text,
+          kind,
+          sentAt,
+        });
+      },
+      onLobbyKicked: (message) => {
+        this.firstTimeQueue?.leaveRoom();
+        window.alert(message);
+        window.location.reload();
+      },
+      onRoomJoined: () => this.enterQueuedMatch(),
+      onMatchStarted: () => this.enterQueuedMatch(),
+      onTickUpdate: noop,
+      onPlayerLeft: noop,
+      onRunestoneActivated: noop,
+      onAllRunestonesActivated: noop,
+      onChestOpened: noop,
+      onWisdomOrbGranted: noop,
+      onWisdomOrbUsed: noop,
+      onPlayerRoleChanged: noop,
+      onDebugPlayerRole: noop,
+      onGateStateChanged: noop,
+      onTrapActivationResult: noop,
+      onPlayerTrapped: noop,
+      onChatMessage: noop,
+      onPlayerEscaped: noop,
+      onMatchEnded: noop,
+      onError: (code, message) => {
+        console.error(`[Queue] Server error [${code}]: ${message}`);
+        if (!code.startsWith('RECONNECT_')) this.showQueueError(message);
+      },
+      onConnectionState: (state) => this.firstTimeReconnectOverlay?.update(state),
+    };
+
+    const reconnectSession = createReconnectSession(this.profile.id, 'quick', '');
+    this.firstTimeQueue = new NetworkManager(callbacks);
+    this.firstTimeQueue.connect(
+      getGameServerUrl(),
+      reconnectSession,
+      this.profile.display_name,
+      this.session?.access_token,
+    );
+
+    // Warm the same assets the tutorial and eventual match consume while the
+    // player is reading the prompt or waiting in the room.
+    void loadGameModule()
+      .then((gameModule) => gameModule.preloadGameAssets())
+      .catch((error: unknown) => {
+        console.warn('[Queue] Background game warmup did not finish', error);
+      });
+  }
+
+  private async startTrainingWhileQueued(): Promise<void> {
+    if (
+      this.queuedTutorialStarted ||
+      this.queuedMatchTransitionStarted ||
+      !this.profile
+    ) {
+      return;
+    }
+    this.queuedTutorialStarted = true;
+    this.firstTimeLobbyOverlay?.destroy();
+    this.firstTimeLobbyOverlay = null;
+    this.firstTimeReconnectOverlay?.destroy();
+    this.firstTimeReconnectOverlay = null;
+    root.innerHTML = gameMarkup();
+
+    let gameModule: typeof import('./game');
+    try {
+      gameModule = await loadGameModule();
+      clearDeploymentReloadAttempt();
+    } catch (error) {
+      console.error('[Queue] Failed to load the training maze:', error);
+      if (!reloadLatestDeployment()) showGameModuleLoadError();
+      return;
+    }
+
+    const queue: TrainingQueueSubscription = {
+      initialStatus: this.trainingQueueStatus,
+      subscribe: (listener) => {
+        this.trainingQueueListeners.add(listener);
+        listener(this.trainingQueueStatus);
+        return () => this.trainingQueueListeners.delete(listener);
+      },
+      onReturnToLobby: () => this.returnFromQueuedTrainingToLobby(),
+      onTrainingComplete: () => this.returnFromQueuedTrainingToLobby(),
+    };
+
+    try {
+      await gameModule.startTutorial({
+        displayName: this.profile.display_name,
+        isAdmin: this.profile.is_admin,
+        queue,
+      });
+      this.view = 'game';
+    } catch {
+      // The tutorial module owns its loading-screen error presentation.
+    }
+  }
+
+  private publishTrainingQueueStatus(status: TrainingQueueStatus): void {
+    this.trainingQueueStatus = status;
+    for (const listener of this.trainingQueueListeners) listener(status);
+  }
+
+  private enterQueuedMatch(): void {
+    if (this.queuedMatchTransitionStarted) return;
+    this.queuedMatchTransitionStarted = true;
+    this.publishTrainingQueueStatus({ matchReady: true });
+    window.location.reload();
+  }
+
+  private returnFromQueuedTrainingToLobby(): void {
+    if (this.queuedMatchTransitionStarted || !this.profile) return;
+    this.queuedMatchTransitionStarted = true;
+    markTrainingCompleteReturn(this.profile.id);
+    window.location.reload();
+  }
+
+  private setupQueueAudioToggle(selector = '[data-audio-toggle]'): void {
+    const theme = document.querySelector<HTMLAudioElement>('#pregame-theme');
+    if (theme) theme.volume = 0.65;
+    document.querySelector<HTMLButtonElement>(selector)?.addEventListener('click', () => {
+      const muted = !areAllAudioMuted(loadAudioPreferences());
+      saveMusicMutedPreference(muted);
+      saveSoundEffectsMutedPreference(muted);
+      if (theme) theme.muted = muted;
+      syncAudioToggleState(document, muted);
+    });
+  }
+
+  private showQueueError(message: string): void {
+    const screen = document.querySelector<HTMLElement>('#loading-screen');
+    const status = document.querySelector<HTMLElement>('#loading-status');
+    const percent = document.querySelector<HTMLElement>('#loading-percent');
+    if (screen) screen.classList.add('loading-screen--error');
+    if (status) status.textContent = message;
+    if (percent) percent.textContent = 'ERROR';
   }
 
   private async launchTutorial(): Promise<void> {

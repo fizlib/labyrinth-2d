@@ -1,7 +1,7 @@
 # Game audio sources
 
-All files in this directory are released under CC0 1.0. The filenames were
-normalized for use by the game; the audio itself is unmodified.
+All third-party files in this directory are released under CC0 1.0. Their
+filenames were normalized for use by the game; the audio itself is unmodified.
 
 | Game assets                                                                                                  | Source                                                                                                  | Creator     |
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ----------- |
@@ -17,4 +17,10 @@ normalized for use by the game; the audio itself is unmodified.
 | `ambience/swamp.ogg`                                                                                         | [Swamp environment audio](https://opengameart.org/content/swamp-environment-audio)                      | bart        |
 | `ambience/forest.ogg`                                                                                        | [Cathedral in the forest](https://opengameart.org/content/cathedral-in-the-forest-ambient-loop)          | congusbongus |
 
-License: [Creative Commons CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+## Original project audio
+
+| Game asset                    | Source                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `magic/wisdom-orb-use.wav`    | Original procedural synthesis from `design/audio/wisdom-orb-previews/generate_previews.py` |
+
+Third-party asset license: [Creative Commons CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).

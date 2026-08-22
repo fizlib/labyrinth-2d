@@ -1,5 +1,5 @@
-export const COMMUNITY_ROUND_TIME_ZONE = 'Europe/Kyiv';
-export const COMMUNITY_ROUND_HOUR = 18;
+export const COMMUNITY_ROUND_TIME_ZONE = 'Europe/Vilnius';
+export const COMMUNITY_ROUND_HOUR = 21;
 
 const SECOND_MS = 1_000;
 const MINUTE_MS = 60 * SECOND_MS;
@@ -104,6 +104,19 @@ function getOccurrenceKey(date: CalendarDate): string {
     .padStart(2, '0')}-${date.day.toString().padStart(2, '0')}`;
 }
 
+function formatGoogleCalendarDateTime(date: Date, timeZone: string): string {
+  const parts = getZonedDateTimeParts(date, timeZone);
+  return [
+    parts.year.toString().padStart(4, '0'),
+    parts.month.toString().padStart(2, '0'),
+    parts.day.toString().padStart(2, '0'),
+    'T',
+    parts.hour.toString().padStart(2, '0'),
+    parts.minute.toString().padStart(2, '0'),
+    parts.second.toString().padStart(2, '0'),
+  ].join('');
+}
+
 /**
  * Return today's scheduled round in the host time zone. It remains open after
  * its start time until that host-local day ends. Once this player's match
@@ -135,6 +148,31 @@ export function getCommunityRoundState(
   };
 }
 
+/** Return the next future round, even while today's community round is open. */
+export function getNextCommunityRoundState(
+  now: Date,
+  timeZone = COMMUNITY_ROUND_TIME_ZONE,
+  hour = COMMUNITY_ROUND_HOUR,
+): CommunityRoundState {
+  const nowInHostTimeZone = getZonedDateTimeParts(now, timeZone);
+  const today: CalendarDate = {
+    year: nowInHostTimeZone.year,
+    month: nowInHostTimeZone.month,
+    day: nowInHostTimeZone.day,
+  };
+  const todayOccurrence = getUtcDateForZonedTime(today, hour, timeZone);
+  const occurrenceDate =
+    now.getTime() < todayOccurrence.getTime() ? today : addCalendarDays(today, 1);
+  const occurrence = getUtcDateForZonedTime(occurrenceDate, hour, timeZone);
+
+  return {
+    occurrence,
+    occurrenceKey: getOccurrenceKey(occurrenceDate),
+    isOpen: false,
+    remainingMs: Math.max(0, occurrence.getTime() - now.getTime()),
+  };
+}
+
 export function formatCommunityRoundCountdown(remainingMs: number): string {
   const remainingSeconds = Math.max(0, Math.ceil(remainingMs / SECOND_MS));
   const hours = Math.floor(remainingSeconds / 3_600);
@@ -143,4 +181,31 @@ export function formatCommunityRoundCountdown(remainingMs: number): string {
   return [hours, minutes, seconds]
     .map((value) => value.toString().padStart(2, '0'))
     .join(':');
+}
+
+export function formatCommunityRoundWait(remainingMs: number): string {
+  const remainingMinutes = Math.max(0, Math.ceil(remainingMs / MINUTE_MS));
+  const hours = Math.floor(remainingMinutes / 60);
+  const minutes = remainingMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
+}
+
+/** Build a recurring daily Google Calendar event anchored to the next round. */
+export function getCommunityRoundGoogleCalendarUrl(
+  occurrence: Date,
+  timeZone = COMMUNITY_ROUND_TIME_ZONE,
+): string {
+  const end = new Date(occurrence.getTime() + HOUR_MS);
+  const url = new URL('https://calendar.google.com/calendar/render');
+  url.searchParams.set('action', 'TEMPLATE');
+  url.searchParams.set('text', 'False Arrow Community Round');
+  url.searchParams.set(
+    'dates',
+    `${formatGoogleCalendarDateTime(occurrence, timeZone)}/${formatGoogleCalendarDateTime(end, timeZone)}`,
+  );
+  url.searchParams.set('ctz', timeZone);
+  url.searchParams.set('recur', 'RRULE:FREQ=DAILY');
+  url.searchParams.set('details', 'Join the daily False Arrow community round.');
+  return url.toString();
 }

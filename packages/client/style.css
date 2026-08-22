@@ -2555,6 +2555,319 @@ body {
   font-weight: 700;
 }
 
+/* ── First-time Quick Play training prompt ───────────────────────────── */
+
+.first-time-training {
+  position: fixed;
+  z-index: 3100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+    max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  background: rgba(25, 50, 54, 0.2);
+  backdrop-filter: blur(5px) saturate(0.82);
+}
+
+.first-time-training__dialog {
+  width: min(440px, 100%);
+  padding: clamp(26px, 4vw, 34px);
+  border: 1px solid rgba(255, 255, 255, 0.96);
+  border-radius: 16px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 252, 0.98),
+    rgba(244, 248, 244, 0.98)
+  );
+  box-shadow:
+    0 18px 44px rgba(30, 65, 67, 0.3),
+    0 2px 6px rgba(30, 65, 67, 0.16),
+    inset 0 1px 0 #ffffff;
+  color: #1e393d;
+  text-align: center;
+}
+
+.first-time-training__dialog h2 {
+  margin: 0;
+  color: #18383d;
+  font-size: clamp(1.55rem, 3.5vw, 2rem);
+  font-weight: 760;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.first-time-training__dialog p {
+  max-width: 360px;
+  margin: 14px auto 25px;
+  color: #29474d;
+  font-size: clamp(0.98rem, 2.2vw, 1.12rem);
+  line-height: 1.45;
+}
+
+.first-time-training__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.first-time-training__actions button {
+  min-height: 54px;
+  padding: 12px 16px;
+  border: 1px solid rgba(92, 117, 119, 0.38);
+  border-radius: 11px;
+  background: rgba(255, 254, 250, 0.97);
+  color: #18363b;
+  box-shadow:
+    0 5px 9px rgba(42, 72, 68, 0.18),
+    inset 0 1px 0 #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.98rem;
+  font-weight: 740;
+  transition:
+    transform 90ms ease,
+    box-shadow 120ms ease,
+    background 120ms ease;
+}
+
+.first-time-training__actions .first-time-training__start {
+  border-color: #1f8b38;
+  background: linear-gradient(180deg, #4fc25f, #31a747);
+  color: #ffffff;
+  box-shadow:
+    0 6px 10px rgba(31, 118, 53, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.first-time-training__actions button:hover {
+  background: #ffffff;
+  box-shadow:
+    0 7px 13px rgba(42, 72, 68, 0.22),
+    inset 0 1px 0 #ffffff;
+  transform: translateY(-1px);
+}
+
+.first-time-training__actions .first-time-training__start:hover {
+  background: linear-gradient(180deg, #5acc6a, #39af4e);
+}
+
+.first-time-training__actions button:active {
+  transform: translateY(1px);
+}
+
+.first-time-training__actions button:focus-visible {
+  outline: 3px solid #168dce;
+  outline-offset: 3px;
+}
+
+.training-complete__dialog {
+  width: min(520px, 100%);
+}
+
+.training-complete__dialog p {
+  max-width: 450px;
+}
+
+.training-complete__countdown {
+  color: #18863a;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.training-complete__reminder-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin: -8px 0 14px;
+  padding: 11px;
+  border: 1px solid rgba(92, 117, 119, 0.24);
+  border-radius: 11px;
+  background: rgba(226, 237, 231, 0.66);
+}
+
+.training-complete__reminder-choices[hidden] {
+  display: none;
+}
+
+.training-complete__reminder-link {
+  display: inline-flex;
+  min-height: 43px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 11px;
+  border: 1px solid rgba(92, 117, 119, 0.38);
+  border-radius: 9px;
+  background: rgba(255, 254, 250, 0.98);
+  color: #18363b;
+  box-shadow: 0 3px 7px rgba(42, 72, 68, 0.13);
+  font-size: 0.83rem;
+  font-weight: 740;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  transition:
+    transform 90ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.training-complete__reminder-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.training-complete__reminder-icon--discord {
+  color: #5865f2;
+  fill: currentColor;
+}
+
+.training-complete__reminder-icon--calendar {
+  color: #4285f4;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.training-complete__reminder-icon--calendar path:last-child {
+  fill: currentColor;
+  stroke: none;
+}
+
+.training-complete__reminder-link:hover {
+  border-color: #2e8650;
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.training-complete__reminder-link:focus-visible {
+  outline: 3px solid #168dce;
+  outline-offset: 2px;
+}
+
+.training-complete__remind[hidden] + .training-complete__wait {
+  grid-column: 1 / -1;
+}
+
+/* ── Matchmaking banner over the local training maze ─────────────────── */
+
+.training-queue-banner {
+  position: fixed;
+  z-index: 2600;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  display: grid;
+  width: min(720px, calc(100vw - 24px));
+  min-height: 74px;
+  grid-template-columns: minmax(150px, 1fr) minmax(240px, 1.45fr) minmax(150px, 1fr);
+  align-items: center;
+  padding: 10px 16px;
+  border: 1px solid rgba(232, 213, 164, 0.52);
+  border-radius: 13px;
+  background: linear-gradient(180deg, rgba(22, 31, 35, 0.96), rgba(11, 20, 25, 0.96));
+  box-shadow:
+    0 9px 28px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.035);
+  color: #fff1c7;
+  font-family: PixelOperator8, monospace;
+  transform: translateX(-50%);
+}
+
+.training-queue-banner__back {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-self: start;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 1px solid rgba(225, 201, 143, 0.55);
+  border-radius: 7px;
+  background: rgba(30, 44, 49, 0.94);
+  color: #fff1c7;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+.training-queue-banner__back > span:first-child {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 1rem;
+}
+
+.training-queue-banner__back:hover {
+  border-color: #f0d58f;
+  background: #2c4047;
+}
+
+.training-queue-banner__back:focus-visible {
+  outline: 2px solid #f0d58f;
+  outline-offset: 3px;
+}
+
+.training-queue-banner__message {
+  display: flex;
+  min-width: 0;
+  grid-column: 2;
+  align-items: center;
+  flex-direction: column;
+  gap: 5px;
+  text-align: center;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+.training-queue-banner__headline {
+  color: #fff0b8;
+  font-size: clamp(0.92rem, 2vw, 1.15rem);
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.training-queue-banner__detail {
+  color: #b9c3bc;
+  font-size: clamp(0.64rem, 1.45vw, 0.76rem);
+  line-height: 1.15;
+}
+
+.training-queue-banner--ready {
+  border-color: rgba(132, 221, 126, 0.72);
+  background: linear-gradient(180deg, rgba(27, 61, 39, 0.97), rgba(14, 37, 27, 0.97));
+  box-shadow:
+    0 9px 28px rgba(0, 0, 0, 0.42),
+    inset 0 0 20px rgba(89, 191, 94, 0.12);
+}
+
+.training-queue-banner--ready .training-queue-banner__headline {
+  color: #d9ffd4;
+}
+
+@media (min-width: 481px) {
+  .training-queue-banner {
+    top: max(32px, env(safe-area-inset-top));
+    display: block;
+    width: max-content;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  .training-queue-banner__back {
+    display: none;
+  }
+
+  .training-queue-banner__message {
+    grid-column: auto;
+  }
+}
+
 .loading-screen__error-action {
   margin: 20px auto 0;
 }
@@ -2610,6 +2923,46 @@ body {
 }
 
 @media (max-width: 480px) {
+  .first-time-training__dialog {
+    padding: 25px 20px 21px;
+  }
+
+  .first-time-training__actions {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .first-time-training__actions button {
+    min-height: 50px;
+  }
+
+  .training-complete__reminder-choices {
+    grid-template-columns: 1fr;
+  }
+
+  .training-queue-banner {
+    top: calc(var(--fullscreen-toggle-top) + var(--fullscreen-toggle-size) + 8px);
+    width: calc(100vw - 16px);
+    min-height: 84px;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    padding: 9px 10px;
+  }
+
+  .training-queue-banner__back {
+    min-height: 42px;
+    padding-inline: 10px;
+  }
+
+  .training-queue-banner__back > span:last-child {
+    display: none;
+  }
+
+  .training-queue-banner__message {
+    grid-column: 2;
+    padding-right: 6px;
+  }
+
   .lobby-panel {
     width: 100%;
     min-height: calc(100dvh - 36px);
