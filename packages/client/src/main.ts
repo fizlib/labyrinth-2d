@@ -40,6 +40,7 @@ import {
   formatCommunityRoundCountdown,
   getCommunityRoundState,
 } from './systems/CommunityRoundSchedule';
+import { shouldWarmGameAssetsInBackground } from './assets/AssetPreloadPolicy';
 
 inject();
 
@@ -60,6 +61,16 @@ function loadGameModule(): Promise<typeof import('./game')> {
 function scheduleGameWarmup(): void {
   if (gameWarmupScheduled) return;
   gameWarmupScheduled = true;
+
+  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  if (
+    !shouldWarmGameAssetsInBackground({
+      maxTouchPoints: navigator.maxTouchPoints ?? 0,
+      coarsePointer,
+    })
+  ) {
+    return;
+  }
 
   window.setTimeout(() => {
     void loadGameModule()

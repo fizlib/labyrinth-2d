@@ -1838,8 +1838,11 @@ function fadeOutPregameTheme(): void {
   const initialVolume = theme.volume;
   const fadeStartedAt = performance.now();
   const fade = (now: number): void => {
-    const progress = Math.min(1, (now - fadeStartedAt) / PREGAME_THEME_FADE_MS);
-    theme.volume = initialVolume * (1 - progress);
+    const progress = Math.max(
+      0,
+      Math.min(1, (now - fadeStartedAt) / PREGAME_THEME_FADE_MS),
+    );
+    theme.volume = Math.max(0, Math.min(1, initialVolume * (1 - progress)));
 
     if (progress < 1) {
       pregameThemeFadeFrame = window.requestAnimationFrame(fade);

@@ -115,10 +115,9 @@ const FIORWOODS_RUNTIME_ASSET_IDS = [
   ]),
 ];
 
-// Start every small runtime request together. The authored maze art consists of
-// hundreds of tiny PNGs; loading their logical groups one after another turns a
-// cold cache into a long network waterfall even though the total byte size is
-// modest. The normal loader below still validates each group and owns fallbacks.
+// Desktop menu warmup starts every small runtime request together. Phones and
+// tablets deliberately skip that warmup because decoding the authored texture
+// library while Pixi creates its renderer can exhaust their tab process.
 const GAME_ASSET_PATHS = [
   ...new Set([
     'assets/tiles.png',
@@ -353,10 +352,9 @@ export type AssetLoadProgressCallback = (progress: number, status: string) => vo
 export async function loadAssets(
   onProgress?: AssetLoadProgressCallback,
 ): Promise<GameAssets> {
-  // Do not await this aggregate request. Individual loads below attach to the
-  // same Pixi promises, retaining validation and progress while eliminating the
-  // cold-cache category waterfall.
-  void preloadAssets();
+  // When desktop menu warmup is active, these individual requests attach to
+  // Pixi's cached promises. On touch devices no aggregate preload is started,
+  // so the groups below load in stages after renderer initialization.
 
   const reportProgress = (progress: number, status: string): void => {
     onProgress?.(Math.max(0, Math.min(1, progress)), status);
