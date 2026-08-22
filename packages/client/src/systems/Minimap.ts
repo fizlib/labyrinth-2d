@@ -371,6 +371,17 @@ export class Minimap {
     this.lastPlayerTileY = -1;
   }
 
+  /** Refresh Warden map colouring after the server trap network changes. */
+  setTrapCells(trapCells: readonly TrapCellPlacement[]): void {
+    this.trapCellMask = this.createTrapCellMask(trapCells);
+    this.lastPlayerTileX = -1;
+    this.lastPlayerTileY = -1;
+    if (this.expanded) {
+      this.redrawExpandedCanvas();
+      this.expandedTexture?.source.update();
+    }
+  }
+
   /**
    * Call every frame with the local player's precise pixel position.
    * Handles both optimized CPU fog updates and GPU smooth scrolling.

@@ -10,13 +10,15 @@ const BUTTON_WIDTH = 132;
 const BUTTON_HEIGHT = 25;
 const MAIN_BUTTON_X = (PANEL_WIDTH - BUTTON_WIDTH) / 2;
 
-type MenuPage = 'main' | 'controls' | 'exit-confirmation';
+type MenuPage = 'main' | 'controls' | 'options' | 'exit-confirmation';
 
 export interface GameMenuActions {
   onVisibilityChange: (visible: boolean) => void;
   onOpenAdminPanel: () => void;
   isSoundMuted: () => boolean;
   onSoundMutedChange: (muted: boolean) => void;
+  areChatBubblesEnabled: () => boolean;
+  onChatBubblesEnabledChange: (enabled: boolean) => void;
   onExitMatch: () => void;
 }
 
@@ -26,11 +28,13 @@ export class GameMenuHud {
   private readonly title: Text;
   private readonly mainPage = new Container();
   private readonly controlsPage = new Container();
+  private readonly optionsPage = new Container();
   private readonly exitConfirmationPage = new Container();
   private readonly adminButton: Container;
   private readonly controlsButton: Container;
-  private readonly soundButton: Container;
+  private readonly optionsButton: Container;
   private readonly soundButtonLabel: Text;
+  private readonly chatBubblesButtonLabel: Text;
   private readonly exitButton: Container;
   private available = false;
   private adminAvailable = false;
@@ -65,13 +69,20 @@ export class GameMenuHud {
     const mainPageButtons = this.buildMainPage();
     this.adminButton = mainPageButtons.admin;
     this.controlsButton = mainPageButtons.controls;
-    this.soundButton = mainPageButtons.sound;
-    this.soundButtonLabel = mainPageButtons.soundLabel;
+    this.optionsButton = mainPageButtons.options;
     this.exitButton = mainPageButtons.exit;
     this.layoutMainPage();
     this.buildControlsPage();
+    const optionsPageButtons = this.buildOptionsPage();
+    this.soundButtonLabel = optionsPageButtons.soundLabel;
+    this.chatBubblesButtonLabel = optionsPageButtons.chatBubblesLabel;
     this.buildExitConfirmationPage();
-    panel.addChild(this.mainPage, this.controlsPage, this.exitConfirmationPage);
+    panel.addChild(
+      this.mainPage,
+      this.controlsPage,
+      this.optionsPage,
+      this.exitConfirmationPage,
+    );
 
     this.container.visible = false;
     this.showPage('main');
@@ -97,7 +108,7 @@ export class GameMenuHud {
 
   open(): void {
     if (!this.available || this.container.visible) return;
-    this.updateSoundButtonLabel();
+    this.updateOptionButtonLabels();
     this.showPage('main');
     this.container.visible = true;
     this.actions.onVisibilityChange(true);
@@ -136,8 +147,7 @@ export class GameMenuHud {
   private buildMainPage(): {
     admin: Container;
     controls: Container;
-    sound: Container;
-    soundLabel: Text;
+    options: Container;
     exit: Container;
   } {
     const resumeButton = this.createButton('Resume game', MAIN_BUTTON_X, 58, () =>
@@ -153,14 +163,8 @@ export class GameMenuHud {
     const controlsButton = this.createButton('Controls', MAIN_BUTTON_X, 92, () =>
       this.showPage('controls'),
     );
-    const soundButtonView = this.createButtonView(
-      this.getSoundButtonLabel(),
-      MAIN_BUTTON_X,
-      121,
-      () => {
-        this.actions.onSoundMutedChange(!this.actions.isSoundMuted());
-        this.updateSoundButtonLabel();
-      },
+    const optionsButton = this.createButton('Options', MAIN_BUTTON_X, 121, () =>
+      this.showPage('options'),
     );
     const exitButton = this.createButton('Exit match', MAIN_BUTTON_X, 150, () =>
       this.showPage('exit-confirmation'),
@@ -169,7 +173,7 @@ export class GameMenuHud {
       resumeButton,
       adminButton,
       controlsButton,
-      soundButtonView.container,
+      optionsButton,
       exitButton,
     );
 
@@ -181,8 +185,7 @@ export class GameMenuHud {
     return {
       admin: adminButton,
       controls: controlsButton,
-      sound: soundButtonView.container,
-      soundLabel: soundButtonView.label,
+      options: optionsButton,
       exit: exitButton,
     };
   }
@@ -190,7 +193,7 @@ export class GameMenuHud {
   private layoutMainPage(): void {
     this.adminButton.visible = this.adminAvailable;
     this.controlsButton.y = this.adminAvailable ? 116 : 92;
-    this.soundButton.y = this.adminAvailable ? 145 : 121;
+    this.optionsButton.y = this.adminAvailable ? 145 : 121;
     this.exitButton.y = this.adminAvailable ? 174 : 150;
   }
 
@@ -198,8 +201,13 @@ export class GameMenuHud {
     return `Sound: ${this.actions.isSoundMuted() ? 'Off' : 'On'}`;
   }
 
-  private updateSoundButtonLabel(): void {
+  private getChatBubblesButtonLabel(): string {
+    return `Chat bubbles: ${this.actions.areChatBubblesEnabled() ? 'On' : 'Off'}`;
+  }
+
+  private updateOptionButtonLabels(): void {
     this.soundButtonLabel.text = this.getSoundButtonLabel();
+    this.chatBubblesButtonLabel.text = this.getChatBubblesButtonLabel();
   }
 
   private buildControlsPage(): void {
@@ -228,6 +236,36 @@ export class GameMenuHud {
     );
   }
 
+  private buildOptionsPage(): { soundLabel: Text; chatBubblesLabel: Text } {
+    const soundButtonView = this.createButtonView(
+      this.getSoundButtonLabel(),
+      MAIN_BUTTON_X,
+      66,
+      () => {
+        this.actions.onSoundMutedChange(!this.actions.isSoundMuted());
+        this.updateOptionButtonLabels();
+      },
+    );
+    const chatBubblesButtonView = this.createButtonView(
+      this.getChatBubblesButtonLabel(),
+      MAIN_BUTTON_X,
+      100,
+      () => {
+        this.actions.onChatBubblesEnabledChange(!this.actions.areChatBubblesEnabled());
+        this.updateOptionButtonLabels();
+      },
+    );
+    this.optionsPage.addChild(
+      soundButtonView.container,
+      chatBubblesButtonView.container,
+      this.createButton('Back', MAIN_BUTTON_X, 145, () => this.showPage('main')),
+    );
+    return {
+      soundLabel: soundButtonView.label,
+      chatBubblesLabel: chatBubblesButtonView.label,
+    };
+  }
+
   private buildExitConfirmationPage(): void {
     const message = this.createText(
       'You will not be able to reconnect.',
@@ -253,9 +291,17 @@ export class GameMenuHud {
 
   private showPage(page: MenuPage): void {
     this.page = page;
-    this.title.text = page === 'controls' ? 'Controls' : page === 'exit-confirmation' ? 'Exit match?' : 'Game menu';
+    this.title.text =
+      page === 'controls'
+        ? 'Controls'
+        : page === 'options'
+          ? 'Options'
+          : page === 'exit-confirmation'
+            ? 'Exit match?'
+            : 'Game menu';
     this.mainPage.visible = page === 'main';
     this.controlsPage.visible = page === 'controls';
+    this.optionsPage.visible = page === 'options';
     this.exitConfirmationPage.visible = page === 'exit-confirmation';
   }
 
@@ -336,8 +382,12 @@ export class GameMenuHud {
       background.rect(0, 0, width, BUTTON_HEIGHT);
       background.fill({
         color: dangerous
-          ? hovered ? 0xef715c : 0xa44c42
-          : hovered ? 0xd0b16e : 0x907a55,
+          ? hovered
+            ? 0xef715c
+            : 0xa44c42
+          : hovered
+            ? 0xd0b16e
+            : 0x907a55,
       });
       background.rect(2, 2, width - 4, BUTTON_HEIGHT - 4);
       background.fill({ color: hovered ? 0x263640 : 0x1b2830 });

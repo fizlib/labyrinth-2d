@@ -1,4 +1,11 @@
-import type { FacingDirection } from '@labyrinth/shared';
+import {
+  findTrapCellInteractionTarget,
+  isPlayerInTrapCell,
+  type CageState,
+  type FacingDirection,
+  type PlayerRole,
+  type TrapCellPlacement,
+} from '@labyrinth/shared';
 
 export interface RecordingMoveInput {
   up: boolean;
@@ -22,16 +29,24 @@ export interface RecordingChatCue {
   text: string;
 }
 
+export interface RecordingInteractionCue {
+  id: string;
+  time: number;
+  type: 'activate-trap';
+}
+
 export interface RecordingActor {
   id: string;
   name: string;
   spriteIndex: number;
   teamId: number;
+  role: PlayerRole;
   startX: number;
   startY: number;
   startFacing: FacingDirection;
   frames: RecordingActorFrame[];
   messages: RecordingChatCue[];
+  interactions: RecordingInteractionCue[];
 }
 
 export interface RecordingActorRenderState {
@@ -40,6 +55,7 @@ export interface RecordingActorRenderState {
   name: string;
   spriteIndex: number;
   teamId: number;
+  role: PlayerRole;
   x: number;
   y: number;
   facing: FacingDirection;
@@ -52,10 +68,30 @@ export interface RecordingCameraState {
   y: number;
 }
 
+export interface RecordingCameraAttachment extends RecordingCameraState {
+  actorId: string;
+  spriteId: string;
+  name: string;
+  role: PlayerRole;
+}
+
+export interface RecordingTrapCapture {
+  cageId: number;
+  actorId: string;
+  wardenActorId: string;
+  interactionId: string;
+  trapCellIndex: number;
+  time: number;
+  x: number;
+  y: number;
+}
+
 export interface RecordingStudioOptions {
   characterNames: readonly string[];
   teamNames: readonly string[];
   storageKey: string;
+  trapCells: readonly TrapCellPlacement[];
+  tileSize: number;
   getLocalPosition: () => { x: number; y: number; facing: FacingDirection };
   moveActor: (
     pose: { x: number; y: number; facing: FacingDirection },
@@ -71,7 +107,7 @@ export interface RecordingStudioOptions {
 type StudioMode = 'idle' | 'playing' | 'recording';
 
 export interface RecordingProjectFile {
-  version: 1;
+  version: 1 | 2;
   actors: RecordingActor[];
 }
 
@@ -137,7 +173,11 @@ export function getRecordingActorDuration(actor: RecordingActor): number {
     (latest, cue) => Math.max(latest, cue.time + cue.duration),
     0,
   );
-  return Math.max(frameDuration, chatDuration);
+  const interactionDuration = (actor.interactions ?? []).reduce(
+    (latest, cue) => Math.max(latest, cue.time),
+    0,
+  );
+  return Math.max(frameDuration, chatDuration, interactionDuration);
 }
 
 export function getRecordingActorMovementDuration(actor: RecordingActor): number {
@@ -186,10 +226,74 @@ export function sampleRecordingActor(
   };
 }
 
+/** Replay all recorded Warden trap activations up to one timeline position. */
+export function deriveRecordingTrapCaptures(
+  actors: readonly RecordingActor[],
+  time: number,
+  trapCells: readonly TrapCellPlacement[],
+  tileSize: number,
+): RecordingTrapCapture[] {
+  const activations = actors
+    .filter((actor) => actor.role === 'warden')
+    .flatMap((actor) =>
+      (actor.interactions ?? []).map((interaction) => ({ actor, interaction })),
+    )
+    .filter(
+      ({ interaction }) =>
+        interaction.type === 'activate-trap' && interaction.time <= time,
+    )
+    .sort(
+      (a, b) =>
+        a.interaction.time - b.interaction.time ||
+        a.interaction.id.localeCompare(b.interaction.id),
+    );
+  const capturedActorIds = new Set<string>();
+  const captures: RecordingTrapCapture[] = [];
+
+  for (const { actor: warden, interaction } of activations) {
+    const wardenPose = sampleRecordingActor(warden, interaction.time);
+    const target = findTrapCellInteractionTarget(
+      trapCells,
+      wardenPose.x,
+      wardenPose.y,
+      tileSize,
+    );
+    if (!target) continue;
+
+    for (const survivor of actors) {
+      if (survivor.role !== 'survivor' || capturedActorIds.has(survivor.id)) continue;
+      const survivorPose = sampleRecordingActor(survivor, interaction.time);
+      const trapCellIndex = trapCells.findIndex((trapCell) =>
+        isPlayerInTrapCell(trapCell, survivorPose.x, survivorPose.y, tileSize),
+      );
+      if (trapCellIndex < 0) continue;
+
+      capturedActorIds.add(survivor.id);
+      captures.push({
+        cageId: -(captures.length + 1),
+        actorId: survivor.id,
+        wardenActorId: warden.id,
+        interactionId: interaction.id,
+        trapCellIndex,
+        time: interaction.time,
+        x: survivorPose.x,
+        y: survivorPose.y,
+      });
+    }
+  }
+
+  return captures;
+}
+
 export function parseRecordingProject(value: unknown): RecordingActor[] | null {
   if (!value || typeof value !== 'object') return null;
   const project = value as Partial<RecordingProjectFile>;
-  if (project.version !== 1 || !Array.isArray(project.actors)) return null;
+  if (
+    (project.version !== 1 && project.version !== 2) ||
+    !Array.isArray(project.actors)
+  ) {
+    return null;
+  }
 
   const actors: RecordingActor[] = [];
   for (const candidate of project.actors) {
@@ -244,6 +348,23 @@ export function parseRecordingProject(value: unknown): RecordingActor[] | null {
           }))
           .sort((a, b) => a.time - b.time)
       : [];
+    const interactions = Array.isArray(actor.interactions)
+      ? actor.interactions
+          .filter(
+            (cue): cue is RecordingInteractionCue =>
+              Boolean(cue) &&
+              typeof cue.id === 'string' &&
+              cue.type === 'activate-trap' &&
+              typeof cue.time === 'number' &&
+              Number.isFinite(cue.time) &&
+              cue.time >= 0,
+          )
+          .map((cue) => ({
+            ...cue,
+            time: clamp(cue.time, 0, MAX_RECORDING_SECONDS),
+          }))
+          .sort((a, b) => a.time - b.time)
+      : [];
     actors.push({
       id: actor.id,
       name: actor.name.trim().slice(0, 24) || 'Actor',
@@ -255,11 +376,13 @@ export function parseRecordingProject(value: unknown): RecordingActor[] | null {
         typeof actor.teamId === 'number' && Number.isInteger(actor.teamId)
           ? Math.max(0, actor.teamId)
           : 0,
+      role: actor.role === 'warden' ? 'warden' : 'survivor',
       startX: actor.startX,
       startY: actor.startY,
       startFacing,
       frames,
       messages,
+      interactions,
     });
   }
   return actors;
@@ -280,10 +403,13 @@ export class RecordingStudio {
   private readonly cleanButton: HTMLButtonElement;
   private readonly restartButton: HTMLButtonElement;
   private readonly continueButton: HTMLButtonElement;
+  private readonly attachCameraButton: HTMLButtonElement;
   private readonly actorNameInput: HTMLInputElement;
   private readonly actorSkinSelect: HTMLSelectElement;
   private readonly actorTeamSelect: HTMLSelectElement;
+  private readonly actorRoleSelect: HTMLSelectElement;
   private readonly messageList: HTMLDivElement;
+  private readonly interactionList: HTMLDivElement;
   private readonly messageTimeInput: HTMLInputElement;
   private readonly messageDurationInput: HTMLInputElement;
   private readonly messageTextInput: HTMLInputElement;
@@ -297,6 +423,7 @@ export class RecordingStudio {
   private selectedActorId: string | null = null;
   private mode: StudioMode = 'idle';
   private cameraActive = false;
+  private cameraActorId: string | null = null;
   private panelOpen = false;
   private cleanMode = false;
   private currentTime = 0;
@@ -338,17 +465,44 @@ export class RecordingStudio {
       this.setPanelOpen(false);
       return;
     }
-    if (event.code === 'Space' && (this.mode !== 'idle' || this.cameraActive)) {
+    if (
+      event.code === 'Space' &&
+      (this.mode !== 'idle' || this.cameraActive || this.cameraActorId !== null)
+    ) {
       event.preventDefault();
       event.stopImmediatePropagation();
       if (!event.repeat) {
         if (this.mode !== 'idle') this.stop();
+        else if (this.cameraActorId) this.detachActorCamera();
         else this.toggleCamera();
       }
       return;
     }
 
-    if (this.mode !== 'recording' && !this.cameraActive) return;
+    if (this.mode === 'recording' && event.code === 'KeyE') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!event.repeat) this.recordTrapInteraction();
+      return;
+    }
+
+    if (
+      this.cameraActorId &&
+      this.mode !== 'recording' &&
+      (event.code === 'KeyE' || event.code === 'KeyQ')
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+
+    if (this.mode !== 'recording' && !this.cameraActive) {
+      if (this.cameraActorId && this.directionForCode(event.code)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+      return;
+    }
     const direction = this.directionForCode(event.code);
     if (direction) {
       event.preventDefault();
@@ -429,6 +583,10 @@ export class RecordingStudio {
             <select name="team" aria-label="Squad">
               ${options.teamNames.map((name, index) => `<option value="${index}">${name}</option>`).join('')}
             </select>
+            <select name="role" aria-label="Role">
+              <option value="survivor">Survivor</option>
+              <option value="warden">Warden</option>
+            </select>
             <button type="submit">+ Spawn</button>
           </form>
           <div class="recording-studio__actors" data-studio-list="actors"></div>
@@ -438,14 +596,20 @@ export class RecordingStudio {
             <label>Name<input data-studio-field="actor-name" maxlength="24"></label>
             <label>Skin<select data-studio-field="actor-skin">${options.characterNames.map((name, index) => `<option value="${index}">${name}</option>`).join('')}</select></label>
             <label>Squad<select data-studio-field="actor-team">${options.teamNames.map((name, index) => `<option value="${index}">${name}</option>`).join('')}</select></label>
+            <label>Role<select data-studio-field="actor-role"><option value="survivor">Survivor</option><option value="warden">Warden</option></select></label>
           </div>
           <div class="recording-studio__actor-actions">
             <button type="button" data-studio-action="restart-recording">● Start take</button>
             <button type="button" data-studio-action="continue-recording" disabled>▶ Continue recording</button>
+            <button type="button" data-studio-action="attach-camera">Attach camera</button>
             <button type="button" data-studio-action="set-start">Set start here</button>
             <button type="button" data-studio-action="delete-actor" class="danger">Delete</button>
           </div>
-          <p class="recording-studio__hint">Use WASD or arrows. Space pauses and saves the take. Continue resumes at the endpoint; discard & restart returns to the actor's start.</p>
+          <p class="recording-studio__hint">Use WASD or arrows. Wardens record trap activations with E. Space pauses and saves the take. Continue resumes at the endpoint; discard & restart returns to the actor's start.</p>
+          <div class="recording-studio__interactions">
+            <h3>Recorded interactions</h3>
+            <div data-studio-list="interactions" class="recording-studio__interaction-list"></div>
+          </div>
           <div class="recording-studio__messages">
             <h3>Chat bubbles</h3>
             <form data-studio-form="message" class="recording-studio__message-form">
@@ -489,10 +653,15 @@ export class RecordingStudio {
     this.continueButton = query<HTMLButtonElement>(
       '[data-studio-action="continue-recording"]',
     );
+    this.attachCameraButton = query<HTMLButtonElement>(
+      '[data-studio-action="attach-camera"]',
+    );
     this.actorNameInput = query<HTMLInputElement>('[data-studio-field="actor-name"]');
     this.actorSkinSelect = query<HTMLSelectElement>('[data-studio-field="actor-skin"]');
     this.actorTeamSelect = query<HTMLSelectElement>('[data-studio-field="actor-team"]');
+    this.actorRoleSelect = query<HTMLSelectElement>('[data-studio-field="actor-role"]');
     this.messageList = query<HTMLDivElement>('[data-studio-list="messages"]');
+    this.interactionList = query<HTMLDivElement>('[data-studio-list="interactions"]');
     this.messageTimeInput = query<HTMLInputElement>('[data-studio-field="message-time"]');
     this.messageDurationInput = query<HTMLInputElement>(
       '[data-studio-field="message-duration"]',
@@ -517,7 +686,13 @@ export class RecordingStudio {
   }
 
   blocksLocalMovement(): boolean {
-    return this.panelOpen || this.mode !== 'idle' || this.cameraActive || this.cleanMode;
+    return (
+      this.panelOpen ||
+      this.mode !== 'idle' ||
+      this.cameraActive ||
+      this.cameraActorId !== null ||
+      this.cleanMode
+    );
   }
 
   hasActorSpriteId(spriteId: string): boolean {
@@ -529,13 +704,58 @@ export class RecordingStudio {
   }
 
   getCameraOverride(): RecordingCameraState | null {
-    return this.cameraActive ? { x: this.cameraX, y: this.cameraY } : null;
+    if (this.cameraActive) return { x: this.cameraX, y: this.cameraY };
+    if (!this.cameraActorId) return null;
+    const actor = this.getActorStates().find(
+      (candidate) => candidate.actorId === this.cameraActorId,
+    );
+    return actor ? { x: actor.x, y: actor.y } : null;
+  }
+
+  getCameraAttachment(): RecordingCameraAttachment | null {
+    if (!this.cameraActorId) return null;
+    const actor = this.getActorStates().find(
+      (candidate) => candidate.actorId === this.cameraActorId,
+    );
+    return actor
+      ? {
+          actorId: actor.actorId,
+          spriteId: actor.spriteId,
+          name: actor.name,
+          role: actor.role,
+          x: actor.x,
+          y: actor.y,
+        }
+      : null;
+  }
+
+  getRecordingCageStates(): CageState[] {
+    return this.getTrapCaptures().map((capture) => ({
+      cageId: capture.cageId,
+      prisonerPlayerId: this.spriteIdFor(capture.actorId),
+      x: capture.x,
+      y: capture.y,
+      opened: false,
+      vacated: false,
+    }));
   }
 
   getActorStates(): RecordingActorRenderState[] {
+    const captureByActorId = new Map(
+      this.getTrapCaptures().map((capture) => [capture.actorId, capture]),
+    );
     return this.actors.map((actor) => {
-      const pose =
+      const recordedPose =
         this.poses.get(actor.id) ?? sampleRecordingActor(actor, this.currentTime);
+      const capture = captureByActorId.get(actor.id);
+      const pose = capture
+        ? {
+            ...recordedPose,
+            x: capture.x,
+            y: capture.y,
+            isMoving: false,
+          }
+        : recordedPose;
       const cue = actor.messages.find(
         (candidate) =>
           this.currentTime >= candidate.time &&
@@ -547,6 +767,7 @@ export class RecordingStudio {
         name: actor.name,
         spriteIndex: actor.spriteIndex,
         teamId: actor.teamId,
+        role: actor.role,
         x: pose.x,
         y: pose.y,
         facing: pose.facing,
@@ -628,6 +849,9 @@ export class RecordingStudio {
         case 'continue-recording':
           this.continueRecording();
           break;
+        case 'attach-camera':
+          this.toggleActorCamera();
+          break;
         case 'set-start':
           this.setSelectedStart();
           break;
@@ -637,6 +861,11 @@ export class RecordingStudio {
         case 'delete-message': {
           const cueId = actionButton.dataset.messageId;
           if (cueId) this.deleteMessage(cueId);
+          break;
+        }
+        case 'delete-interaction': {
+          const interactionId = actionButton.dataset.interactionId;
+          if (interactionId) this.deleteInteraction(interactionId);
           break;
         }
       }
@@ -651,7 +880,8 @@ export class RecordingStudio {
         const name = String(data.get('name') ?? '').trim();
         const spriteIndex = Number.parseInt(String(data.get('skin') ?? '0'), 10);
         const teamId = Number.parseInt(String(data.get('team') ?? '0'), 10);
-        this.spawnActor(name, spriteIndex, teamId);
+        const role = data.get('role') === 'warden' ? 'warden' : 'survivor';
+        this.spawnActor(name, spriteIndex, teamId, role);
         const nameInput = form.elements.namedItem('name');
         if (nameInput instanceof HTMLInputElement) {
           nameInput.value = `Explorer ${this.actors.length + 1}`;
@@ -698,6 +928,15 @@ export class RecordingStudio {
       actor.teamId = Number.parseInt(this.actorTeamSelect.value, 10) || 0;
       this.save();
     });
+    this.actorRoleSelect.addEventListener('change', () => {
+      const actor = this.getSelectedActor();
+      if (!actor) return;
+      actor.role = this.actorRoleSelect.value === 'warden' ? 'warden' : 'survivor';
+      this.save();
+      this.renderActors();
+      this.renderInteractions();
+      this.refreshTransport(true);
+    });
 
     this.timelineInput.addEventListener('input', () => {
       this.stop(false);
@@ -731,20 +970,46 @@ export class RecordingStudio {
       this.renderMessages();
       this.refreshTransport(true);
     });
+
+    this.interactionList.addEventListener('change', (event) => {
+      if (!(event.target instanceof HTMLInputElement)) return;
+      const interactionId = event.target.dataset.interactionId;
+      const actor = this.getSelectedActor();
+      const interaction = actor?.interactions.find(
+        (candidate) => candidate.id === interactionId,
+      );
+      if (!actor || !interaction) return;
+      interaction.time = clamp(
+        Number.parseFloat(event.target.value) || 0,
+        0,
+        MAX_RECORDING_SECONDS,
+      );
+      actor.interactions.sort((a, b) => a.time - b.time);
+      this.save();
+      this.renderInteractions();
+      this.refreshTransport(true);
+    });
   }
 
-  private spawnActor(name: string, spriteIndex: number, teamId: number): void {
+  private spawnActor(
+    name: string,
+    spriteIndex: number,
+    teamId: number,
+    role: PlayerRole,
+  ): void {
     const local = this.options.getLocalPosition();
     const actor: RecordingActor = {
       id: createId('actor'),
       name: name.slice(0, 24) || `Explorer ${this.actors.length + 1}`,
       spriteIndex: clamp(spriteIndex, 0, this.options.characterNames.length - 1),
       teamId: clamp(teamId, 0, this.options.teamNames.length - 1),
+      role,
       startX: local.x,
       startY: local.y,
       startFacing: local.facing,
       frames: [],
       messages: [],
+      interactions: [],
     };
     this.actors.push(actor);
     this.selectedActorId = actor.id;
@@ -766,10 +1031,12 @@ export class RecordingStudio {
     actor.startY = local.y;
     actor.startFacing = local.facing;
     actor.frames = [];
+    actor.interactions = [];
     this.currentTime = 0;
     this.poses.set(actor.id, sampleRecordingActor(actor, 0));
     this.save();
     this.renderActors();
+    this.renderInteractions();
     this.refreshTransport(true);
     this.setStatus(`${actor.name}'s start moved here; its previous take was cleared.`);
   }
@@ -778,6 +1045,7 @@ export class RecordingStudio {
     const actor = this.getSelectedActor();
     if (!actor) return;
     this.stop(false);
+    if (this.cameraActorId === actor.id) this.cameraActorId = null;
     this.actors = this.actors.filter((candidate) => candidate.id !== actor.id);
     this.poses.delete(actor.id);
     this.selectedActorId = this.actors[0]?.id ?? null;
@@ -824,8 +1092,57 @@ export class RecordingStudio {
     this.refreshTransport(true);
   }
 
+  private recordTrapInteraction(): void {
+    const actor = this.getSelectedActor();
+    if (!actor || actor.role !== 'warden') {
+      this.setStatus('Only a Warden actor can record an E trap activation.');
+      return;
+    }
+    const pose =
+      this.poses.get(actor.id) ?? sampleRecordingActor(actor, this.currentTime);
+    const target = findTrapCellInteractionTarget(
+      this.options.trapCells,
+      pose.x,
+      pose.y,
+      this.options.tileSize,
+    );
+    if (!target) {
+      this.setStatus('Move the Warden next to a trap cell before pressing E.');
+      return;
+    }
+    const lastFrame = actor.frames.at(-1);
+    if (!lastFrame || lastFrame.time < this.currentTime) {
+      actor.frames.push({ ...pose, time: this.currentTime });
+    }
+    actor.interactions.push({
+      id: createId('interaction'),
+      time: this.currentTime,
+      type: 'activate-trap',
+    });
+    actor.interactions.sort((a, b) => a.time - b.time);
+    this.save();
+    this.renderActors();
+    this.renderInteractions();
+    this.refreshTransport(true);
+    this.setStatus(
+      `${actor.name} activated trap cell ${target.trapCellIndex + 1} at ${formatTime(this.currentTime)}.`,
+    );
+  }
+
+  private deleteInteraction(interactionId: string): void {
+    const actor = this.getSelectedActor();
+    if (!actor) return;
+    actor.interactions = actor.interactions.filter(
+      (interaction) => interaction.id !== interactionId,
+    );
+    this.save();
+    this.renderActors();
+    this.renderInteractions();
+    this.refreshTransport(true);
+  }
+
   private exportProject(): void {
-    const project: RecordingProjectFile = { version: 1, actors: this.actors };
+    const project: RecordingProjectFile = { version: 2, actors: this.actors };
     const blob = new Blob([JSON.stringify(project, null, 2)], {
       type: 'application/json',
     });
@@ -850,6 +1167,7 @@ export class RecordingStudio {
       if (!project) throw new Error('Unsupported recording project');
 
       this.stop(false);
+      this.cameraActorId = null;
       this.actors = project.map((actor) => ({
         ...actor,
         spriteIndex: clamp(actor.spriteIndex, 0, this.options.characterNames.length - 1),
@@ -906,13 +1224,15 @@ export class RecordingStudio {
         isMoving: false,
       },
     ];
+    actor.interactions = [];
     this.applyTimelinePose(0);
     // Discarding is committed immediately; closing the page mid-retake must not
     // resurrect the take the admin explicitly chose to replace.
     this.save();
     this.renderActors();
+    this.renderInteractions();
     this.setStatus(
-      `Recording ${actor.name} from the beginning. Use WASD/arrows; Space pauses.`,
+      `Recording ${actor.name} from the beginning. Use WASD/arrows${actor.role === 'warden' ? ', E activates traps' : ''}; Space pauses.`,
     );
     this.options.onInputCaptureChange();
     this.refreshTransport(true);
@@ -932,7 +1252,7 @@ export class RecordingStudio {
     this.recordSampleAccumulator = 0;
     this.applyTimelinePose(this.currentTime);
     this.setStatus(
-      `Continuing ${actor.name} at ${formatTime(this.currentTime)}. Space pauses.`,
+      `Continuing ${actor.name} at ${formatTime(this.currentTime)}${actor.role === 'warden' ? '; E activates traps' : ''}. Space pauses.`,
     );
     this.options.onInputCaptureChange();
     this.refreshTransport(true);
@@ -979,6 +1299,35 @@ export class RecordingStudio {
     }
   }
 
+  private toggleActorCamera(): void {
+    const actor = this.getSelectedActor();
+    if (!actor) return;
+    if (this.cameraActorId === actor.id) {
+      this.detachActorCamera();
+      return;
+    }
+    this.cameraActive = false;
+    this.cameraVelocityX = 0;
+    this.cameraVelocityY = 0;
+    this.clearMovementKeys();
+    this.cameraActorId = actor.id;
+    this.setStatus(
+      `Camera attached to ${actor.name}. Their ${actor.role} HUD is now displayed.`,
+    );
+    this.options.onInputCaptureChange();
+    this.renderActors();
+    this.refreshTransport(true);
+  }
+
+  private detachActorCamera(): void {
+    const actor = this.actors.find((candidate) => candidate.id === this.cameraActorId);
+    this.cameraActorId = null;
+    this.setStatus(actor ? `Camera detached from ${actor.name}.` : 'Camera detached.');
+    this.options.onInputCaptureChange();
+    this.renderActors();
+    this.refreshTransport(true);
+  }
+
   private toggleCamera(): void {
     if (this.cameraActive) {
       this.cameraActive = false;
@@ -998,6 +1347,7 @@ export class RecordingStudio {
     // control pauses an active take. Timeline playback has no such conflict and
     // deliberately continues while the camera is controlled.
     if (this.mode === 'recording') this.stop();
+    this.cameraActorId = null;
     const local = this.options.getLocalPosition();
     this.cameraX = local.x;
     this.cameraY = local.y;
@@ -1106,9 +1456,11 @@ export class RecordingStudio {
     this.actorList.innerHTML = this.actors
       .map((actor) => {
         const selected = actor.id === this.selectedActorId;
+        const cameraAttached = actor.id === this.cameraActorId;
         const duration = getRecordingActorDuration(actor);
         const name = this.escapeHtml(actor.name);
-        return `<button type="button" class="recording-studio__actor${selected ? ' is-selected' : ''}" data-actor-id="${this.escapeHtml(actor.id)}"><span>${name}</span><small>${actor.frames.length > 1 ? formatTime(duration) : 'No take'} · ${actor.messages.length} bubble${actor.messages.length === 1 ? '' : 's'}</small></button>`;
+        const roleName = actor.role === 'warden' ? 'Warden' : 'Survivor';
+        return `<button type="button" class="recording-studio__actor${selected ? ' is-selected' : ''}${cameraAttached ? ' is-camera' : ''}" data-actor-id="${this.escapeHtml(actor.id)}"><span>${cameraAttached ? '◉ ' : ''}${name}</span><small>${roleName} · ${actor.frames.length > 1 ? formatTime(duration) : 'No take'} · ${actor.interactions.length} E</small></button>`;
       })
       .join('');
   }
@@ -1121,7 +1473,30 @@ export class RecordingStudio {
     this.actorNameInput.value = actor.name;
     this.actorSkinSelect.value = String(actor.spriteIndex);
     this.actorTeamSelect.value = String(actor.teamId);
+    this.actorRoleSelect.value = actor.role;
+    this.renderInteractions();
     this.renderMessages();
+  }
+
+  private renderInteractions(): void {
+    const actor = this.getSelectedActor();
+    if (!actor || actor.interactions.length === 0) {
+      this.interactionList.innerHTML =
+        actor?.role === 'warden'
+          ? '<p class="recording-studio__muted">No E trap activations recorded.</p>'
+          : '<p class="recording-studio__muted">Set this actor to Warden to record E.</p>';
+      return;
+    }
+    this.interactionList.innerHTML = actor.interactions
+      .map(
+        (interaction) => `
+          <div class="recording-studio__interaction-row">
+            <span>Activate trap</span>
+            <input data-interaction-id="${this.escapeHtml(interaction.id)}" type="number" min="0" max="600" step="0.1" value="${interaction.time.toFixed(1)}" aria-label="Trap activation time">
+            <button type="button" class="danger" data-studio-action="delete-interaction" data-interaction-id="${this.escapeHtml(interaction.id)}" aria-label="Delete trap activation">×</button>
+          </div>`,
+      )
+      .join('');
   }
 
   private renderMessages(): void {
@@ -1164,6 +1539,11 @@ export class RecordingStudio {
     this.restartButton.disabled = this.mode === 'recording';
     this.restartButton.textContent = hasTake ? '↻ Discard & restart' : '● Start take';
     this.continueButton.disabled = !hasTake || this.mode === 'recording';
+    const cameraAttached = selectedActor?.id === this.cameraActorId;
+    this.attachCameraButton.classList.toggle('is-active', cameraAttached);
+    this.attachCameraButton.textContent = cameraAttached
+      ? 'Detach camera'
+      : 'Attach camera';
   }
 
   private setStatus(text: string): void {
@@ -1208,6 +1588,15 @@ export class RecordingStudio {
     return `${ACTOR_SPRITE_PREFIX}${actorId}`;
   }
 
+  private getTrapCaptures(): RecordingTrapCapture[] {
+    return deriveRecordingTrapCaptures(
+      this.actors,
+      this.currentTime,
+      this.options.trapCells,
+      this.options.tileSize,
+    );
+  }
+
   private load(): RecordingActor[] {
     try {
       const raw = localStorage.getItem(this.options.storageKey);
@@ -1219,7 +1608,7 @@ export class RecordingStudio {
 
   private save(): void {
     try {
-      const project: RecordingProjectFile = { version: 1, actors: this.actors };
+      const project: RecordingProjectFile = { version: 2, actors: this.actors };
       localStorage.setItem(this.options.storageKey, JSON.stringify(project));
     } catch {
       // Recording remains usable for this session when storage is unavailable.

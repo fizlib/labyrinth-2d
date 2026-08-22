@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { TRAP_CELL_RELEASE_COOLDOWN_MS } from '@labyrinth/shared';
+import {
+  CELL_SIZE,
+  CELL_STEP_X,
+  CELL_STEP_Y,
+  GRID_CELLS,
+  TRAP_CELL_RELEASE_COOLDOWN_MS,
+  WALL_HEIGHT,
+  WALL_WIDTH,
+} from '@labyrinth/shared';
 import { Room } from '../dist/Room.js';
 
 class FakeSocket {
@@ -66,6 +74,85 @@ function getLatestTrapResult(room, warden) {
     .get(warden.id)
     ?.sent.findLast((message) => message.type === 'TRAP_ACTIVATION_RESULT');
 }
+
+test('admin /trap chat command adds and synchronizes an immediately usable trap cell', (t) => {
+  const room = createRunningRoom();
+  t.after(() => room.destroy());
+
+  const [admin, survivor, regularPlayer] = room.state.players;
+  assert.ok(admin && survivor && regularPlayer);
+  room.seats.get(admin.id).isAdmin = true;
+  room.sockets.get(admin.id).data.isAdmin = true;
+
+  let candidate = null;
+  for (let cellY = 0; cellY < GRID_CELLS && !candidate; cellY++) {
+    for (let cellX = 0; cellX < GRID_CELLS; cellX++) {
+      if (
+        !room.trapCells.some(
+          (placement) => placement.cellX === cellX && placement.cellY === cellY,
+        )
+      ) {
+        candidate = {
+          cellX,
+          cellY,
+          tileX: WALL_WIDTH + cellX * CELL_STEP_X,
+          tileY: WALL_HEIGHT + cellY * CELL_STEP_Y,
+        };
+        break;
+      }
+    }
+  }
+  assert.ok(candidate);
+
+  const centerX = (candidate.tileX + CELL_SIZE / 2) * room.map.tileSize;
+  const centerY = (candidate.tileY + CELL_SIZE / 2) * room.map.tileSize;
+  admin.x = centerX;
+  admin.y = centerY;
+  regularPlayer.x = centerX;
+  regularPlayer.y = centerY;
+
+  const originalCount = room.trapCells.length;
+  room.handleSendChatMessage(regularPlayer.id, {
+    type: 'SEND_CHAT_MESSAGE',
+    text: '/trap',
+  });
+  assert.equal(room.trapCells.length, originalCount, 'regular players cannot add traps');
+
+  room.handleSendChatMessage(admin.id, {
+    type: 'SEND_CHAT_MESSAGE',
+    text: '  /TRAP  ',
+  });
+  assert.equal(room.trapCells.length, originalCount + 1);
+  assert.deepEqual(room.trapCells.at(-1), candidate);
+  assert.equal(room.trapCellCooldownEndsAtMs.length, room.trapCells.length);
+
+  room.handleSendChatMessage(admin.id, {
+    type: 'SEND_CHAT_MESSAGE',
+    text: '/trap',
+  });
+  assert.equal(room.trapCells.length, originalCount + 1, 'repeating it is idempotent');
+
+  room.tick();
+  const snapshot = room.sockets
+    .get(admin.id)
+    .sent.findLast((message) => message.type === 'TICK_UPDATE');
+  assert.deepEqual(snapshot.gameState.trapCells.at(-1), candidate);
+
+  admin.role = 'warden';
+  survivor.role = 'survivor';
+  survivor.x = centerX;
+  survivor.y = centerY;
+  room.handleActivateTrapCell(admin.id, {
+    type: 'ACTIVATE_TRAP_CELL',
+    trapCellIndex: originalCount,
+  });
+  assert.equal(
+    room.cageStates.some(
+      (cage) => !cage.vacated && cage.prisonerPlayerId === survivor.id,
+    ),
+    true,
+  );
+});
 
 test('released trap cells cool down without disabling other cells or trapping wardens', (t) => {
   const room = createRunningRoom();

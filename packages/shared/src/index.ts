@@ -12,6 +12,7 @@ import type { SwordFieldState } from './sword-field.js';
 import type { CageState } from './cage.js';
 import type { SpikeGateState, SpikePlateState } from './spike-gate.js';
 import type { LobbyJoinMode, LobbyState } from './lobby.js';
+import type { TrapCellPlacement } from './maps/level1.js';
 
 export {
   LOBBY_MAX_PLAYERS,
@@ -192,6 +193,7 @@ export {
 export {
   TRAP_CELL_INTERACTION_RANGE,
   TRAP_CELL_RELEASE_COOLDOWN_MS,
+  getTrapCellPlacementAtWorldPoint,
   getTrapCellWorldBounds,
   isPlayerInTrapCell,
   findTrapCellInteractionTarget,
@@ -943,6 +945,8 @@ export interface GameState {
   spikePlateStates: SpikePlateState[];
   /** Spawned survivor cages, including vacated cages that remain solid forever. */
   cageStates: CageState[];
+  /** Server-authoritative trap network, including cells added by administrators. */
+  trapCells: TrapCellPlacement[];
 }
 
 // ── Union Types ─────────────────────────────────────────────────────────────

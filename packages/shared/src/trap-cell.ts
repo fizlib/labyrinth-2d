@@ -1,4 +1,12 @@
-import { CELL_SIZE, type TrapCellPlacement } from './maps/level1.js';
+import {
+  CELL_SIZE,
+  CELL_STEP_X,
+  CELL_STEP_Y,
+  GRID_CELLS,
+  WALL_HEIGHT,
+  WALL_WIDTH,
+  type TrapCellPlacement,
+} from './maps/level1.js';
 
 /** Distance outside a 6x6 trap-cell edge at which a warden may activate it. */
 export const TRAP_CELL_INTERACTION_RANGE = 20;
@@ -16,6 +24,45 @@ export interface TrapCellWorldBounds {
 export interface TrapCellInteractionTarget {
   trapCellIndex: number;
   distanceSquared: number;
+}
+
+/** Resolve the authored 6x6 maze cell containing a player's feet. */
+export function getTrapCellPlacementAtWorldPoint(
+  playerX: number,
+  playerY: number,
+  tileSize: number,
+): TrapCellPlacement | null {
+  if (
+    !Number.isFinite(playerX) ||
+    !Number.isFinite(playerY) ||
+    !Number.isFinite(tileSize) ||
+    tileSize <= 0
+  ) {
+    return null;
+  }
+
+  const tileX = Math.floor(playerX / tileSize);
+  const tileY = Math.floor((playerY - 1) / tileSize);
+  const mazeX = tileX - WALL_WIDTH;
+  const mazeY = tileY - WALL_HEIGHT;
+  if (mazeX < 0 || mazeY < 0) return null;
+
+  const cellX = Math.floor(mazeX / CELL_STEP_X);
+  const cellY = Math.floor(mazeY / CELL_STEP_Y);
+  if (cellX >= GRID_CELLS || cellY >= GRID_CELLS) return null;
+
+  const cellTileX = WALL_WIDTH + cellX * CELL_STEP_X;
+  const cellTileY = WALL_HEIGHT + cellY * CELL_STEP_Y;
+  if (
+    tileX < cellTileX ||
+    tileX >= cellTileX + CELL_SIZE ||
+    tileY < cellTileY ||
+    tileY >= cellTileY + CELL_SIZE
+  ) {
+    return null;
+  }
+
+  return { cellX, cellY, tileX: cellTileX, tileY: cellTileY };
 }
 
 export function getTrapCellWorldBounds(

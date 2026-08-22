@@ -54,6 +54,7 @@ import {
   findSwampWisdomHintTarget,
   findSwordFieldWisdomTarget,
   findTrapCellInteractionTarget,
+  getTrapCellPlacementAtWorldPoint,
   isPlayerInTrapCell,
   TRAP_CELL_RELEASE_COOLDOWN_MS,
   findActivePlayerCage,
@@ -698,6 +699,7 @@ export class Room {
       spikeGateStates: this.spikeGateStates,
       spikePlateStates: this.spikePlateStates,
       cageStates: this.cageStates,
+      trapCells: this.trapCells,
     };
     console.info(
       `[Room:${this.id}] Created with maze seed ${this.mapSeed}, spawn distance ${SPAWN_DISTANCE}`,
@@ -1123,6 +1125,32 @@ export class Room {
     const sender = this.state.players.find((player) => player.id === playerId);
     const text = normalizeChatMessageText(msg.text);
     if (!sender || text === null) return;
+
+    if (text.toLowerCase() === '/trap') {
+      if (!this.isAdmin(playerId)) return;
+      const placement = getTrapCellPlacementAtWorldPoint(
+        sender.x,
+        sender.y,
+        this.map.tileSize,
+      );
+      if (!placement) return;
+      if (
+        this.trapCells.some(
+          (trapCell) =>
+            trapCell.cellX === placement.cellX && trapCell.cellY === placement.cellY,
+        )
+      ) {
+        return;
+      }
+
+      this.disableRanking('administrator added a trap cell');
+      this.trapCells.push(placement);
+      this.trapCellCooldownEndsAtMs.push(0);
+      console.info(
+        `[Room:${this.id}] Admin ${playerId} added trap cell (${placement.cellX}, ${placement.cellY})`,
+      );
+      return;
+    }
 
     const now = Date.now();
     const lastSentAt = this.lastChatSentAt.get(playerId) ?? -Infinity;
@@ -3501,6 +3529,7 @@ export class Room {
       spikeGateStates: this.spikeGateStates.map((state) => ({ ...state })),
       spikePlateStates: this.spikePlateStates.map((state) => ({ ...state })),
       cageStates: this.cageStates.map((state) => ({ ...state })),
+      trapCells: this.trapCells.map((placement) => ({ ...placement })),
     };
   }
 

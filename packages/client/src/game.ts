@@ -30,6 +30,7 @@ import {
   CELL_STEP_Y,
   GRID_CELLS,
   SPAWN_DISTANCE,
+  INITIAL_WISDOM_ORBS,
   MAX_WISDOM_ORBS,
   SWAMP_DEEP_MUD_SUBMERGE_DEPTH,
   CHEST_INTERACTION_RANGE,
@@ -66,6 +67,7 @@ import type {
   SpikePlatePlacement,
   SpikePlateState,
   PressurePlateState,
+  TrapCellPlacement,
 } from '@labyrinth/shared';
 import { NetworkManager, type NetworkCallbacks } from './net/NetworkManager';
 import type { NetworkDiagnostics } from './net/NetworkDiagnosticsTracker';
@@ -314,6 +316,27 @@ let cellBoundaryOverlay: Graphics | null = null;
 
 /** Current layout data for gate/pressure plate reference. */
 let currentLayout: GeneratedMazeLayout | null = null;
+
+function syncAuthoritativeTrapCells(trapCells: readonly TrapCellPlacement[]): void {
+  if (!currentLayout) return;
+  const current = currentLayout.trapCells;
+  const unchanged =
+    current.length === trapCells.length &&
+    current.every((placement, index) => {
+      const next = trapCells[index];
+      return (
+        placement.cellX === next.cellX &&
+        placement.cellY === next.cellY &&
+        placement.tileX === next.tileX &&
+        placement.tileY === next.tileY
+      );
+    });
+  if (unchanged) return;
+
+  current.splice(0, current.length, ...trapCells.map((placement) => ({ ...placement })));
+  tilemapRenderer?.syncTrapCells(current, currentMap?.tileSize ?? TILE_SIZE);
+  minimap?.setTrapCells(current);
+}
 
 /** Pressure plate animation speed (frames per second). */
 const PLATE_ANIM_SPEED = 12;
@@ -1633,6 +1656,25 @@ let gameAudio: GameAudio | null = null;
 let audioToggleListenerInstalled = false;
 let loadingScreenDismissTimer: number | null = null;
 
+const PLAYER_CHAT_BUBBLE_DURATION_MS = 2_400;
+const CHAT_BUBBLES_STORAGE_KEY = 'labyrinth-chat-bubbles-enabled';
+
+function loadChatBubblesEnabledPreference(): boolean {
+  try {
+    return window.localStorage.getItem(CHAT_BUBBLES_STORAGE_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function saveChatBubblesEnabledPreference(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(CHAT_BUBBLES_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    // The toggle still works for this session when storage is unavailable.
+  }
+}
+
 function getPregameTheme(): HTMLAudioElement | null {
   return document.getElementById('pregame-theme') as HTMLAudioElement | null;
 }
@@ -1923,11 +1965,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const playerNameTagLayer = new Container();
   playerNameTagLayer.sortableChildren = true;
   app.stage.addChild(playerNameTagLayer);
-  // Name tags and speech bubbles are diegetic recording content, so they remain
-  // visible when clean-frame mode hides the rest of the HUD.
-  const recordingActorBubbleLayer = new Container();
-  recordingActorBubbleLayer.sortableChildren = true;
-  app.stage.addChild(recordingActorBubbleLayer);
+  // Name tags and speech bubbles are diegetic content, so they remain visible
+  // when clean-frame mode hides the rest of the HUD.
+  const speechBubbleLayer = new Container();
+  speechBubbleLayer.sortableChildren = true;
+  app.stage.addChild(speechBubbleLayer);
   const cleanUiRenderState = new Map<(typeof app.stage.children)[number], boolean>();
 
   const matchHud = new MatchHud(INTERNAL_WIDTH, INTERNAL_HEIGHT, {
@@ -1967,6 +2009,9 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let recordingStudioMapSeed: number | null = null;
   let recordingWorldState: RecordingWorldState | null = null;
   let currentRecordingActorStates: RecordingActorRenderState[] = [];
+  let currentRecordingCageStates: CageState[] = [];
+  let displayedRecordingCameraActorId: string | null = null;
+  let displayedRecordingCameraRole: PlayerRole | null = null;
 
   // ── Player Sprite Registry ──────────────────────────────────────────────
 
@@ -1986,15 +2031,23 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     teamId: number;
   }
 
-  interface RecordingActorBubbleData {
+  interface SpeechBubbleData {
     container: Container;
     background: Graphics;
     text: Text;
     value: string;
   }
 
+  interface ActivePlayerChatBubble {
+    text: string;
+    expiresAt: number;
+  }
+
   const playerSprites: Map<string, PlayerSpriteData> = new Map();
-  const recordingActorBubbles = new Map<string, RecordingActorBubbleData>();
+  const speechBubbles = new Map<string, SpeechBubbleData>();
+  const playerChatBubbles = new Map<string, ActivePlayerChatBubble>();
+  let chatBubblesEnabled = loadChatBubblesEnabledPreference();
+  speechBubbleLayer.visible = chatBubblesEnabled;
   const renderedRecordingActorIds = new Set<string>();
   const cageVisuals = new Map<number, CageVisual>();
 
@@ -2178,6 +2231,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   function removePlayerSprite(playerId: string): void {
     portalEscapeAnimations.delete(playerId);
     worldAudio.removePlayer(playerId);
+    playerChatBubbles.delete(playerId);
     const data = playerSprites.get(playerId);
     if (data) {
       data.sprite.mask = null;
@@ -2192,29 +2246,31 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       data.container.destroy({ children: true });
       playerSprites.delete(playerId);
     }
-    const bubble = recordingActorBubbles.get(playerId);
+    const bubble = speechBubbles.get(playerId);
     if (bubble) {
       bubble.container.parent?.removeChild(bubble.container);
       bubble.container.destroy({ children: true });
-      recordingActorBubbles.delete(playerId);
+      speechBubbles.delete(playerId);
     }
   }
 
-  function syncRecordingActorBubble(
-    actor: RecordingActorRenderState,
-    data: PlayerSpriteData,
+  function syncSpeechBubble(
+    spriteId: string,
+    value: string | null,
+    data: PlayerSpriteData | null,
   ): void {
-    let bubble = recordingActorBubbles.get(actor.spriteId);
-    if (!actor.chatText) {
+    let bubble = speechBubbles.get(spriteId);
+    if (!value) {
       if (bubble) bubble.container.visible = false;
       return;
     }
+    if (!data) return;
 
     if (!bubble) {
       const container = new Container();
       const background = new Graphics();
       const text = new Text({
-        text: actor.chatText,
+        text: value,
         style: new TextStyle({
           fontFamily: 'PixelOperator8',
           fontSize: 64,
@@ -2231,19 +2287,19 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       text.scale.set(0.125);
       container.addChild(background, text);
       container.eventMode = 'none';
-      recordingActorBubbleLayer.addChild(container);
+      speechBubbleLayer.addChild(container);
       bubble = { container, background, text, value: '' };
-      recordingActorBubbles.set(actor.spriteId, bubble);
+      speechBubbles.set(spriteId, bubble);
     }
 
-    if (bubble.value !== actor.chatText) {
-      bubble.value = actor.chatText;
-      bubble.text.text = actor.chatText;
+    if (bubble.value !== value) {
+      bubble.value = value;
+      bubble.text.text = value;
       // A centered, wrapped Pixi Text reports its configured wrap width rather
       // than the width of a short line. Size from the actual line metrics so a
       // word such as "stay" produces a compact bubble while long cues still wrap.
       const metrics = CanvasTextMetrics.measureText(
-        actor.chatText,
+        value,
         bubble.text.style,
         undefined,
         true,
@@ -2276,6 +2332,45 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     bubble.container.y = screenY;
     bubble.container.zIndex = 1_000_000 + screenY;
     bubble.container.visible = true;
+  }
+
+  function syncRecordingActorBubble(
+    actor: RecordingActorRenderState,
+    data: PlayerSpriteData,
+  ): void {
+    syncSpeechBubble(actor.spriteId, actor.chatText, data);
+  }
+
+  function showPlayerChatBubble(playerId: string, text: string): void {
+    playerChatBubbles.set(playerId, {
+      text,
+      expiresAt: performance.now() + PLAYER_CHAT_BUBBLE_DURATION_MS,
+    });
+    const data = playerSprites.get(playerId);
+    if (data?.container.visible) {
+      syncSpeechBubble(playerId, text, data);
+    }
+  }
+
+  function setChatBubblesEnabled(enabled: boolean): void {
+    chatBubblesEnabled = enabled;
+    speechBubbleLayer.visible = enabled;
+    saveChatBubblesEnabledPreference(enabled);
+  }
+
+  function updatePlayerChatBubbles(): void {
+    const now = performance.now();
+    for (const [playerId, activeBubble] of playerChatBubbles) {
+      if (now >= activeBubble.expiresAt) {
+        playerChatBubbles.delete(playerId);
+        syncSpeechBubble(playerId, null, null);
+        continue;
+      }
+
+      const data = playerSprites.get(playerId);
+      if (!data) continue;
+      syncSpeechBubble(playerId, data.container.visible ? activeBubble.text : null, data);
+    }
   }
 
   const PORTAL_ESCAPE_ANIMATION_DURATION = 0.6;
@@ -2354,6 +2449,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     recordingStudioMapSeed = null;
     recordingWorldState = null;
     currentRecordingActorStates = [];
+    currentRecordingCageStates = [];
     renderedRecordingActorIds.clear();
     for (const spriteId of spriteIds) removePlayerSprite(spriteId);
   }
@@ -2373,6 +2469,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         (color) => `${color[0].toUpperCase()}${color.slice(1)} squad`,
       ),
       storageKey: `labyrinth-recording-studio:v1:${mapSeed}`,
+      trapCells: currentLayout.trapCells,
+      tileSize: currentMap.tileSize,
       getLocalPosition: () => ({ x: localX, y: localY, facing: localFacing }),
       moveActor: (pose, input: RecordingMoveInput, dt) => {
         const moving = input.up || input.down || input.left || input.right;
@@ -2394,7 +2492,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           currentLayout.chestDeadEnds,
           currentLayout.swordFields,
           state.swordFieldStates,
-          state.cageStates,
+          getEffectiveCageStates(state.cageStates),
           undefined,
           currentLayout.tIntersectionDecorations,
           currentLayout.decoratedVerticalPassages,
@@ -2422,15 +2520,21 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   function refreshRecordingWorldState(gameState: GameState): RecordingWorldState | null {
     if (!recordingStudio || !currentLayout) {
       recordingWorldState = null;
+      currentRecordingCageStates = [];
       return null;
     }
     currentRecordingActorStates = recordingStudio.getActorStates();
+    currentRecordingCageStates = recordingStudio.getRecordingCageStates();
     recordingWorldState = deriveRecordingWorldState(
       currentLayout,
       gameState,
       currentRecordingActorStates,
     );
     return recordingWorldState;
+  }
+
+  function getEffectiveCageStates(serverCages: readonly CageState[]): CageState[] {
+    return [...serverCages, ...currentRecordingCageStates];
   }
 
   function syncActivatedWardstoneIndexes(gameState: GameState): void {
@@ -2625,12 +2729,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       );
     }
 
+    const displayedRole = recordingStudio?.getCameraAttachment()?.role ?? localPlayerRole;
     replacementRenderer.setWardenBridgeWisdomHints(
       currentLayout.bridges,
-      localPlayerRole === 'warden',
+      displayedRole === 'warden',
     );
-    replacementRenderer.setWardenSwampWisdomHints(localPlayerRole === 'warden');
-    replacementRenderer.setWardenTrapHighlights(localPlayerRole === 'warden');
+    replacementRenderer.setWardenSwampWisdomHints(displayedRole === 'warden');
+    replacementRenderer.setWardenTrapHighlights(displayedRole === 'warden');
     updateGateSlideAnimations(0);
     replacementRenderer.updateVisibility(worldContainer.x, worldContainer.y, zoomLevel);
     console.info(
@@ -3212,6 +3317,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         const activeTilemapRenderer = tilemapRenderer;
         if (!activeTilemapRenderer)
           throw new Error('Missing tilemap after room admission');
+        syncAuthoritativeTrapCells(gameState.trapCells);
         if (isAdmin) ensureRecordingStudio(mapSeed);
         const initialRecordingWorldState = refreshRecordingWorldState(gameState);
         activeTilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
@@ -3226,7 +3332,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           false,
         );
         activeTilemapRenderer.syncChestStates(gameState.chestStates, false);
-        syncCageVisuals(gameState.cageStates, false);
+        syncCageVisuals(getEffectiveCageStates(gameState.cageStates), false);
 
         if (statusEl) {
           statusEl.textContent = 'Connected';
@@ -3424,6 +3530,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
       syncWorldAudio(latestServerState, gameState);
       syncActivatedWardstoneIndexes(gameState);
+      syncAuthoritativeTrapCells(gameState.trapCells);
       const localPlayerId = net.playerId;
       matchHud.sync(gameState.match);
       snapshotBuffer.push(gameState);
@@ -3443,7 +3550,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         true,
       );
       tilemapRenderer?.syncChestStates(gameState.chestStates, true);
-      syncCageVisuals(gameState.cageStates, true);
+      syncCageVisuals(getEffectiveCageStates(gameState.cageStates), true);
 
       const localPlayerData = gameState.players.find((p) => p.id === localPlayerId);
       if (localPlayerData) {
@@ -3765,6 +3872,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       )
         return;
       chatHud?.addMessage({ playerId, displayName, teamId, text });
+      showPlayerChatBubble(playerId, text);
     },
 
     onPlayerEscaped: (
@@ -4166,6 +4274,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     },
     isSoundMuted: () => audioMuted,
     onSoundMutedChange: (muted) => setAudioMuted(muted, true),
+    areChatBubblesEnabled: () => chatBubblesEnabled,
+    onChatBubblesEnabledChange: setChatBubblesEnabled,
     onExitMatch: returnToMainMenu,
   });
   gameMenuHud.setAdminAvailable(isAdminSession);
@@ -4204,9 +4314,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     chatHud?.setSuppressed(true);
   };
 
-  applyLocalRoleUi = (role, wisdomOrbs, showIntroDialogue) => {
-    localPlayerRole = role;
-    localWisdomOrbs = wisdomOrbs;
+  const applyDisplayedRoleUi = (
+    role: PlayerRole,
+    wisdomOrbs: number,
+    recordingActorId: string | null,
+  ): void => {
     if (interactPrompt) interactPrompt.style.fill = getInteractPromptColor(role);
     if (!currentMap || !currentLayout) return;
 
@@ -4245,15 +4357,45 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     wisdomOrbHud = null;
     wisdomArrow?.destroy();
     wisdomArrow = null;
-    mobileControls.setWisdomAvailable(role === 'survivor');
+    mobileControls.setWisdomAvailable(role === 'survivor' && recordingActorId === null);
 
     if (role === 'survivor') {
       wisdomOrbHud = new WisdomOrbHud(assets.wisdomOrbTexture, () => {
+        if (recordingStudio?.getCameraAttachment()) return;
         triggerUseWisdomOrb('Click');
       });
       wisdomOrbHud.addToStage(app.stage);
       wisdomOrbHud.setRemaining(wisdomOrbs);
-      wisdomArrow = new WisdomArrow(entityLayer);
+      if (recordingActorId === null) wisdomArrow = new WisdomArrow(entityLayer);
+    }
+  };
+
+  const syncRecordingCameraRoleUi = (): void => {
+    const attachment = recordingStudio?.getCameraAttachment() ?? null;
+    if (
+      attachment?.actorId === displayedRecordingCameraActorId &&
+      attachment?.role === displayedRecordingCameraRole
+    ) {
+      return;
+    }
+    displayedRecordingCameraActorId = attachment?.actorId ?? null;
+    displayedRecordingCameraRole = attachment?.role ?? null;
+    if (attachment) {
+      applyDisplayedRoleUi(
+        attachment.role,
+        attachment.role === 'survivor' ? INITIAL_WISDOM_ORBS : 0,
+        attachment.actorId,
+      );
+    } else if (localPlayerRole) {
+      applyDisplayedRoleUi(localPlayerRole, localWisdomOrbs, null);
+    }
+  };
+
+  applyLocalRoleUi = (role, wisdomOrbs, showIntroDialogue) => {
+    localPlayerRole = role;
+    localWisdomOrbs = wisdomOrbs;
+    if (!recordingStudio?.getCameraAttachment()) {
+      applyDisplayedRoleUi(role, wisdomOrbs, null);
     }
 
     introDialogueHud?.destroy();
@@ -4451,8 +4593,25 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     updatePortalEscapeAnimations(dtSeconds);
 
     // ── 2b. Admin recording actors + local plate simulation ─────────
+    const previousRecordingCageIds = new Set(
+      currentRecordingCageStates.map((cage) => cage.cageId),
+    );
     recordingStudio?.update(dtSeconds);
     currentRecordingActorStates = recordingStudio?.getActorStates() ?? [];
+    currentRecordingCageStates = recordingStudio?.getRecordingCageStates() ?? [];
+    syncRecordingCameraRoleUi();
+    for (const cage of currentRecordingCageStates) {
+      if (!previousRecordingCageIds.has(cage.cageId)) {
+        worldAudio.playCageMaterialize(
+          cage.cageId,
+          { x: cage.x, y: cage.y },
+          getAudioListener(),
+        );
+      }
+    }
+    if (latestServerState) {
+      syncCageVisuals(getEffectiveCageStates(latestServerState.cageStates), true);
+    }
     const activeRecordingSpriteIds = new Set(
       currentRecordingActorStates.map((actor) => actor.spriteId),
     );
@@ -4566,7 +4725,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         if (
           child === worldContainer ||
           child === playerNameTagLayer ||
-          child === recordingActorBubbleLayer
+          child === speechBubbleLayer
         ) {
           continue;
         }
@@ -4594,12 +4753,16 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
     // ── 4. Minimap ────────────────────────────────────────────────────
     if (minimap) {
+      const cameraAttachment = recordingStudio?.getCameraAttachment() ?? null;
+      const focusX = cameraAttachment?.x ?? localX;
+      const focusY = cameraAttachment?.y ?? localY;
+      const focusSpriteId = cameraAttachment?.spriteId ?? net.playerId;
       const otherPlayerPositions: Array<{ x: number; y: number }> = [];
       for (const [playerId, data] of playerSprites) {
-        if (playerId === net.playerId) continue;
+        if (playerId === focusSpriteId) continue;
         otherPlayerPositions.push({ x: data.container.x, y: data.container.y });
       }
-      minimap.update(localX, localY, otherPlayerPositions);
+      minimap.update(focusX, focusY, otherPlayerPositions);
     }
     introDialogueHud?.update(dtSeconds);
     chatHud?.setSuppressed(
@@ -4891,6 +5054,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       );
     }
     updatePlayerNameTagScreenPositions();
+    updatePlayerChatBubbles();
     for (const actor of currentRecordingActorStates) {
       const data = playerSprites.get(actor.spriteId);
       if (data) syncRecordingActorBubble(actor, data);

@@ -459,16 +459,7 @@ export class TilemapRenderer {
     this.groundDetailLayer.sortableChildren = true;
     this.trapCellHighlightLayer = new Container();
     this.trapCellHighlightLayer.visible = false;
-
-    for (const placement of trapCells) {
-      const size = CELL_SIZE * ts;
-      const highlight = new Graphics()
-        .rect(placement.tileX * ts, placement.tileY * ts, size, size)
-        .fill({ color: 0xd7192d, alpha: 0.2 })
-        .rect(placement.tileX * ts + 1, placement.tileY * ts + 1, size - 2, size - 2)
-        .stroke({ color: 0xff3348, alpha: 0.82, width: 2 });
-      this.trapCellHighlightLayer.addChild(highlight);
-    }
+    this.syncTrapCells(trapCells, ts);
 
     // ── Step 1: Build 32×32 2D Chunks (Background + Shadows) ─────────
 
@@ -1061,6 +1052,25 @@ export class TilemapRenderer {
   /** Reveal or hide the complete trap-cell network for the local role. */
   setWardenTrapHighlights(visible: boolean): void {
     this.trapCellHighlightLayer.visible = visible;
+  }
+
+  /** Rebuild red Warden overlays after an administrator adds a trap cell. */
+  syncTrapCells(trapCells: readonly TrapCellPlacement[], tileSize: number): void {
+    this.trapCellHighlightLayer.removeChildren().forEach((child) => child.destroy());
+    const size = CELL_SIZE * tileSize;
+    for (const placement of trapCells) {
+      const highlight = new Graphics()
+        .rect(placement.tileX * tileSize, placement.tileY * tileSize, size, size)
+        .fill({ color: 0xd7192d, alpha: 0.2 })
+        .rect(
+          placement.tileX * tileSize + 1,
+          placement.tileY * tileSize + 1,
+          size - 2,
+          size - 2,
+        )
+        .stroke({ color: 0xff3348, alpha: 0.82, width: 2 });
+      this.trapCellHighlightLayer.addChild(highlight);
+    }
   }
 
   // ── Per-frame viewport culling ────────────────────────────────────────

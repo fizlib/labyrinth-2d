@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   CELL_SIZE,
+  CELL_STEP_X,
+  CELL_STEP_Y,
   MAX_TRAP_CELLS,
   MIN_TRAP_CELLS,
   TILE_FLOOR,
@@ -13,9 +15,12 @@ import {
   generateMazeLayout,
   getCageCollisionBounds,
   getCageSeparationPositions,
+  getTrapCellPlacementAtWorldPoint,
   getTrapCellWorldBounds,
   isPlayerInTrapCell,
   isPositionValid,
+  WALL_HEIGHT,
+  WALL_WIDTH,
 } from '../dist/index.js';
 
 test('trap cells are deterministic, complete 6x6 floors, and avoid solid authored placements', () => {
@@ -96,6 +101,32 @@ test('trap membership and interaction use the full cell rectangle', () => {
   assert.equal(
     findTrapCellInteractionTarget([placement], bounds.right + 21, bounds.bottom, 16),
     null,
+  );
+});
+
+test('world positions resolve only to the 6x6 maze cell under the player feet', () => {
+  const tileSize = 16;
+  const cellX = 3;
+  const cellY = 4;
+  const tileX = WALL_WIDTH + cellX * CELL_STEP_X;
+  const tileY = WALL_HEIGHT + cellY * CELL_STEP_Y;
+
+  assert.deepEqual(
+    getTrapCellPlacementAtWorldPoint(
+      (tileX + CELL_SIZE - 0.5) * tileSize,
+      (tileY + CELL_SIZE - 0.5) * tileSize,
+      tileSize,
+    ),
+    { cellX, cellY, tileX, tileY },
+  );
+  assert.equal(
+    getTrapCellPlacementAtWorldPoint(
+      (tileX + CELL_SIZE + 0.5) * tileSize,
+      (tileY + 2.5) * tileSize,
+      tileSize,
+    ),
+    null,
+    'the wall/passage band between logical cells is not itself a trap cell',
   );
 });
 
