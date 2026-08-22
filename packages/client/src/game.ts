@@ -13,6 +13,7 @@ import {
   CanvasTextMetrics,
   TextureStyle,
   Graphics,
+  BlurFilter,
 } from 'pixi.js';
 
 TextureStyle.defaultOptions.scaleMode = 'nearest';
@@ -38,8 +39,10 @@ import {
   PLAYER_CHARACTER_NAMES,
   SQUAD_COLORS,
   generateMazeLayout,
+  generateTutorialMazeLayout,
   applyInputWithCollision,
   getPlayerSwampTerrain,
+  findBridgeWisdomHintTarget,
   getBridgeWalkwayTileAtPoint,
   getHubTileBounds,
   getSpikeGateCollisionBounds,
@@ -68,8 +71,13 @@ import type {
   SpikePlateState,
   PressurePlateState,
   TrapCellPlacement,
+  TutorialMazeLayout,
 } from '@labyrinth/shared';
 import { NetworkManager, type NetworkCallbacks } from './net/NetworkManager';
+import {
+  LocalTutorialSession,
+  TUTORIAL_WARDEN_PLAYER_ID,
+} from './net/LocalTutorialSession';
 import type { NetworkDiagnostics } from './net/NetworkDiagnosticsTracker';
 import { getReconciliationInputs } from './net/ReconciliationPolicy';
 import {
@@ -125,6 +133,42 @@ const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
   "You're a <survivor>survivor</survivor>. Work together to find your way to the center of the Maze, where you will meet the other survivors.",
   'Together, activate the three ancient runes to unlock the portal and escape… before the Maze claims you forever.',
 ];
+
+const TUTORIAL_SPAWN_DIALOGUE_PAGES = [
+  "You're a <survivor>survivor</survivor>. Your goal is to reach the center of the Maze and activate its ancient runes.",
+];
+
+const TUTORIAL_WISDOM_DIALOGUE_PAGES = [
+  'Press <key>[ Q ]</key> to see which direction leads to the center of the Maze.',
+];
+
+const TUTORIAL_SWAMP_DIALOGUE_PAGES = [
+  'Press <key>[ Q ]</key> to use a Wisdom Orb and reveal the firm-ground path through the swamp.',
+];
+
+const TUTORIAL_BRIDGE_DIALOGUE_PAGES = [
+  'Some of the bridge stones are cursed. Press <key>[ Q ]</key> to reveal the safe path.',
+];
+
+const TUTORIAL_RUNESTONE_DIALOGUE_PAGES = [
+  'Walk toward the rune and press <key>[ E ]</key> to activate it.',
+];
+
+const TUTORIAL_ESCAPE_DIALOGUE_PAGES = [
+  'The escape portal is active. Reach the portal to escape the Maze. Press <key>[ Q ]</key> to see where to go.',
+];
+
+const TUTORIAL_COMPLETE_DIALOGUE_PAGES = [
+  'Tutorial complete. You escaped the Maze! Press <key>[ E ]</key> to return to the menu.',
+];
+
+const TUTORIAL_RUNESTONE_LESSON_RANGE = TILE_SIZE * 4;
+const TUTORIAL_BRIDGE_LESSON_RANGE = TILE_SIZE * 1.5;
+
+type GameSession = Pick<
+  NetworkManager,
+  Exclude<keyof NetworkManager, 'connect' | 'disconnect'>
+>;
 
 const WARDSTONES_ACTIVATED_CHAT_MESSAGE =
   'All wardstones have been activated. The escape portal is now open!';
@@ -385,7 +429,7 @@ let pendingPortalPos: { x: number; y: number } | null = null;
 
 /**
  * Camera cinematic state machine for the portal reveal sequence.
- * Instant teleport to portal (no directional clues), watch appearance, then teleport back.
+ * Jump to the portal, watch its appearance, then jump back to the player.
  */
 type CinematicPhase = 'idle' | 'watch_portal';
 let cinematicPhase: CinematicPhase = 'idle';
@@ -393,6 +437,7 @@ let cinematicElapsed = 0;
 
 /** Duration (seconds) to watch the portal appearance before returning. */
 const WATCH_DURATION = 1.6;
+const TUTORIAL_PORTAL_CAMERA_Y_OFFSET = TILE_SIZE * 1.5;
 
 /** Camera override target during cinematic (world pixel coords). */
 let cinematicTargetX = 0;
@@ -1255,7 +1300,7 @@ function createDebugUI(): DebugUiDom {
 
 function setupDebugToggles(
   debugUi: DebugUiDom,
-  net: NetworkManager,
+  net: GameSession,
   statsHud: NetworkStatsHudDom,
 ): void {
   const debugUI = debugUi.root;
@@ -1323,7 +1368,7 @@ function renderDebugPlayerActions(
 
 function setupDebugPlayerActions(
   debugUi: DebugUiDom,
-  net: NetworkManager,
+  net: GameSession,
   getState: () => GameState | null,
   getLocalPlayerId: () => string | null,
 ): void {
@@ -1914,9 +1959,23 @@ export interface GameLaunchOptions {
   onMatchStarted?: () => void;
 }
 
+export interface TutorialLaunchOptions {
+  displayName: string;
+  isAdmin: boolean;
+}
+
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 
-async function initializeGame(options: GameLaunchOptions): Promise<void> {
+async function initializeGame(
+  options: GameLaunchOptions | TutorialLaunchOptions,
+  isTutorial: boolean,
+): Promise<void> {
+  const tutorialLayout: TutorialMazeLayout | null = isTutorial
+    ? generateTutorialMazeLayout()
+    : null;
+  const tilemapRendererOptions = isTutorial
+    ? ({ centralHubOpenEntrances: ['west'] } as const)
+    : undefined;
   setupAudioToggle();
   startPregameTheme();
   gameAudio?.destroy();
@@ -1956,7 +2015,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const reportMatchStarted = (): void => {
     if (matchStartReported) return;
     matchStartReported = true;
-    options.onMatchStarted?.();
+    if ('onMatchStarted' in options) options.onMatchStarted?.();
   };
   let assets!: GameAssets;
   let assetsReady = false;
@@ -1996,17 +2055,22 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   app.stage.addChild(speechBubbleLayer);
   const cleanUiRenderState = new Map<(typeof app.stage.children)[number], boolean>();
 
-  const matchHud = new MatchHud(INTERNAL_WIDTH, INTERNAL_HEIGHT, {
-    onPlayAgain: () => {
-      net.leaveRoom();
-      window.sessionStorage.setItem(PLAY_AGAIN_STORAGE_KEY, '1');
-      window.location.reload();
+  const matchHud = new MatchHud(
+    INTERNAL_WIDTH,
+    INTERNAL_HEIGHT,
+    {
+      onPlayAgain: () => {
+        net.leaveRoom();
+        window.sessionStorage.setItem(PLAY_AGAIN_STORAGE_KEY, '1');
+        window.location.reload();
+      },
+      onExit: () => {
+        net.leaveRoom();
+        window.location.reload();
+      },
     },
-    onExit: () => {
-      net.leaveRoom();
-      window.location.reload();
-    },
-  });
+    { showTimer: !isTutorial },
+  );
   matchHud.addToStage(app.stage);
 
   let mapPixelW = MAZE_WIDTH * TILE_SIZE;
@@ -2047,6 +2111,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     container: Container;
     shadow: Graphics;
     sprite: AnimatedSprite;
+    redGlowSprite: AnimatedSprite | null;
     nameTag: Text | null;
     swampMask: Graphics;
     swampTerrain: SwampTerrain;
@@ -2071,7 +2136,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const speechBubbles = new Map<string, SpeechBubbleData>();
   const playerChatBubbles = new Map<string, ActivePlayerChatBubble>();
   let chatBubblesEnabled = loadChatBubblesEnabledPreference();
-  speechBubbleLayer.visible = chatBubblesEnabled;
+  speechBubbleLayer.visible = isTutorial || chatBubblesEnabled;
   const renderedRecordingActorIds = new Set<string>();
   const cageVisuals = new Map<number, CageVisual>();
 
@@ -2144,6 +2209,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       container,
       shadow,
       sprite,
+      redGlowSprite: null,
       nameTag: null,
       swampMask,
       swampTerrain: 'dry',
@@ -2155,10 +2221,29 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     return data;
   }
 
+  function ensureRedPlayerGlow(data: PlayerSpriteData): void {
+    if (data.redGlowSprite) return;
+
+    const glow = new AnimatedSprite(data.sprite.textures);
+    glow.animationSpeed = data.sprite.animationSpeed;
+    glow.loop = true;
+    glow.anchor.set(0.5, 1);
+    glow.scale.set(data.sprite.scale.x * 1.1, data.sprite.scale.y * 1.1);
+    glow.tint = 0xff1710;
+    glow.alpha = 0.9;
+    glow.blendMode = 'add';
+    glow.filters = [new BlurFilter({ strength: 3, quality: 2 })];
+    glow.eventMode = 'none';
+    glow.play();
+    data.container.addChildAt(glow, data.container.getChildIndex(data.sprite));
+    data.redGlowSprite = glow;
+  }
+
   function syncPlayerNameTag(
     data: PlayerSpriteData,
     displayName: string,
     shouldShow: boolean,
+    fillColor = '#fff0b5',
   ): void {
     if (!shouldShow) {
       if (data.nameTag) {
@@ -2175,7 +2260,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         style: new TextStyle({
           fontFamily: 'PixelOperator8',
           fontSize: 64,
-          fill: '#fff0b5',
+          fill: fillColor,
           stroke: {
             color: '#211407',
             width: 8,
@@ -2193,6 +2278,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     } else if (data.nameTag.text !== displayName) {
       data.nameTag.text = displayName;
     }
+    if (data.nameTag) data.nameTag.style.fill = fillColor;
   }
 
   function ensurePlayerSprite(
@@ -2210,7 +2296,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       data.currentAnimKey = '';
       setPlayerAnimation(data, 'idle-down');
     }
-    syncPlayerNameTag(data, displayName, shouldShowNameTag);
+    const nameTagFill =
+      isTutorial && playerId === TUTORIAL_WARDEN_PLAYER_ID ? '#ff4d5f' : '#fff0b5';
+    syncPlayerNameTag(data, displayName, shouldShowNameTag, nameTagFill);
+    if (isTutorial && playerId === TUTORIAL_WARDEN_PLAYER_ID) {
+      ensureRedPlayerGlow(data);
+    }
     return data;
   }
 
@@ -2249,6 +2340,13 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       : animSet.scale;
     data.sprite.scale.y = animSet.scale;
     data.sprite.play();
+    const glow = data.redGlowSprite;
+    if (glow) {
+      glow.textures = frames;
+      glow.scale.x = data.sprite.scale.x * 1.1;
+      glow.scale.y = data.sprite.scale.y * 1.1;
+      glow.play();
+    }
     data.currentAnimKey = animKey;
   }
 
@@ -2365,10 +2463,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     syncSpeechBubble(actor.spriteId, actor.chatText, data);
   }
 
-  function showPlayerChatBubble(playerId: string, text: string): void {
+  function showPlayerChatBubble(
+    playerId: string,
+    text: string,
+    durationMs = PLAYER_CHAT_BUBBLE_DURATION_MS,
+  ): void {
     playerChatBubbles.set(playerId, {
       text,
-      expiresAt: performance.now() + PLAYER_CHAT_BUBBLE_DURATION_MS,
+      expiresAt: performance.now() + durationMs,
     });
     const data = playerSprites.get(playerId);
     if (data?.container.visible) {
@@ -2378,7 +2480,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
   function setChatBubblesEnabled(enabled: boolean): void {
     chatBubblesEnabled = enabled;
-    speechBubbleLayer.visible = enabled;
+    speechBubbleLayer.visible = isTutorial || enabled;
     saveChatBubblesEnabledPreference(enabled);
   }
 
@@ -2683,6 +2785,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         currentLayout.dirtMask,
         assets,
         app.renderer,
+        tilemapRendererOptions,
       );
     } catch (error) {
       console.error(
@@ -3102,6 +3205,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   let setMobileInputEnabled: (enabled: boolean) => void = () => {};
   let setGameMenuAvailable: (available: boolean) => void = () => {};
   let syncLocalInputAvailability: () => void = () => {};
+  let tutorialIntersectionDialogueShown = false;
+  let tutorialSwampDialogueShown = false;
+  let tutorialBridgeDialogueShown = false;
+  let tutorialRunestoneDialogueShown = false;
+  let tutorialEscapeDialogueShown = false;
+  let tutorialCompletionShown = false;
   let matchRuntimeReady = false;
   let deferredRoomAdmission: Parameters<NetworkCallbacks['onRoomJoined']> | null = null;
   let deferredTickUpdate: GameState | null = null;
@@ -3270,6 +3379,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         console.info(
           `[Main] ${resumed ? 'Resumed' : 'Joined'} room "${roomId}" as ${playerId} (${role}, maze seed: ${mapSeed})`,
         );
+        if (isTutorial && !resumed) {
+          tutorialIntersectionDialogueShown = false;
+          tutorialSwampDialogueShown = false;
+          tutorialBridgeDialogueShown = false;
+          tutorialRunestoneDialogueShown = false;
+          tutorialEscapeDialogueShown = false;
+          tutorialCompletionShown = false;
+        }
         debugPlayerRoles.clear();
         debugPlayerRoles.set(playerId, role);
         if (!resumed) chatHud?.clear();
@@ -3305,7 +3422,8 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
           portalPlatform = null;
           clearCageVisuals();
 
-          const layout = generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
+          const layout =
+            tutorialLayout ?? generateMazeLayout(mapSeed, SPAWN_DISTANCE, MAX_TEAMS);
           currentMapSeed = mapSeed;
           currentMap = layout.map;
           currentLayout = layout;
@@ -3329,6 +3447,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
             layout.dirtMask,
             assets,
             app.renderer,
+            tilemapRendererOptions,
           );
           if (cellBoundaryOverlay?.parent === worldContainer) {
             worldContainer.removeChild(cellBoundaryOverlay);
@@ -3765,9 +3884,20 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
         `[Main] All runestones activated! Portal at (${Math.round(portalX)}, ${Math.round(portalY)})`,
       );
       chatHud?.addSystemMessage(WARDSTONES_ACTIVATED_CHAT_MESSAGE);
-      // Start screen shake — portal will light up after it completes
-      shakeTimeRemaining = SHAKE_DURATION;
       pendingPortalPos = { x: portalX, y: portalY };
+      if (isTutorial) {
+        resetAllInput();
+        activatePortalReveal(pendingPortalPos);
+        pendingPortalPos = null;
+        cinematicPhase = 'watch_portal';
+        cinematicElapsed = 0;
+        cinematicTargetX = portalX;
+        cinematicTargetY = portalY + TUTORIAL_PORTAL_CAMERA_Y_OFFSET;
+        syncLocalInputAvailability();
+      } else {
+        // Normal matches retain their shake before the instant portal reveal.
+        shakeTimeRemaining = SHAKE_DURATION;
+      }
     },
 
     onWisdomOrbUsed: (hint, remainingWisdomOrbs) => {
@@ -3888,15 +4018,15 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       showDialoguePages(SURVIVOR_TRAPPED_DIALOGUE_PAGES);
     },
 
-    onChatMessage: (playerId, displayName, teamId, text) => {
+    onChatMessage: (playerId, displayName, teamId, text, durationMs) => {
       if (
         deferMatchEvent(() =>
-          networkCallbacks.onChatMessage(playerId, displayName, teamId, text),
+          networkCallbacks.onChatMessage(playerId, displayName, teamId, text, durationMs),
         )
       )
         return;
       chatHud?.addMessage({ playerId, displayName, teamId, text });
-      showPlayerChatBubble(playerId, text);
+      showPlayerChatBubble(playerId, text, durationMs);
     },
 
     onPlayerEscaped: (
@@ -3937,6 +4067,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       console.info(
         `[Main] ${displayName} escaped via portal (${escapedCount}/${escapeThreshold})`,
       );
+      if (isTutorial && playerId === net.playerId && !tutorialCompletionShown) {
+        tutorialCompletionShown = true;
+        window.setTimeout(() => {
+          showDialoguePages(TUTORIAL_COMPLETE_DIALOGUE_PAGES, returnToMainMenu);
+        }, 700);
+      }
     },
 
     onMatchEnded: (winner, escapedCount, escapeThreshold, remainingMs, finalRoster) => {
@@ -4003,32 +4139,40 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       }
     },
   };
-  const net = new NetworkManager(networkCallbacks);
+  const localTutorialSession = isTutorial
+    ? new LocalTutorialSession(networkCallbacks)
+    : null;
+  const networkManager = isTutorial ? null : new NetworkManager(networkCallbacks);
+  const net: GameSession = localTutorialSession ?? networkManager!;
 
-  reconnectOverlay = new ReconnectOverlay({
-    parent: container,
-    onLeave: () => {
-      net.leaveRoom();
-      const url = new URL(window.location.href);
-      url.searchParams.delete('room');
-      window.location.href = url.toString();
-    },
-  });
+  if (!isTutorial) {
+    reconnectOverlay = new ReconnectOverlay({
+      parent: container,
+      onLeave: () => {
+        net.leaveRoom();
+        const url = new URL(window.location.href);
+        url.searchParams.delete('room');
+        window.location.href = url.toString();
+      },
+    });
+  }
   window.addEventListener(RELEASE_ROOM_EVENT, () => net.leaveRoom());
 
-  chatHud = new ProximityChatHud({
-    parent: container,
-    canvas: app.canvas,
-    onSend: (text) => net.sendChatMessage(text),
-    onActiveChange: (active) => {
-      chatInputActive = active;
-      if (active) {
-        resetAllInput();
-        minimap?.closeExpanded();
-      }
-      syncLocalInputAvailability();
-    },
-  });
+  if (!isTutorial) {
+    chatHud = new ProximityChatHud({
+      parent: container,
+      canvas: app.canvas,
+      onSend: (text) => net.sendChatMessage(text),
+      onActiveChange: (active) => {
+        chatInputActive = active;
+        if (active) {
+          resetAllInput();
+          minimap?.closeExpanded();
+        }
+        syncLocalInputAvailability();
+      },
+    });
+  }
 
   // ── Interaction Helpers + Mobile Controls ────────────────────────────
 
@@ -4273,37 +4417,42 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   const handleGameMenuToggle = (): void => gameMenuHud?.toggle();
   gameMenuToggle?.addEventListener('click', handleGameMenuToggle);
 
-  gameMenuHud = new GameMenuHud(INTERNAL_WIDTH, INTERNAL_HEIGHT, {
-    onVisibilityChange: (visible) => {
-      gameMenuOpen = visible;
-      if (!visible && debugUi) setAdminPanelOpen(debugUi, false);
-      gameMenuToggle?.setAttribute('aria-expanded', String(visible));
-      resetAllInput();
-      if (visible) {
-        chatHud?.close();
-        minimap?.closeExpanded();
-      }
-      syncLocalInputAvailability();
-    },
-    onOpenAdminPanel: () => {
-      if (!isAdminSession || !debugUi) return;
-      if (latestServerState) {
-        for (const player of latestServerState.players) {
-          net.sendDebugPlayerAction(player.id, 'get-role');
+  gameMenuHud = new GameMenuHud(
+    INTERNAL_WIDTH,
+    INTERNAL_HEIGHT,
+    {
+      onVisibilityChange: (visible) => {
+        gameMenuOpen = visible;
+        if (!visible && debugUi) setAdminPanelOpen(debugUi, false);
+        gameMenuToggle?.setAttribute('aria-expanded', String(visible));
+        resetAllInput();
+        if (visible) {
+          chatHud?.close();
+          minimap?.closeExpanded();
         }
-        updateDebugUI(debugUi, latestServerState, net.playerId, true);
-      }
-      setAdminPanelOpen(debugUi, true);
-      debugUi.closeButton.focus();
+        syncLocalInputAvailability();
+      },
+      onOpenAdminPanel: () => {
+        if (!isAdminSession || !debugUi) return;
+        if (latestServerState) {
+          for (const player of latestServerState.players) {
+            net.sendDebugPlayerAction(player.id, 'get-role');
+          }
+          updateDebugUI(debugUi, latestServerState, net.playerId, true);
+        }
+        setAdminPanelOpen(debugUi, true);
+        debugUi.closeButton.focus();
+      },
+      isMusicMuted: () => musicMuted,
+      onMusicMutedChange: (muted) => setMusicMuted(muted, true),
+      areSoundEffectsMuted: () => soundEffectsMuted,
+      onSoundEffectsMutedChange: (muted) => setSoundEffectsMuted(muted, true),
+      areChatBubblesEnabled: () => chatBubblesEnabled,
+      onChatBubblesEnabledChange: setChatBubblesEnabled,
+      onExitMatch: returnToMainMenu,
     },
-    isMusicMuted: () => musicMuted,
-    onMusicMutedChange: (muted) => setMusicMuted(muted, true),
-    areSoundEffectsMuted: () => soundEffectsMuted,
-    onSoundEffectsMutedChange: (muted) => setSoundEffectsMuted(muted, true),
-    areChatBubblesEnabled: () => chatBubblesEnabled,
-    onChatBubblesEnabledChange: setChatBubblesEnabled,
-    onExitMatch: returnToMainMenu,
-  });
+    isTutorial ? { exitLabel: 'Exit tutorial', confirmExit: false } : undefined,
+  );
   gameMenuHud.setAdminAvailable(isAdminSession);
   gameMenuHud.addToStage(app.stage);
 
@@ -4320,7 +4469,12 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   };
   syncLocalInputAvailability = () => {
     const canAct = net.isConnected && isLocalPlayerActionable();
-    setMobileInputEnabled(canAct && !chatInputActive && !gameMenuOpen);
+    setMobileInputEnabled(
+      canAct &&
+        !chatInputActive &&
+        !gameMenuOpen &&
+        (!isTutorial || cinematicPhase === 'idle'),
+    );
     chatHud?.setSuppressed(
       gameMenuOpen ||
         (introDialogueHud?.isVisible() ?? false) ||
@@ -4328,13 +4482,14 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     );
   };
 
-  const showDialoguePages = (pages: readonly string[]): void => {
+  const showDialoguePages = (pages: readonly string[], onDismiss?: () => void): void => {
     introDialogueHud?.destroy();
     introDialogueHud = new IntroDialogueHud(
       INTERNAL_WIDTH,
       INTERNAL_HEIGHT,
       pages,
       (bounds) => mobileControls.setDialogueExclusion(bounds),
+      onDismiss,
     );
     introDialogueHud.addToStage(app.stage);
     chatHud?.setSuppressed(true);
@@ -4430,7 +4585,11 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     introDialogueHud = null;
     if (showIntroDialogue) {
       showDialoguePages(
-        role === 'warden' ? WARDEN_SPAWN_DIALOGUE_PAGES : SURVIVOR_SPAWN_DIALOGUE_PAGES,
+        isTutorial
+          ? TUTORIAL_SPAWN_DIALOGUE_PAGES
+          : role === 'warden'
+            ? WARDEN_SPAWN_DIALOGUE_PAGES
+            : SURVIVOR_SPAWN_DIALOGUE_PAGES,
       );
     }
     chatHud?.setSuppressed(showIntroDialogue);
@@ -4453,9 +4612,35 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   );
 
   // ── 60 FPS Game Loop ──────────────────────────────────────────────────
+  const activatePortalReveal = (position: { x: number; y: number }): void => {
+    if (!portalPlatform && tilemapRenderer) {
+      portalPlatform = new PortalPlatform(
+        position.x,
+        position.y,
+        assets.portalPlatformTextures,
+        tilemapRenderer.portalTerrainLayer,
+        tilemapRenderer.groundDetailLayer,
+        entityLayer,
+      );
+    }
+    if (!portal) {
+      portal = new Portal(
+        position.x,
+        position.y,
+        assets.portalFrames,
+        assets.portalActivationCount,
+        entityLayer,
+      );
+    }
+    portal.activate();
+    worldAudio.playPortalActivation(position, getAudioListener());
+    minimap?.setPortalPosition(position.x, position.y);
+  };
+
   app.ticker.add((ticker) => {
     matchHud.update();
     const dtSeconds = Math.min(ticker.deltaMS / 1000, 0.1);
+    localTutorialSession?.update(dtSeconds);
     const matchAudioActive =
       net.isConnected &&
       localPlayerInitialized &&
@@ -4494,13 +4679,20 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       ? findActivePlayerCage(latestServerState.cageStates, net.playerId)
       : null;
     const recordingBlocksLocalMovement = recordingStudio?.blocksLocalMovement() ?? false;
+    const tutorialDialogueBlocksMovement =
+      isTutorial && (introDialogueHud?.isVisible() ?? false);
+    const tutorialCinematicBlocksMovement = isTutorial && cinematicPhase !== 'idle';
+    const localMovementBlocked =
+      recordingBlocksLocalMovement ||
+      tutorialDialogueBlocksMovement ||
+      tutorialCinematicBlocksMovement;
     const movementInput = {
       up:
-        chatInputActive || gameMenuOpen || recordingBlocksLocalMovement || !localCanAct
+        chatInputActive || gameMenuOpen || localMovementBlocked || !localCanAct
           ? false
           : activeKeys.up,
       down:
-        chatInputActive || gameMenuOpen || recordingBlocksLocalMovement || !localCanAct
+        chatInputActive || gameMenuOpen || localMovementBlocked || !localCanAct
           ? false
           : activeKeys.down,
       // Once opened, the cage permits only its north/south escape route. A
@@ -4508,7 +4700,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       left:
         chatInputActive ||
         gameMenuOpen ||
-        recordingBlocksLocalMovement ||
+        localMovementBlocked ||
         !localCanAct ||
         activeLocalCage?.opened
           ? false
@@ -4516,7 +4708,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       right:
         chatInputActive ||
         gameMenuOpen ||
-        recordingBlocksLocalMovement ||
+        localMovementBlocked ||
         !localCanAct ||
         activeLocalCage?.opened
           ? false
@@ -4590,6 +4782,65 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     }
 
     // ── 2. Remote player interpolation ────────────────────────────
+    if (isTutorial && tutorialLayout && !isLocalEscaped) {
+      const tutorialIntersection = tutorialLayout.tIntersectionDecorations[0];
+      const walkedOneTileIntoIntersection =
+        tutorialIntersection !== undefined &&
+        localX >= tutorialIntersection.tileX * TILE_SIZE &&
+        localX < (tutorialIntersection.tileX + CELL_SIZE) * TILE_SIZE &&
+        localY >= tutorialIntersection.tileY * TILE_SIZE &&
+        localY <= (tutorialIntersection.tileY + CELL_SIZE - 1) * TILE_SIZE;
+      if (!tutorialIntersectionDialogueShown && walkedOneTileIntoIntersection) {
+        tutorialIntersectionDialogueShown = true;
+        resetAllInput();
+        showDialoguePages(TUTORIAL_WISDOM_DIALOGUE_PAGES);
+      }
+
+      const enteredTutorialSwamp =
+        getPlayerSwampTerrain(tutorialLayout.swamps, localX, localY, TILE_SIZE) !== 'dry';
+      if (!tutorialSwampDialogueShown && enteredTutorialSwamp) {
+        tutorialSwampDialogueShown = true;
+        resetAllInput();
+        showDialoguePages(TUTORIAL_SWAMP_DIALOGUE_PAGES);
+      }
+
+      const reachedTutorialBridge =
+        findBridgeWisdomHintTarget(
+          tutorialLayout.bridges,
+          localX,
+          localY,
+          TILE_SIZE,
+          TUTORIAL_BRIDGE_LESSON_RANGE,
+        ) !== null;
+      if (!tutorialBridgeDialogueShown && reachedTutorialBridge) {
+        tutorialBridgeDialogueShown = true;
+        resetAllInput();
+        showDialoguePages(TUTORIAL_BRIDGE_DIALOGUE_PAGES);
+      }
+
+      const tutorialRunestone = latestServerState?.runestones.find(
+        (runestone) => !runestone.activated,
+      );
+      const runestoneX = tutorialRunestone
+        ? (tutorialRunestone.tileX + 0.5) * TILE_SIZE
+        : 0;
+      const runestoneY = tutorialRunestone
+        ? (tutorialRunestone.tileY + 1) * TILE_SIZE
+        : 0;
+      const runestoneDx = localX - runestoneX;
+      const runestoneDy = localY - runestoneY;
+      if (
+        !tutorialRunestoneDialogueShown &&
+        tutorialRunestone &&
+        runestoneDx * runestoneDx + runestoneDy * runestoneDy <=
+          TUTORIAL_RUNESTONE_LESSON_RANGE * TUTORIAL_RUNESTONE_LESSON_RANGE
+      ) {
+        tutorialRunestoneDialogueShown = true;
+        resetAllInput();
+        showDialoguePages(TUTORIAL_RUNESTONE_DIALOGUE_PAGES);
+      }
+    }
+
     const renderTime = now - INTERPOLATION_DELAY;
     const interpolationPair = snapshotBuffer.getInterpolationPair(renderTime);
     const latestSnapshot = snapshotBuffer.getLatest();
@@ -4715,7 +4966,6 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
       bridgeCameraBlend = 0;
       bridgeCameraFocus = null;
     } else if (cinematicPhase !== 'idle') {
-      // The portal reveal remains an instant, higher-priority camera override.
       camTargetX = cinematicTargetX;
       camTargetY = cinematicTargetY;
       bridgeCameraBlend = 0;
@@ -4815,28 +5065,7 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
 
       // When shake ends, light the portal and move the camera to it.
       if (shakeTimeRemaining <= 0 && pendingPortalPos) {
-        if (!portalPlatform && tilemapRenderer) {
-          portalPlatform = new PortalPlatform(
-            pendingPortalPos.x,
-            pendingPortalPos.y,
-            assets.portalPlatformTextures,
-            tilemapRenderer.portalTerrainLayer,
-            tilemapRenderer.groundDetailLayer,
-            entityLayer,
-          );
-        }
-        if (!portal) {
-          portal = new Portal(
-            pendingPortalPos.x,
-            pendingPortalPos.y,
-            assets.portalFrames,
-            assets.portalActivationCount,
-            entityLayer,
-          );
-        }
-        portal.activate();
-        worldAudio.playPortalActivation(pendingPortalPos, getAudioListener());
-        minimap?.setPortalPosition(pendingPortalPos.x, pendingPortalPos.y);
+        activatePortalReveal(pendingPortalPos);
         // Instant camera jump to portal (no directional clues)
         cinematicPhase = 'watch_portal';
         cinematicElapsed = 0;
@@ -4850,9 +5079,17 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
     if (cinematicPhase === 'watch_portal') {
       cinematicElapsed += dtSeconds;
       if (cinematicElapsed >= WATCH_DURATION) {
-        // Instant snap back to player
         cinematicPhase = 'idle';
         cinematicElapsed = 0;
+        // Apply the snap immediately so the tutorial instruction appears over
+        // the player's view, rather than over the last portal frame.
+        updateCamera(worldContainer, localX, localY, mapPixelW, mapPixelH, zoomLevel);
+        if (isTutorial && !tutorialEscapeDialogueShown) {
+          tutorialEscapeDialogueShown = true;
+          resetAllInput();
+          showDialoguePages(TUTORIAL_ESCAPE_DIALOGUE_PAGES);
+        }
+        syncLocalInputAvailability();
       }
     }
 
@@ -5274,7 +5511,19 @@ async function initializeGame(options: GameLaunchOptions): Promise<void> {
   }
   const displayName = options.displayName;
 
-  net.connect(wsUrl, options.reconnectSession, displayName, options.accessToken);
+  if (localTutorialSession) {
+    localTutorialSession.start(
+      displayName,
+      'isAdmin' in options ? options.isAdmin : false,
+    );
+  } else if (networkManager && 'reconnectSession' in options) {
+    networkManager.connect(
+      wsUrl,
+      options.reconnectSession,
+      displayName,
+      options.accessToken,
+    );
+  }
 
   try {
     assets = await assetLoadPromise;
@@ -5322,10 +5571,20 @@ export function preloadGameAssets(): Promise<void> {
 
 export async function startGame(options: GameLaunchOptions): Promise<void> {
   try {
-    await initializeGame(options);
+    await initializeGame(options, false);
   } catch (error: unknown) {
     console.error(error);
     showLoadingError('The maze could not be opened. Refresh to try again.');
+    throw error;
+  }
+}
+
+export async function startTutorial(options: TutorialLaunchOptions): Promise<void> {
+  try {
+    await initializeGame(options, true);
+  } catch (error: unknown) {
+    console.error(error);
+    showLoadingError('The tutorial could not be opened. Refresh to try again.');
     throw error;
   }
 }

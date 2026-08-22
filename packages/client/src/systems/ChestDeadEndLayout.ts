@@ -454,7 +454,9 @@ export const SOUTH_EAST_CHEST_DEAD_END_SPRITES = [
 
 export function getChestDeadEndScenerySprites(
   variant: ChestDeadEndVariant,
+  preserveTurnOpenings = false,
 ): readonly ChestDeadEndSpriteSpec[] {
+  if (preserveTurnOpenings) return COMMON_CHEST_DEAD_END_SPRITES;
   return variant === 'north-west'
     ? CHEST_DEAD_END_SPRITES
     : [...COMMON_CHEST_DEAD_END_SPRITES, ...SOUTH_EAST_CHEST_DEAD_END_SPRITES];

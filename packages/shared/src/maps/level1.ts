@@ -168,6 +168,8 @@ export interface ChestDeadEndPlacement {
   openDirection: ChestDeadEndDirection;
   /** Authored art/collider family selected from the opening direction. */
   variant: ChestDeadEndVariant;
+  /** Omit the dead-end backdrop when this chest occupies a multi-opening room. */
+  preserveTurnOpenings?: boolean;
   /** Number of independently openable chests authored into this dead-end cell. */
   chestCount: ChestCount;
   /** Position of this chest within the count-specific authored arrangement. */
@@ -198,6 +200,20 @@ export interface GeneratedMazeLayout {
   chestDeadEnds: ChestDeadEndPlacement[];
   /** Visual-only dirt overlay for gate approaches. 1 = render dirt on the ground layer. */
   dirtMask: Uint8Array;
+}
+
+/** Short, authored-on-the-maze-grid route used by the local first-time tutorial. */
+export interface TutorialMazeLayout extends GeneratedMazeLayout {
+  landmarks: {
+    /** Tile-space feet position used for the single local survivor. */
+    spawnPoint: SpawnPoint;
+    /** Tile-space center of the decorated T-junction. */
+    intersectionCenter: SpawnPoint;
+    /** Tile-space point just inside the hub's only open entrance. */
+    hubEntrancePoint: SpawnPoint;
+    /** Fractional tile-space portal anchor, matching normal round placement. */
+    portalPosition: SpawnPoint;
+  };
 }
 
 // ── Tile ID Constants ───────────────────────────────────────────────────────
@@ -601,6 +617,16 @@ function generateMazeData(seed: number): number[] {
 
   // ── Post-processing: convert to Stardew-style 2.5D tiles ────────────────
 
+  return finalizeMazeData(data, hubTileX, hubTileY, hubSize);
+}
+
+/** Convert a raw floor/wall mask into the same 2.5D terrain used by real rounds. */
+function finalizeMazeData(
+  data: number[],
+  hubTileX: number,
+  hubTileY: number,
+  hubSize: number,
+): number[] {
   // Step 1: Convert ALL old walls (1) → Wall Interior (4) initially
   for (let i = 0; i < data.length; i++) {
     if (data[i] === 1) {
@@ -1610,31 +1636,13 @@ function getSpikeGateCountForPassage(
   if (orientation === 'horizontal') {
     const continuesEast =
       secondCellX < GRID_CELLS - 1 &&
-      areCellsConnected(
-        data,
-        secondCellX,
-        secondCellY,
-        secondCellX + 1,
-        secondCellY,
-      );
+      areCellsConnected(data, secondCellX, secondCellY, secondCellX + 1, secondCellY);
     const opensNorth =
       secondCellY > 0 &&
-      areCellsConnected(
-        data,
-        secondCellX,
-        secondCellY,
-        secondCellX,
-        secondCellY - 1,
-      );
+      areCellsConnected(data, secondCellX, secondCellY, secondCellX, secondCellY - 1);
     const opensSouth =
       secondCellY < GRID_CELLS - 1 &&
-      areCellsConnected(
-        data,
-        secondCellX,
-        secondCellY,
-        secondCellX,
-        secondCellY + 1,
-      );
+      areCellsConnected(data, secondCellX, secondCellY, secondCellX, secondCellY + 1);
     return continuesEast && !opensNorth && !opensSouth ? 3 : 2;
   }
 
@@ -1643,11 +1651,14 @@ function getSpikeGateCountForPassage(
   return 3;
 }
 
-function cellHasHorizontalConnection(data: number[], cellX: number, cellY: number): boolean {
+function cellHasHorizontalConnection(
+  data: number[],
+  cellX: number,
+  cellY: number,
+): boolean {
   return (
     (cellX > 0 && areCellsConnected(data, cellX, cellY, cellX - 1, cellY)) ||
-    (cellX < GRID_CELLS - 1 &&
-      areCellsConnected(data, cellX, cellY, cellX + 1, cellY))
+    (cellX < GRID_CELLS - 1 && areCellsConnected(data, cellX, cellY, cellX + 1, cellY))
   );
 }
 
@@ -1655,8 +1666,14 @@ function getSpikeGateOccupiedCellKeys(
   placement: Pick<SpikeGateObstaclePlacement, 'orientation' | 'cellX' | 'cellY'>,
 ): [string, string] {
   return placement.orientation === 'horizontal'
-    ? [`${placement.cellX},${placement.cellY}`, `${placement.cellX + 1},${placement.cellY}`]
-    : [`${placement.cellX},${placement.cellY}`, `${placement.cellX},${placement.cellY + 1}`];
+    ? [
+        `${placement.cellX},${placement.cellY}`,
+        `${placement.cellX + 1},${placement.cellY}`,
+      ]
+    : [
+        `${placement.cellX},${placement.cellY}`,
+        `${placement.cellX},${placement.cellY + 1}`,
+      ];
 }
 
 function occupySpikeGateCells(
@@ -2193,6 +2210,164 @@ export function computeDecoratedVerticalPassagePlacements(
 
 export const MAZE_WIDTH = MAP_WIDTH;
 export const MAZE_HEIGHT = MAP_HEIGHT;
+
+/**
+ * Build the deliberately short local tutorial route on the production maze grid.
+ *
+ * Route: spawn cell ↑ decorated T-junction → west-only central hub.
+ * The junction's extended west branch turns north, crosses a bridge, and ends
+ * at the normal raised escape portal platform.
+ */
+export function generateTutorialMazeLayout(): TutorialMazeLayout {
+  const data = new Array<number>(MAP_WIDTH * MAP_HEIGHT).fill(1);
+  const hubTileX = Math.floor((MAP_WIDTH - HUB_SIZE) / 2);
+  const hubTileY = Math.floor((MAP_HEIGHT - HUB_SIZE) / 2);
+
+  for (let dy = 0; dy < HUB_SIZE; dy++) {
+    for (let dx = 0; dx < HUB_SIZE; dx++) {
+      data[(hubTileY + dy) * MAP_WIDTH + hubTileX + dx] = TILE_FLOOR;
+    }
+  }
+
+  const spawnCell = { cx: 5, cy: 8 };
+  const intersectionCell = { cx: 5, cy: 7 };
+  const westCell = { cx: 4, cy: 7 };
+  const trapDeadEndCell = { cx: 4, cy: 8 };
+  const turnCell = { cx: 3, cy: 7 };
+  const northCell = { cx: 3, cy: 6 };
+  const portalCell = { cx: 3, cy: 5 };
+  carveCell(data, spawnCell.cx, spawnCell.cy);
+  carveCell(data, intersectionCell.cx, intersectionCell.cy);
+  carveCell(data, westCell.cx, westCell.cy);
+  carveCell(data, trapDeadEndCell.cx, trapDeadEndCell.cy);
+  carveCell(data, turnCell.cx, turnCell.cy);
+  carveCell(data, northCell.cx, northCell.cy);
+  carveCell(data, portalCell.cx, portalCell.cy);
+  carvePassage(
+    data,
+    spawnCell.cx,
+    spawnCell.cy,
+    intersectionCell.cx,
+    intersectionCell.cy,
+  );
+  carvePassage(data, westCell.cx, westCell.cy, intersectionCell.cx, intersectionCell.cy);
+  carvePassage(data, turnCell.cx, turnCell.cy, westCell.cx, westCell.cy);
+  carvePassage(data, trapDeadEndCell.cx, trapDeadEndCell.cy, westCell.cx, westCell.cy);
+  carvePassage(data, northCell.cx, northCell.cy, turnCell.cx, turnCell.cy);
+  carvePassage(data, portalCell.cx, portalCell.cy, northCell.cx, northCell.cy);
+
+  // Continue the T-junction's east branch through the production hub's west wall.
+  const { tx: intersectionTileX, ty: intersectionTileY } = cellToTile(
+    intersectionCell.cx,
+    intersectionCell.cy,
+  );
+  const corridorStartX = intersectionTileX + CELL_SIZE;
+  for (let x = corridorStartX; x < hubTileX + CELL_SIZE; x++) {
+    for (let dy = 0; dy < CELL_SIZE; dy++) {
+      data[(intersectionTileY + dy) * MAP_WIDTH + x] = TILE_FLOOR;
+    }
+  }
+
+  const { tx: spawnTileX, ty: spawnTileY } = cellToTile(spawnCell.cx, spawnCell.cy);
+  const { tx: turnTileX, ty: turnTileY } = cellToTile(turnCell.cx, turnCell.cy);
+  const { tx: trapTileX, ty: trapTileY } = cellToTile(
+    trapDeadEndCell.cx,
+    trapDeadEndCell.cy,
+  );
+  const { tx: portalTileX, ty: portalTileY } = cellToTile(portalCell.cx, portalCell.cy);
+  const { tx: bridgeTileX, ty: bridgeNorthTileY } = cellToTile(
+    portalCell.cx,
+    portalCell.cy,
+  );
+  const [bridgeSafeTileMask] = generateBridgeSafeTileMasks(1, 0x7475746f);
+  const tutorialBridge: BridgePlacement = {
+    cellX: portalCell.cx,
+    northCellY: portalCell.cy,
+    tileX: bridgeTileX,
+    tileY: bridgeNorthTileY + CELL_SIZE,
+    safeTileMask: bridgeSafeTileMask,
+  };
+  const spawnPoint = {
+    x: spawnTileX + Math.floor(CELL_SIZE / 2),
+    y: spawnTileY + Math.floor(CELL_SIZE / 2),
+  };
+  const portalPosition = {
+    x: portalTileX + CELL_SIZE / 2,
+    y: portalTileY - 0.75,
+  };
+  const map: TileMapData = {
+    width: MAP_WIDTH,
+    height: MAP_HEIGHT,
+    tileSize: TILE_PX,
+    data: finalizeMazeData(data, hubTileX, hubTileY, HUB_SIZE),
+  };
+
+  return {
+    map,
+    spawnPoints: [spawnPoint],
+    gates: [],
+    pressurePlates: [],
+    bridges: [tutorialBridge],
+    swamps: [
+      {
+        westCellX: turnCell.cx,
+        cellY: turnCell.cy,
+        lengthCells: MIN_SWAMP_LENGTH_CELLS,
+        decorationSeed: 0x7475746f,
+        // Offset the original cell anchor by exactly six tiles so the swamp
+        // occupies the passage without covering the Warden encounter cell.
+        tileX: turnTileX + CELL_SIZE,
+        tileY: turnTileY,
+      },
+    ],
+    swordFields: [],
+    spikeGateObstacles: [],
+    tIntersectionDecorations: [
+      {
+        cellX: intersectionCell.cx,
+        cellY: intersectionCell.cy,
+        closedDirection: 'north',
+        tileX: intersectionTileX,
+        tileY: intersectionTileY,
+      },
+    ],
+    decoratedVerticalPassages: [],
+    trapCells: [
+      {
+        cellX: trapDeadEndCell.cx,
+        cellY: trapDeadEndCell.cy,
+        tileX: trapTileX,
+        tileY: trapTileY,
+      },
+    ],
+    chestDeadEnds: [
+      {
+        cellX: turnCell.cx,
+        cellY: turnCell.cy,
+        tileX: turnTileX,
+        tileY: turnTileY,
+        openDirection: 'north',
+        variant: 'south-east',
+        preserveTurnOpenings: true,
+        chestCount: 1,
+        chestSlot: 0,
+      },
+    ],
+    dirtMask: new Uint8Array(MAP_WIDTH * MAP_HEIGHT),
+    landmarks: {
+      spawnPoint,
+      intersectionCenter: {
+        x: intersectionTileX + CELL_SIZE / 2,
+        y: intersectionTileY + CELL_SIZE / 2,
+      },
+      hubEntrancePoint: {
+        x: hubTileX + 1,
+        y: intersectionTileY + CELL_SIZE / 2,
+      },
+      portalPosition,
+    },
+  };
+}
 
 export function generateMazeLayout(
   seed: number,

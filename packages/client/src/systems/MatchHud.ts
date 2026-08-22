@@ -19,6 +19,10 @@ export interface MatchHudActions {
   onExit: () => void;
 }
 
+export interface MatchHudOptions {
+  showTimer?: boolean;
+}
+
 export class MatchHud {
   private readonly container = new Container();
   private readonly timerText: Text;
@@ -34,6 +38,7 @@ export class MatchHud {
     private readonly internalWidth: number,
     private readonly internalHeight: number,
     actions: MatchHudActions,
+    private readonly options: MatchHudOptions = {},
   ) {
     this.container.eventMode = 'passive';
     this.container.zIndex = 100_000;
@@ -141,7 +146,7 @@ export class MatchHud {
     this.remainingMs = Math.max(0, match.remainingMs);
     this.lastSyncAt = performance.now();
     this.updateTimerText();
-    this.timerText.visible = match.status !== 'ended';
+    this.timerText.visible = (this.options.showTimer ?? true) && match.status !== 'ended';
     if (match.status === 'ended' && match.winner) {
       this.showResult(match);
     } else {

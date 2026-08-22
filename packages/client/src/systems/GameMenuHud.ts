@@ -24,6 +24,11 @@ export interface GameMenuActions {
   onExitMatch: () => void;
 }
 
+export interface GameMenuOptions {
+  exitLabel?: string;
+  confirmExit?: boolean;
+}
+
 /** Local-only multiplayer menu styled to match the end-of-match panel. */
 export class GameMenuHud {
   private readonly container = new Container();
@@ -47,6 +52,7 @@ export class GameMenuHud {
     internalWidth: number,
     internalHeight: number,
     private readonly actions: GameMenuActions,
+    private readonly options: GameMenuOptions = {},
   ) {
     this.container.eventMode = 'static';
     this.container.zIndex = 110_000;
@@ -170,8 +176,13 @@ export class GameMenuHud {
     const optionsButton = this.createButton('Options', MAIN_BUTTON_X, 121, () =>
       this.showPage('options'),
     );
-    const exitButton = this.createButton('Exit match', MAIN_BUTTON_X, 150, () =>
-      this.showPage('exit-confirmation'),
+    const exitButton = this.createButton(
+      this.options.exitLabel ?? 'Exit match',
+      MAIN_BUTTON_X,
+      150,
+      this.options.confirmExit === false
+        ? this.actions.onExitMatch
+        : () => this.showPage('exit-confirmation'),
     );
     this.mainPage.addChild(
       resumeButton,
@@ -306,10 +317,16 @@ export class GameMenuHud {
     this.exitConfirmationPage.addChild(
       message,
       this.createButton('Stay', 18, 162, () => this.showPage('main'), { width: 90 }),
-      this.createButton('Exit match', 116, 162, this.actions.onExitMatch, {
-        width: 90,
-        dangerous: true,
-      }),
+      this.createButton(
+        this.options.exitLabel ?? 'Exit match',
+        116,
+        162,
+        this.actions.onExitMatch,
+        {
+          width: 90,
+          dangerous: true,
+        },
+      ),
     );
   }
 
@@ -321,7 +338,7 @@ export class GameMenuHud {
         : page === 'options'
           ? 'Options'
           : page === 'exit-confirmation'
-            ? 'Exit match?'
+            ? `${this.options.exitLabel ?? 'Exit match'}?`
             : 'Game menu';
     this.mainPage.visible = page === 'main';
     this.controlsPage.visible = page === 'controls';

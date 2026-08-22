@@ -328,12 +328,14 @@ export function getChestDeadEndBounds(
   const anchorX = placement.tileX * tileSize;
   const anchorY = placement.tileY * tileSize;
 
+  const baseSpecs = placement.preserveTurnOpenings
+    ? CHEST_DEAD_END_BASE_COLLIDER_SPECS[placement.variant].filter(
+        (spec) => spec.kind !== 'backdrop',
+      )
+    : CHEST_DEAD_END_BASE_COLLIDER_SPECS[placement.variant];
   const specs =
     placement.chestSlot === 0
-      ? [
-          ...CHEST_DEAD_END_BASE_COLLIDER_SPECS[placement.variant],
-          getChestColliderSpec(placement),
-        ]
+      ? [...baseSpecs, getChestColliderSpec(placement)]
       : [getChestColliderSpec(placement)];
 
   return specs.map((spec) => ({

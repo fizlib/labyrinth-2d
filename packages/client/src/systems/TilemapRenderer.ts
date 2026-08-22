@@ -67,7 +67,10 @@ import { addSpikeGateObstacles, type SpikeGateObstacleVisual } from './SpikeGate
 import { addChestDeadEnds, type ChestDeadEndVisual } from './ChestDeadEnd';
 import { addTIntersectionDecorations } from './TIntersectionDecoration';
 import { addDecoratedVerticalPassages } from './DecoratedVerticalPassage';
-import { addCentralHub } from './CentralHub';
+import {
+  addCentralHub,
+  type CentralHubEntranceDirection,
+} from './CentralHub';
 
 // ── Exported types ──────────────────────────────────────────────────────────
 
@@ -77,6 +80,10 @@ export interface RunestoneSpriteData {
   tileX: number;
   tileY: number;
   activated: boolean;
+}
+
+export interface TilemapRendererOptions {
+  centralHubOpenEntrances?: readonly CentralHubEntranceDirection[];
 }
 
 export interface PressurePlateSpriteData {
@@ -444,6 +451,7 @@ export class TilemapRenderer {
     dirtMask: Uint8Array,
     assets: GameAssets,
     renderer: Renderer,
+    options: TilemapRendererOptions = {},
   ) {
     const ts = map.tileSize;
     const renderSimpleHorizontalGates = !assets.frontGateTextures;
@@ -867,6 +875,7 @@ export class TilemapRenderer {
       assets.runestoneTextures,
       renderer,
       this.groundDetailLayer,
+      { openEntrances: options.centralHubOpenEntrances },
     );
     this.centralHubYSortedSprites.push(...centralHubRender.ySortedSprites);
     this.runestoneSprites.push(...centralHubRender.runestones);

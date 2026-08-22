@@ -10,7 +10,15 @@ import {
   CENTRAL_HUB_SPRITE_SPECS,
   CENTRAL_HUB_VISUAL_BOUNDS,
   CENTRAL_HUB_Y_SORTED_SPRITE_SPECS,
+  type CentralHubSpriteSpec,
 } from './CentralHubLayout.generated';
+
+export type CentralHubEntranceDirection = 'north' | 'east' | 'south' | 'west';
+
+export interface CentralHubRenderOptions {
+  /** Omit authored approach paths where the surrounding maze keeps an entrance closed. */
+  openEntrances?: readonly CentralHubEntranceDirection[];
+}
 
 export interface CentralHubRunestoneSprite {
   sprite: Sprite;
@@ -25,6 +33,22 @@ export interface CentralHubRenderResult {
   ySortedSprites: Sprite[];
 }
 
+function getExteriorApproachDirection(
+  spec: CentralHubSpriteSpec,
+  hubAuthoringSize: number,
+): CentralHubEntranceDirection | null {
+  const [, x, y, width, height, zIndex] = spec;
+
+  // The editor-authored stone approach tiles use the 500/501 ground-detail
+  // layers. Lower layers outside the hub are surrounding grass decorations.
+  if (zIndex < 500) return null;
+  if (x < 0) return 'west';
+  if (x + width > hubAuthoringSize) return 'east';
+  if (y < 0) return 'north';
+  if (y + height > hubAuthoringSize) return 'south';
+  return null;
+}
+
 /** Bake the exact editor-authored hub repaint and create its moved objectives. */
 export function addCentralHub(
   map: TileMapData,
@@ -32,6 +56,7 @@ export function addCentralHub(
   runestoneTextures: readonly [Texture, Texture][],
   renderer: Renderer,
   groundDetailParent: Container,
+  options: CentralHubRenderOptions = {},
 ): CentralHubRenderResult {
   const runestonePlacements = getCentralHubRunestonePlacements(map);
   if (runestonePlacements.length === 0) {
@@ -41,18 +66,24 @@ export function addCentralHub(
   const hubBounds = getHubTileBounds(map.width, map.height);
   const hubX = hubBounds.left * map.tileSize;
   const hubY = hubBounds.top * map.tileSize;
+  const hubAuthoringSize =
+    (hubBounds.right - hubBounds.left + 1) * CENTRAL_HUB_AUTHORING_TILE_SIZE;
+  const openEntrances = options.openEntrances
+    ? new Set(options.openEntrances)
+    : null;
   const source = new Container();
   source.sortableChildren = true;
 
-  for (const [
-    assetIndex,
-    x,
-    y,
-    width,
-    height,
-    zIndex,
-    flipX,
-  ] of CENTRAL_HUB_SPRITE_SPECS) {
+  for (const spec of CENTRAL_HUB_SPRITE_SPECS) {
+    const approachDirection = getExteriorApproachDirection(spec, hubAuthoringSize);
+    if (
+      approachDirection !== null &&
+      openEntrances !== null &&
+      !openEntrances.has(approachDirection)
+    ) {
+      continue;
+    }
+    const [assetIndex, x, y, width, height, zIndex, flipX] = spec;
     const texture = textures.get(CENTRAL_HUB_ASSET_PATHS[assetIndex]);
     if (!texture) continue;
     const sprite = new Sprite(texture);

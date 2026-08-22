@@ -76,111 +76,111 @@ One room owns one maze instance. The server is authoritative for player state, h
 
 #### Client -> Server
 
-| Message | Purpose |
-| --- | --- |
-| `JOIN_ROOM` | Join or create a room with a display name |
-| `RECONNECT_ROOM` | Reclaim a reserved seat with its private per-tab bearer token |
-| `LEAVE_ROOM` | Explicitly release the current seat without a reconnect grace period |
-| `VOTE_TO_START` | Cast or withdraw the local player's underfilled-start vote |
-| `SEND_LOBBY_CHAT` | Submit one server-validated room-wide waiting-room message |
-| `GAME_READY` | Confirm that runtime assets and the recipient's initial maze scene are ready |
-| `PLAYER_INPUT` | Send one frame of movement intent plus `sequenceNumber` |
-| `ACTIVATE_RUNESTONE` | Request activation of a nearby runestone |
-| `OPEN_CHEST` | Request opening a nearby unopened treasure chest |
-| `PRESS_PRESSURE_PLATE` | Warden-only request to latch a nearby gate button |
-| `PRESS_SPIKE_PLATE` | Warden-only request to latch a nearby spike-gate plate |
-| `ACTIVATE_TRAP_CELL` | Warden-only request to fire the shared trap network from a nearby 6x6 trap cell |
-| `OPEN_CAGE` | Outside-player request to open a nearby prisoner's cage |
-| `USE_WISDOM_ORB` | Survivors spend an orb on a nearby reveal/clear or request direction; wardens may use the same proximity request only to clear sword fields |
-| `SEND_CHAT_MESSAGE` | Submit one server-validated proximity-chat message |
-| `ESCAPE_PORTAL` | Survivor request to enter the active portal after a shared 28px proximity check |
-| `DEBUG_TELEPORT` | Debug-only teleport helper used by developer tooling |
-| `DEBUG_SET_MATCH_TIME` | Debug-only authoritative match timer adjustment |
-| `DEBUG_SET_NETWORK_STATS` | Admin-only request that toggles the room-wide in-match network-stat HUD |
-| `DEBUG_SET_TOOLS_ENABLED` | Admin-only sync of the local debug-tools switch used for global chat routing |
+| Message                   | Purpose                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JOIN_ROOM`               | Join or create a room with a display name                                                                                                   |
+| `RECONNECT_ROOM`          | Reclaim a reserved seat with its private per-tab bearer token                                                                               |
+| `LEAVE_ROOM`              | Explicitly release the current seat without a reconnect grace period                                                                        |
+| `VOTE_TO_START`           | Cast or withdraw the local player's underfilled-start vote                                                                                  |
+| `SEND_LOBBY_CHAT`         | Submit one server-validated room-wide waiting-room message                                                                                  |
+| `GAME_READY`              | Confirm that runtime assets and the recipient's initial maze scene are ready                                                                |
+| `PLAYER_INPUT`            | Send one frame of movement intent plus `sequenceNumber`                                                                                     |
+| `ACTIVATE_RUNESTONE`      | Request activation of a nearby runestone                                                                                                    |
+| `OPEN_CHEST`              | Request opening a nearby unopened treasure chest                                                                                            |
+| `PRESS_PRESSURE_PLATE`    | Warden-only request to latch a nearby gate button                                                                                           |
+| `PRESS_SPIKE_PLATE`       | Warden-only request to latch a nearby spike-gate plate                                                                                      |
+| `ACTIVATE_TRAP_CELL`      | Warden-only request to fire the shared trap network from a nearby 6x6 trap cell                                                             |
+| `OPEN_CAGE`               | Outside-player request to open a nearby prisoner's cage                                                                                     |
+| `USE_WISDOM_ORB`          | Survivors spend an orb on a nearby reveal/clear or request direction; wardens may use the same proximity request only to clear sword fields |
+| `SEND_CHAT_MESSAGE`       | Submit one server-validated proximity-chat message                                                                                          |
+| `ESCAPE_PORTAL`           | Survivor request to enter the active portal after a shared 28px proximity check                                                             |
+| `DEBUG_TELEPORT`          | Debug-only teleport helper used by developer tooling                                                                                        |
+| `DEBUG_SET_MATCH_TIME`    | Debug-only authoritative match timer adjustment                                                                                             |
+| `DEBUG_SET_NETWORK_STATS` | Admin-only request that toggles the room-wide in-match network-stat HUD                                                                     |
+| `DEBUG_SET_TOOLS_ENABLED` | Admin-only sync of the local debug-tools switch used for global chat routing                                                                |
 
 #### Server -> Client
 
-| Message | Purpose |
-| --- | --- |
-| `ROOM_JOINED` | Initial or resumed match payload with `playerId`, `mapSeed`, full `gameState`, verified admin status, and the recipient's private role/orb inventory |
-| `MATCH_STARTED` | Release a fully loaded roster with the first shared running state and authoritative ten-minute deadline |
-| `LOBBY_JOINED` | Private lobby admission with the server player ID and current `LobbyState` |
-| `LOBBY_UPDATED` | Event-driven public roster, vote, or countdown replacement state |
-| `LOBBY_CHAT_MESSAGE` | Transient room-wide waiting-room chat event |
-| `TICK_UPDATE` | Authoritative room snapshot broadcast every server tick |
-| `PLAYER_LEFT` | Notify clients that a seat was permanently released after leave or grace expiry |
-| `RUNESTONE_ACTIVATED` | Broadcast that one runestone is now active |
-| `ALL_RUNESTONES_ACTIVATED` | Broadcast the existing portal coordinates once all runestones are active |
-| `CHEST_OPENED` | Broadcast a chest's shared opened state and opener |
-| `WISDOM_ORB_GRANTED` | Privately provide a rewarded survivor's post-reward orb count; wardens receive no reward message |
-| `WISDOM_ORB_USED` | Private accepted-action response containing the result and remaining orb count; warden sword clears leave the count at zero |
-| `PLAYER_ROLE_CHANGED` | Private debug response that replaces the recipient's role and orb inventory |
-| `DEBUG_PLAYER_ROLE` | Private debug response containing a selected player's authoritative role |
-| `TRAP_ACTIVATION_RESULT` | Private result used for the activating Warden's empty-room feedback |
-| `PLAYER_TRAPPED` | Private cage ID notification that opens the captured Survivor's instructional typewriter dialogue |
-| `CHAT_MESSAGE` | Transient message with the sender's public squad ID, normally delivered within 10 tiles; debug-enabled admins receive every message and send room-wide |
-| `PLAYER_ESCAPED` | Room-wide authoritative escape notification with portal coordinates and current victory progress |
-| `MATCH_ENDED` | Immutable survivor/warden result with final escape progress, remaining time, and the role-revealing final roster |
-| `ERROR` | Report room-join or protocol errors |
+| Message                    | Purpose                                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ROOM_JOINED`              | Initial or resumed match payload with `playerId`, `mapSeed`, full `gameState`, verified admin status, and the recipient's private role/orb inventory   |
+| `MATCH_STARTED`            | Release a fully loaded roster with the first shared running state and authoritative ten-minute deadline                                                |
+| `LOBBY_JOINED`             | Private lobby admission with the server player ID and current `LobbyState`                                                                             |
+| `LOBBY_UPDATED`            | Event-driven public roster, vote, or countdown replacement state                                                                                       |
+| `LOBBY_CHAT_MESSAGE`       | Transient room-wide waiting-room chat event                                                                                                            |
+| `TICK_UPDATE`              | Authoritative room snapshot broadcast every server tick                                                                                                |
+| `PLAYER_LEFT`              | Notify clients that a seat was permanently released after leave or grace expiry                                                                        |
+| `RUNESTONE_ACTIVATED`      | Broadcast that one runestone is now active                                                                                                             |
+| `ALL_RUNESTONES_ACTIVATED` | Broadcast the existing portal coordinates once all runestones are active                                                                               |
+| `CHEST_OPENED`             | Broadcast a chest's shared opened state and opener                                                                                                     |
+| `WISDOM_ORB_GRANTED`       | Privately provide a rewarded survivor's post-reward orb count; wardens receive no reward message                                                       |
+| `WISDOM_ORB_USED`          | Private accepted-action response containing the result and remaining orb count; warden sword clears leave the count at zero                            |
+| `PLAYER_ROLE_CHANGED`      | Private debug response that replaces the recipient's role and orb inventory                                                                            |
+| `DEBUG_PLAYER_ROLE`        | Private debug response containing a selected player's authoritative role                                                                               |
+| `TRAP_ACTIVATION_RESULT`   | Private result used for the activating Warden's empty-room feedback                                                                                    |
+| `PLAYER_TRAPPED`           | Private cage ID notification that opens the captured Survivor's instructional typewriter dialogue                                                      |
+| `CHAT_MESSAGE`             | Transient message with the sender's public squad ID, normally delivered within 10 tiles; debug-enabled admins receive every message and send room-wide |
+| `PLAYER_ESCAPED`           | Room-wide authoritative escape notification with portal coordinates and current victory progress                                                       |
+| `MATCH_ENDED`              | Immutable survivor/warden result with final escape progress, remaining time, and the role-revealing final roster                                       |
+| `ERROR`                    | Report room-join or protocol errors                                                                                                                    |
 
 ### Shared State Contracts
 
 #### `LobbyState`
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `roomId` | `string` | Six-character public/private room code |
-| `phase` | `'waiting' \| 'countdown'` | Current pre-game room phase |
-| `players` | `LobbyPlayerInfo[]` | Occupied nicknames plus public vote and connected/reconnecting presence |
-| `minPlayers`, `maxPlayers` | `number` | Early-start minimum (`6`) and room capacity (`9`) |
-| `votesRequired` | `number` | Current two-thirds threshold |
-| `voteAvailableAt` | `number` | Server wall-clock timestamp for enabling early-start voting |
-| `countdownEndsAt` | `number \| null` | Server wall-clock countdown deadline |
-| `startReason` | `'full' \| 'vote' \| null` | Why the roster became locked |
+| Field                      | Type                       | Notes                                                                   |
+| -------------------------- | -------------------------- | ----------------------------------------------------------------------- |
+| `roomId`                   | `string`                   | Six-character public/private room code                                  |
+| `phase`                    | `'waiting' \| 'countdown'` | Current pre-game room phase                                             |
+| `players`                  | `LobbyPlayerInfo[]`        | Occupied nicknames plus public vote and connected/reconnecting presence |
+| `minPlayers`, `maxPlayers` | `number`                   | Early-start minimum (`6`) and room capacity (`9`)                       |
+| `votesRequired`            | `number`                   | Current two-thirds threshold                                            |
+| `voteAvailableAt`          | `number`                   | Server wall-clock timestamp for enabling early-start voting             |
+| `countdownEndsAt`          | `number \| null`           | Server wall-clock countdown deadline                                    |
+| `startReason`              | `'full' \| 'vote' \| null` | Why the roster became locked                                            |
 
 #### `PlayerInfo`
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `id` | `string` | Server-generated player id |
-| `displayName` | `string` | Client-provided display name |
-| `teamId` | `number` | Team assignment used for spawn grouping |
-| `spriteIndex` | `number` | Client sprite-sheet selection |
-| `x`, `y` | `number` | Bottom-center feet position in world pixels |
-| `facing` | `'up' \| 'down' \| 'left' \| 'right'` | Authoritative sprite facing |
-| `isMoving` | `boolean` | Current movement animation state |
-| `connected` | `boolean` | Seat currently has an attached WebSocket rather than being inside reconnect grace |
-| `escaped` | `boolean` | Survivor has entered the portal and is now an inactive spectator |
-| `lastProcessedInput` | `number` | Highest acknowledged local input sequence |
+| Field                | Type                                  | Notes                                                                             |
+| -------------------- | ------------------------------------- | --------------------------------------------------------------------------------- |
+| `id`                 | `string`                              | Server-generated player id                                                        |
+| `displayName`        | `string`                              | Client-provided display name                                                      |
+| `teamId`             | `number`                              | Team assignment used for spawn grouping                                           |
+| `spriteIndex`        | `number`                              | Client sprite-sheet selection                                                     |
+| `x`, `y`             | `number`                              | Bottom-center feet position in world pixels                                       |
+| `facing`             | `'up' \| 'down' \| 'left' \| 'right'` | Authoritative sprite facing                                                       |
+| `isMoving`           | `boolean`                             | Current movement animation state                                                  |
+| `connected`          | `boolean`                             | Seat currently has an attached WebSocket rather than being inside reconnect grace |
+| `escaped`            | `boolean`                             | Survivor has entered the portal and is now an inactive spectator                  |
+| `lastProcessedInput` | `number`                              | Highest acknowledged local input sequence                                         |
 
 Roles and wisdom-orb inventories are intentionally absent from `PlayerInfo` and public snapshots. `ROOM_JOINED` privately provides the recipient's `role` (`'survivor' | 'warden'`) and starting `wisdomOrbs`; later orb changes use the private `WISDOM_ORB_USED` response.
 
 #### `RunestoneInfo`
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `index` | `number` | Runestone slot `0`, `1`, or `2` |
-| `tileX`, `tileY` | `number` | Tile coordinates inside the generated map |
-| `activated` | `boolean` | Authoritative activation state |
+| Field            | Type      | Notes                                     |
+| ---------------- | --------- | ----------------------------------------- |
+| `index`          | `number`  | Runestone slot `0`, `1`, or `2`           |
+| `tileX`, `tileY` | `number`  | Tile coordinates inside the generated map |
+| `activated`      | `boolean` | Authoritative activation state            |
 
 #### `GameState`
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `tick` | `number` | Authoritative simulation tick counter |
-| `match` | `MatchState` | Running/ended status, remaining time, escape progress, threshold, winner, and the role-revealing final roster after completion |
-| `players` | `PlayerInfo[]` | All occupied players, including temporarily disconnected reserved seats |
-| `runestones` | `RunestoneInfo[]` | Three runestones with activation state |
-| `portal` | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation |
-| `bridgeStates` | `BridgeState[]` | Authoritative missing-stone mask for every generated bridge |
-| `chestStates` | `ChestState[]` | Authoritative opened/unopened state for every generated treasure chest |
-| `swordFieldStates` | `SwordFieldState[]` | Authoritative blocking, lowering, and cleared state for every generated sword field |
-| `gateStates` | `GateState[]` | Authoritative open/closed state for every generated gate |
-| `pressurePlateStates` | `PressurePlateState[]` | Authoritative physical-press and warden-latch state for every gate button |
-| `spikeGateStates` | `SpikeGateState[]` | Authoritative open/closed state for every active colored barrier in each spike-gate obstacle |
-| `spikePlateStates` | `SpikePlateState[]` | Authoritative physical-press and warden-latch state for each spike gate's two nearest plates |
-| `cageStates` | `CageState[]` | Authoritative spawned, opened, and permanently vacated cage state |
+| Field                 | Type                               | Notes                                                                                                                          |
+| --------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `tick`                | `number`                           | Authoritative simulation tick counter                                                                                          |
+| `match`               | `MatchState`                       | Running/ended status, remaining time, escape progress, threshold, winner, and the role-revealing final roster after completion |
+| `players`             | `PlayerInfo[]`                     | All occupied players, including temporarily disconnected reserved seats                                                        |
+| `runestones`          | `RunestoneInfo[]`                  | Three runestones with activation state                                                                                         |
+| `portal`              | `{ x: number; y: number } \| null` | Portal world position in pixels, normally selected during room creation                                                        |
+| `bridgeStates`        | `BridgeState[]`                    | Authoritative missing-stone mask for every generated bridge                                                                    |
+| `chestStates`         | `ChestState[]`                     | Authoritative opened/unopened state for every generated treasure chest                                                         |
+| `swordFieldStates`    | `SwordFieldState[]`                | Authoritative blocking, lowering, and cleared state for every generated sword field                                            |
+| `gateStates`          | `GateState[]`                      | Authoritative open/closed state for every generated gate                                                                       |
+| `pressurePlateStates` | `PressurePlateState[]`             | Authoritative physical-press and warden-latch state for every gate button                                                      |
+| `spikeGateStates`     | `SpikeGateState[]`                 | Authoritative open/closed state for every active colored barrier in each spike-gate obstacle                                   |
+| `spikePlateStates`    | `SpikePlateState[]`                | Authoritative physical-press and warden-latch state for each spike gate's two nearest plates                                   |
+| `cageStates`          | `CageState[]`                      | Authoritative spawned, opened, and permanently vacated cage state                                                              |
 
 ## Shared Gameplay Systems
 
@@ -346,27 +346,27 @@ Map generation lives in `packages/shared/src/maps/level1.ts`.
 
 ### Tile IDs
 
-| Id | Constant | Meaning |
-| --- | --- | --- |
-| `0` | `TILE_FLOOR` | Main walkable floor |
-| `1` | `TILE_FLOOR_SHADOW` | Walkable floor shadow / dirt variation |
-| `2` | `TILE_WALL_FACE` | South-facing wall face |
-| `3` | `TILE_WALL_TOP` | Bright grassy wall cap |
-| `4` | `TILE_WALL_INTERIOR` | Solid cliff interior |
-| `5` | `TILE_WALL_SIDE_LEFT` | Left cliff side |
-| `6` | `TILE_WALL_SIDE_RIGHT` | Right cliff side |
-| `7` | `TILE_WALL_BOTTOM` | Bottom cliff edge |
-| `8` | `TILE_WALL_CORNER_TL` | Top-left outer corner |
-| `9` | `TILE_WALL_CORNER_TR` | Top-right outer corner |
-| `10` | `TILE_WALL_CORNER_BL` | Bottom-left outer corner |
-| `11` | `TILE_WALL_CORNER_BR` | Bottom-right outer corner |
-| `12` | `TILE_WALL_TOP_EDGE` | Top exposed rock edge |
-| `13` | `TILE_TREE` | Reserved decorative tree marker (not currently generated) |
-| `14` | `TILE_RUNESTONE_1` | Runestone type 1 |
-| `15` | `TILE_RUNESTONE_2` | Runestone type 2 |
-| `16` | `TILE_RUNESTONE_3` | Runestone type 3 |
-| `17` | `TILE_GATE_HORIZONTAL` | Closed gate row across a cell midpoint |
-| `18` | `TILE_GATE_VERTICAL` | Closed gate column across a cell midpoint |
+| Id   | Constant               | Meaning                                                   |
+| ---- | ---------------------- | --------------------------------------------------------- |
+| `0`  | `TILE_FLOOR`           | Main walkable floor                                       |
+| `1`  | `TILE_FLOOR_SHADOW`    | Walkable floor shadow / dirt variation                    |
+| `2`  | `TILE_WALL_FACE`       | South-facing wall face                                    |
+| `3`  | `TILE_WALL_TOP`        | Bright grassy wall cap                                    |
+| `4`  | `TILE_WALL_INTERIOR`   | Solid cliff interior                                      |
+| `5`  | `TILE_WALL_SIDE_LEFT`  | Left cliff side                                           |
+| `6`  | `TILE_WALL_SIDE_RIGHT` | Right cliff side                                          |
+| `7`  | `TILE_WALL_BOTTOM`     | Bottom cliff edge                                         |
+| `8`  | `TILE_WALL_CORNER_TL`  | Top-left outer corner                                     |
+| `9`  | `TILE_WALL_CORNER_TR`  | Top-right outer corner                                    |
+| `10` | `TILE_WALL_CORNER_BL`  | Bottom-left outer corner                                  |
+| `11` | `TILE_WALL_CORNER_BR`  | Bottom-right outer corner                                 |
+| `12` | `TILE_WALL_TOP_EDGE`   | Top exposed rock edge                                     |
+| `13` | `TILE_TREE`            | Reserved decorative tree marker (not currently generated) |
+| `14` | `TILE_RUNESTONE_1`     | Runestone type 1                                          |
+| `15` | `TILE_RUNESTONE_2`     | Runestone type 2                                          |
+| `16` | `TILE_RUNESTONE_3`     | Runestone type 3                                          |
+| `17` | `TILE_GATE_HORIZONTAL` | Closed gate row across a cell midpoint                    |
+| `18` | `TILE_GATE_VERTICAL`   | Closed gate column across a cell midpoint                 |
 
 ## Client Rendering and HUD
 
@@ -380,7 +380,7 @@ The client first runs a lightweight DOM app shell with these states:
    existing guest profile;
 4. load or create the signed-in user's `public.profiles` row and require a new
    account to choose its display name once;
-5. show Main Menu, Join by Code, or Profile;
+5. show Main Menu, Join by Code, Tutorial, or Profile;
 6. after Main Menu renders, lazily import PixiJS and prime the runtime texture
    cache during idle menu time; all small authored texture requests begin as one
    batch so a cold cache does not create a category-by-category waterfall;
@@ -392,6 +392,30 @@ The client first runs a lightweight DOM app shell with these states:
    build the maze after `ROOM_JOINED`, send `GAME_READY`, and keep the loading
    screen visible until the server releases the fully ready roster with
    `MATCH_STARTED`.
+
+The Main Menu tutorial is the one intentional non-network round. It creates a
+single-survivor browser-local session and reuses the production maze renderer,
+collision, character, central hub, runestone, wisdom-orb, and portal systems.
+Its compact authored route uses normal maze cells: a northbound spawn corridor,
+a decorated north-closed T-junction, the central hub through only its western
+entrance, and an extended western branch that turns north, crosses a production
+bridge obstacle, and ends at a portal dead end. A southbound side branch from
+the first western cell contains a scripted Male2 Warden, two already-caged
+survivors positioned near the cell's southern edge who warn an entering player,
+and a real trap-cell capture after the
+player crosses two tiles into the dead end. After the capture exchange, the
+Warden returns north and disappears upon entering the preceding cell. Two
+seconds later, a third scripted survivor enters from the north, approaches and
+opens the two NPC cages in order, then opens the player's cage last. Each freed
+NPC uses cage-aware local pathing to walk north around any blocking cage and
+disappears in the preceding cell. Two runestones start
+active. The tutorial has no waiting lobby, WebSocket, match
+timer, player chat, or remote players, and returns to the Main Menu after the
+survivor escapes. Activating the final rune snaps the tutorial camera to the
+portal for its activation, then snaps back to the player for the escape
+instruction. Verified admins keep
+the in-game admin panel in this local session; its state-changing actions are
+handled by the browser-local authority instead of a room server.
 
 Guest profiles are created only after the naming form is submitted, use
 `sessionStorage`, never call Supabase, and are discarded

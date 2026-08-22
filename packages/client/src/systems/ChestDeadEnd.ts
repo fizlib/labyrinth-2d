@@ -1,8 +1,5 @@
 import { Container, Graphics, Sprite, Texture } from 'pixi.js';
-import {
-  getChestInteractionPoint,
-  type ChestDeadEndPlacement,
-} from '@labyrinth/shared';
+import { getChestInteractionPoint, type ChestDeadEndPlacement } from '@labyrinth/shared';
 import {
   getChestDeadEndChestSpritePair,
   getChestDeadEndAssetPath,
@@ -63,9 +60,7 @@ export class ChestDeadEndVisual {
     this.container.sortableChildren = true;
     this.container.x = anchorX;
     this.container.y = anchorY;
-    this.container.zIndex = Math.round(
-      anchorY + (closedSpec.y + closedSpec.h) * scale,
-    );
+    this.container.zIndex = Math.round(anchorY + (closedSpec.y + closedSpec.h) * scale);
 
     this.closedSprite = new Sprite(closedTexture);
     this.closedSprite.x = closedSpec.x * scale;
@@ -187,7 +182,10 @@ export function addChestDeadEnds(
       backdrop.y = anchorY;
       backdrop.zIndex = Math.round(anchorY + 16 * scale);
 
-      for (const spec of getChestDeadEndScenerySprites(placement.variant)) {
+      for (const spec of getChestDeadEndScenerySprites(
+        placement.variant,
+        placement.preserveTurnOpenings,
+      )) {
         const texture = textures.get(getChestDeadEndAssetPath(spec.asset));
         if (!texture) continue;
 

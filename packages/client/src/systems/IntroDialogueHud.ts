@@ -11,9 +11,10 @@ const BUTTON_SLOT_WIDTH = 28;
 // Adjusted scale to drastically reduce texture memory / bandwidth on mobile devices
 const TEXT_SCALE = 0.5;
 const TYPEWRITER_CHARS_PER_SECOND = 72;
-const ROLE_TAG_STYLES = {
+const DIALOGUE_TAG_STYLES = {
   survivor: { fill: '#70d486' },
   warden: { fill: '#ef715c' },
+  key: { fill: '#f4cc58' },
 } as const;
 
 function getVisibleTextLength(markup: string): number {
@@ -95,6 +96,7 @@ export class IntroDialogueHud {
     internalHeight: number,
     pages: readonly string[],
     private readonly onLayoutChange?: IntroDialogueLayoutHandler,
+    private readonly onDismiss?: () => void,
   ) {
     this.pages = pages;
     this.internalWidth = internalWidth;
@@ -107,14 +109,15 @@ export class IntroDialogueHud {
       text: '',
       style: new TextStyle({
         fontFamily: 'PixelOperator8',
-        // Render at 16px (2x native) to prevent mobile GPU buffer exhaustion 
+        // Render at 16px (2x native) to prevent mobile GPU buffer exhaustion
         // while remaining perfectly crisp when scaled down by 0.5
         fontSize: 16,
         fill: '#f7edd2',
         wordWrap: true,
-        wordWrapWidth: (PANEL_WIDTH - PANEL_PADDING_X * 2 - BUTTON_SLOT_WIDTH) / TEXT_SCALE,
+        wordWrapWidth:
+          (PANEL_WIDTH - PANEL_PADDING_X * 2 - BUTTON_SLOT_WIDTH) / TEXT_SCALE,
         lineHeight: 18,
-        tagStyles: ROLE_TAG_STYLES,
+        tagStyles: DIALOGUE_TAG_STYLES,
         dropShadow: {
           alpha: 1,
           blur: 0,
@@ -176,6 +179,7 @@ export class IntroDialogueHud {
     this.advanceButton.eventMode = 'none';
     this.advanceButton.cursor = 'default';
     this.onLayoutChange?.(null);
+    this.onDismiss?.();
   }
 
   destroy(): void {
@@ -258,7 +262,10 @@ export class IntroDialogueHud {
 
   private updateDisplayedText(): void {
     const currentPage = this.getCurrentPage();
-    this.messageText.text = getVisibleMarkupPrefix(currentPage, Math.floor(this.revealedChars));
+    this.messageText.text = getVisibleMarkupPrefix(
+      currentPage,
+      Math.floor(this.revealedChars),
+    );
   }
 
   private revealCurrentPage(): void {

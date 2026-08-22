@@ -837,6 +837,7 @@ class AppController {
             <button id="quick-play" class="pixel-button pixel-button--primary" type="button">Quick Play</button>
             <button id="create-game" class="pixel-button" type="button">Create Private Game</button>
             <button id="join-game" class="pixel-button" type="button">Join with Code</button>
+            <button id="tutorial" class="pixel-button" type="button">Tutorial</button>
             ${this.profile.is_admin ? '<a id="open-style-editor" class="pixel-button" href="/style-editor.html" target="_blank" rel="noopener">Style Editor</a>' : ''}
             <button id="sign-out" class="menu-sign-out" type="button">${isGuest ? 'Leave Guest Session' : 'Sign Out'}</button>
             ${discordInviteMarkup()}
@@ -879,6 +880,11 @@ class AppController {
       ?.addEventListener('click', () => {
         this.view = 'join';
         this.renderJoinRoom();
+      });
+    document
+      .querySelector<HTMLButtonElement>('#tutorial')
+      ?.addEventListener('click', () => {
+        void this.launchTutorial();
       });
     document
       .querySelector<HTMLButtonElement>('#open-profile-avatar')
@@ -1157,6 +1163,34 @@ class AppController {
         onMatchStarted: communityRoundOccurrenceKey
           ? () => saveStartedCommunityRound(profileId, communityRoundOccurrenceKey)
           : undefined,
+      });
+      this.view = 'game';
+    } catch {
+      // The game module owns the loading-screen error presentation.
+    }
+  }
+
+  private async launchTutorial(): Promise<void> {
+    if (this.gameLaunchStarted || !this.profile || !this.identityMode) return;
+    this.stopCommunityRoundTimer();
+    this.gameLaunchStarted = true;
+    this.view = 'launching-game';
+    root.innerHTML = gameMarkup();
+
+    let gameModule: typeof import('./game');
+    try {
+      gameModule = await loadGameModule();
+      clearDeploymentReloadAttempt();
+    } catch (error) {
+      console.error('[App] Failed to load the game module:', error);
+      if (!reloadLatestDeployment()) showGameModuleLoadError();
+      return;
+    }
+
+    try {
+      await gameModule.startTutorial({
+        displayName: this.profile.display_name,
+        isAdmin: this.profile.is_admin,
       });
       this.view = 'game';
     } catch {

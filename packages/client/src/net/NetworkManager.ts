@@ -110,6 +110,7 @@ export interface NetworkCallbacks {
     displayName: string,
     teamId: number,
     text: string,
+    durationMs?: number,
   ) => void;
   onPlayerEscaped: (
     playerId: string,
