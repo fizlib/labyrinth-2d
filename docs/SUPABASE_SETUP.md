@@ -122,8 +122,8 @@ Copy-Item packages/server/.env.example packages/server/.env.local
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
 SUPABASE_SECRET_KEY=sb_secret_YOUR_SERVER_KEY
-# Required only when the browser calls a different admin-API origin:
-ADMIN_ALLOWED_ORIGINS=https://game.example.com,http://localhost:5173
+# Optional additional browser origins for staging or custom frontends:
+ADMIN_ALLOWED_ORIGINS=https://staging.example.com,http://localhost:5173
 ```
 
 `SUPABASE_ANON_KEY` is also accepted for projects still using a legacy anon
@@ -137,10 +137,12 @@ eligible for rating or receive persistent counters.
 
 The client normally calls `/admin-api` through the same origin as `/ws`; Vite
 proxies both routes in development. When `VITE_SERVER_URL` points directly at a
-different origin, add the exact browser origin to the comma-separated
-`ADMIN_ALLOWED_ORIGINS` server variable. The Admin API verifies the bearer token
-and re-reads `is_admin` and `suspended_at` for every request. It uses the secret
-key only on the server to list Auth users and synchronize Supabase Auth bans.
+different origin, the canonical `https://falsearrow.com` and
+`https://www.falsearrow.com` browser origins are allowed automatically. Add any
+other exact browser origin to the comma-separated `ADMIN_ALLOWED_ORIGINS` server
+variable. The Admin API verifies the bearer token and re-reads `is_admin` and
+`suspended_at` for every request. It uses the secret key only on the server to
+list Auth users and synchronize Supabase Auth bans.
 The Admin menu is directly addressable at `/admin`; the client Vercel config
 rewrites that path to the SPA entry point while client-side history keeps the
 URL synchronized with the Admin menu and its Back button.

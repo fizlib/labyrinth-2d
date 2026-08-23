@@ -15,9 +15,15 @@ import {
 } from './adminService.js';
 
 const MAX_ADMIN_BODY_BYTES = 16 * 1024;
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://falsearrow.com',
+  'https://www.falsearrow.com',
+] as const;
 const allowedOrigins = new Set(
-  (process.env.ADMIN_ALLOWED_ORIGINS ?? '')
-    .split(',')
+  [
+    ...DEFAULT_ALLOWED_ORIGINS,
+    ...(process.env.ADMIN_ALLOWED_ORIGINS ?? '').split(','),
+  ]
     .map((origin) => origin.trim().replace(/\/$/, ''))
     .filter(Boolean),
 );
@@ -33,7 +39,7 @@ interface RequestContext {
   corsOrigin: string | null;
 }
 
-function isAllowedOrigin(origin: string, host: string): boolean {
+export function isAdminApiOriginAllowed(origin: string, host: string): boolean {
   if (!origin) return true;
   const normalized = origin.replace(/\/$/, '');
   return (
@@ -275,7 +281,7 @@ export function registerAdminApi(
     const corsOrigin = origin || null;
     const context: RequestContext = { aborted: false, corsOrigin };
 
-    if (!isAllowedOrigin(origin, host)) {
+    if (!isAdminApiOriginAllowed(origin, host)) {
       sendJson(
         res,
         context,
