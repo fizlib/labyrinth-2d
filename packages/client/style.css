@@ -5023,8 +5023,7 @@ body.recording-clean-ui .recording-studio__panel {
   padding: clamp(18px, 3vw, 34px);
   border: 2px solid rgba(187, 175, 128, 0.75);
   border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(26, 48, 47, 0.98), rgba(16, 33, 34, 0.98));
+  background: linear-gradient(180deg, rgba(26, 48, 47, 0.98), rgba(16, 33, 34, 0.98));
   box-shadow:
     0 18px 46px rgba(5, 17, 18, 0.48),
     inset 0 0 0 2px rgba(255, 255, 255, 0.04);
@@ -5174,7 +5173,8 @@ body.recording-clean-ui .recording-studio__panel {
 }
 
 .admin-filters label,
-.admin-edit-form label {
+.admin-edit-form label,
+.admin-schedule-form label {
   display: grid;
   gap: 5px;
   color: #bbc8bd;
@@ -5184,7 +5184,9 @@ body.recording-clean-ui .recording-studio__panel {
 
 .admin-filters input,
 .admin-filters select,
-.admin-edit-form input {
+.admin-edit-form input,
+.admin-schedule-form input,
+.admin-schedule-form select {
   min-width: 0;
   min-height: 39px;
   padding: 7px 10px;
@@ -5197,7 +5199,9 @@ body.recording-clean-ui .recording-studio__panel {
 
 .admin-filters input:focus,
 .admin-filters select:focus,
-.admin-edit-form input:focus {
+.admin-edit-form input:focus,
+.admin-schedule-form input:focus,
+.admin-schedule-form select:focus {
   border-color: #edcf6a;
   box-shadow: 0 0 0 2px rgba(237, 207, 106, 0.18);
 }
@@ -5297,11 +5301,21 @@ body.recording-clean-ui .recording-studio__panel {
   text-transform: capitalize;
 }
 
-.admin-badge--neutral { color: #adb8b0; }
-.admin-badge--success { color: #7ed69d; }
-.admin-badge--danger { color: #ef8e82; }
-.admin-badge--gold { color: #f1cd61; }
-.admin-badge--info { color: #82cadd; }
+.admin-badge--neutral {
+  color: #adb8b0;
+}
+.admin-badge--success {
+  color: #7ed69d;
+}
+.admin-badge--danger {
+  color: #ef8e82;
+}
+.admin-badge--gold {
+  color: #f1cd61;
+}
+.admin-badge--info {
+  color: #82cadd;
+}
 
 .admin-pagination {
   display: flex;
@@ -5396,6 +5410,105 @@ body.recording-clean-ui .recording-studio__panel {
   background: #643633;
 }
 
+.admin-schedule-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(3, 13, 14, 0.76);
+  backdrop-filter: blur(4px);
+}
+
+.admin-schedule-panel {
+  width: min(620px, 100%);
+  max-height: min(720px, calc(100vh - 36px));
+  padding: clamp(18px, 4vw, 28px);
+  overflow-y: auto;
+  border: 2px solid rgba(228, 201, 102, 0.72);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #1c3937, #102425);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.58);
+}
+
+.admin-schedule-panel > header,
+.admin-schedule-actions,
+.admin-schedule-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.admin-schedule-panel h2 {
+  margin: 4px 0 0;
+  color: #fff4bf;
+  font-family: 'Pixel Operator', monospace;
+  font-size: clamp(1.55rem, 5vw, 2.15rem);
+  letter-spacing: 0.035em;
+}
+
+.admin-schedule-panel > header > button {
+  min-width: 40px;
+  padding: 0;
+  font-size: 1.5rem;
+}
+
+.admin-schedule-intro,
+.admin-schedule-zone {
+  color: #afbeb3;
+  font-size: 0.8rem;
+}
+
+.admin-schedule-intro {
+  margin: 12px 0 22px;
+}
+
+.admin-schedule-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.admin-schedule-zone {
+  margin: 12px 0;
+}
+
+.admin-schedule-zone strong {
+  color: #e5cf7e;
+}
+
+.admin-schedule-preview {
+  align-items: flex-start;
+  margin-top: 18px;
+  padding: 13px 14px;
+  border: 1px solid rgba(159, 180, 161, 0.25);
+  border-radius: 8px;
+  background: rgba(7, 24, 25, 0.48);
+}
+
+.admin-schedule-preview span {
+  color: #9fb0a5;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.admin-schedule-preview strong {
+  color: #f4df8b;
+  font-size: 0.84rem;
+  text-align: right;
+}
+
+.admin-schedule-actions {
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 17px;
+  border-top: 1px solid rgba(173, 184, 157, 0.2);
+}
+
 .admin-room-list,
 .admin-round-history {
   display: grid;
@@ -5485,7 +5598,8 @@ body.recording-clean-ui .recording-studio__panel {
 
   .admin-filters,
   .admin-edit-form,
-  .admin-detail-grid {
+  .admin-detail-grid,
+  .admin-schedule-fields {
     grid-template-columns: 1fr;
   }
 
@@ -5554,5 +5668,31 @@ body.recording-clean-ui .recording-studio__panel {
   .admin-danger-actions,
   .admin-pagination {
     flex-direction: column;
+  }
+
+  .admin-schedule-backdrop {
+    align-items: end;
+    padding: 8px;
+  }
+
+  .admin-schedule-panel {
+    max-height: calc(100vh - 16px);
+    border-radius: 12px;
+  }
+
+  .admin-schedule-preview,
+  .admin-schedule-actions,
+  .admin-schedule-actions button {
+    width: 100%;
+  }
+
+  .admin-schedule-preview,
+  .admin-schedule-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-schedule-preview strong {
+    text-align: left;
   }
 }

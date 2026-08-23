@@ -8,8 +8,15 @@ import type {
   AdminPage,
   AdminRoomSnapshot,
   AdminUserSummary,
+  CommunityRoundFrequency,
+  CommunityRoundSchedule,
 } from '@labyrinth/shared';
-import { ADMIN_DEFAULT_PAGE_SIZE, ADMIN_MAX_PAGE_SIZE } from '@labyrinth/shared';
+import {
+  ADMIN_DEFAULT_PAGE_SIZE,
+  ADMIN_MAX_PAGE_SIZE,
+  COMMUNITY_ROUND_TIME_ZONE,
+  DEFAULT_COMMUNITY_ROUND_SCHEDULE,
+} from '@labyrinth/shared';
 
 import {
   getSupabaseAdminClient,
@@ -90,6 +97,13 @@ interface AuditRow {
   created_at: string;
 }
 
+interface CommunityRoundScheduleRow {
+  starts_at: string;
+  frequency: CommunityRoundFrequency;
+  time_zone: string;
+  updated_at: string;
+}
+
 type DirectoryUser = Omit<AdminUserSummary, 'currentRoomId'>;
 
 let directoryCache: { expiresAt: number; users: DirectoryUser[] } | null = null;
@@ -143,6 +157,61 @@ export async function authorizeAdmin(
     );
   }
   return identity;
+}
+
+function mapCommunityRoundSchedule(
+  row: CommunityRoundScheduleRow,
+): CommunityRoundSchedule {
+  return {
+    startsAt: row.starts_at,
+    frequency: row.frequency,
+    timeZone: row.time_zone,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function getCommunityRoundSchedule(): Promise<CommunityRoundSchedule> {
+  if (!isSupabaseAdminConfigured) return DEFAULT_COMMUNITY_ROUND_SCHEDULE;
+  const { data, error } = await getSupabaseAdminClient()
+    .from('community_round_schedule')
+    .select('starts_at, frequency, time_zone, updated_at')
+    .eq('id', true)
+    .single();
+  if (error) throw new AdminServiceError(502, 'SUPABASE_ERROR', error.message);
+  return mapCommunityRoundSchedule(data as CommunityRoundScheduleRow);
+}
+
+export async function updateCommunityRoundSchedule(
+  actorId: string,
+  startsAt: string,
+  frequency: string,
+): Promise<CommunityRoundSchedule> {
+  const parsedStartsAt = new Date(startsAt);
+  if (Number.isNaN(parsedStartsAt.getTime())) {
+    throw new AdminServiceError(
+      400,
+      'INVALID_SCHEDULE',
+      'A valid schedule date and time are required.',
+    );
+  }
+  if (!['daily', 'weekly', 'monthly'].includes(frequency)) {
+    throw new AdminServiceError(
+      400,
+      'INVALID_SCHEDULE',
+      'Schedule frequency must be daily, weekly, or monthly.',
+    );
+  }
+  const { error } = await getSupabaseAdminClient().rpc(
+    'admin_update_community_round_schedule',
+    {
+      p_actor_id: actorId,
+      p_starts_at: parsedStartsAt.toISOString(),
+      p_frequency: frequency,
+      p_time_zone: COMMUNITY_ROUND_TIME_ZONE,
+    },
+  );
+  if (error) throw mapRpcError(error);
+  return getCommunityRoundSchedule();
 }
 
 function pageNumber(value: string | null): number {

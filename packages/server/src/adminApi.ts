@@ -4,6 +4,7 @@ import type { AdminApiError, AdminRoomSnapshot } from '@labyrinth/shared';
 import {
   AdminServiceError,
   authorizeAdmin,
+  getCommunityRoundSchedule,
   getAdminOverview,
   getCompletedRound,
   listAdminActivity,
@@ -12,6 +13,7 @@ import {
   setAdminUserRole,
   setAdminUserSuspension,
   updateAdminUserProfile,
+  updateCommunityRoundSchedule,
 } from './adminService.js';
 
 const MAX_ADMIN_BODY_BYTES = 16 * 1024;
@@ -20,10 +22,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'https://www.falsearrow.com',
 ] as const;
 const allowedOrigins = new Set(
-  [
-    ...DEFAULT_ALLOWED_ORIGINS,
-    ...(process.env.ADMIN_ALLOWED_ORIGINS ?? '').split(','),
-  ]
+  [...DEFAULT_ALLOWED_ORIGINS, ...(process.env.ADMIN_ALLOWED_ORIGINS ?? '').split(',')]
     .map((origin) => origin.trim().replace(/\/$/, ''))
     .filter(Boolean),
 );
@@ -177,8 +176,32 @@ async function handleAdminRequest(
   dependencies: AdminApiDependencies,
 ): Promise<void> {
   try {
+    if (method === 'get' && path === '/admin-api/community-round-schedule') {
+      sendJson(res, context, 200, await getCommunityRoundSchedule());
+      return;
+    }
+
     const identity = await authorizeAdmin(accessToken);
     const rooms = dependencies.getRooms();
+
+    if (
+      method === 'patch' &&
+      path === '/admin-api/community-round-schedule' &&
+      bodyPromise
+    ) {
+      const body = await bodyPromise;
+      sendJson(
+        res,
+        context,
+        200,
+        await updateCommunityRoundSchedule(
+          identity.userId,
+          requiredString(body, 'startsAt'),
+          requiredString(body, 'frequency'),
+        ),
+      );
+      return;
+    }
 
     if (method === 'get' && path === '/admin-api/overview') {
       sendJson(res, context, 200, await getAdminOverview(rooms));

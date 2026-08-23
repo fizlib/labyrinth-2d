@@ -1,5 +1,6 @@
 import {
   CHAT_MAX_LENGTH,
+  type CommunityRoundSchedule,
   type LobbyChatMessageKind,
   type LobbyState,
 } from '@labyrinth/shared';
@@ -9,6 +10,10 @@ import {
   getCommunityRoundGoogleCalendarUrl,
   getNextCommunityRoundState,
 } from './CommunityRoundSchedule';
+import {
+  getCachedCommunityRoundSchedule,
+  loadCommunityRoundSchedule,
+} from './CommunityRoundScheduleApi';
 
 const COMMUNITY_ROUND_DISCORD_REMINDER_URL =
   'https://discord.gg/kJYab8PbD?event=1540020495485894686';
@@ -58,6 +63,7 @@ export class LobbyOverlay {
   private state: LobbyState;
   private readonly messages: LobbyChatEntry[] = [];
   private readonly clockHandle: number;
+  private communityRoundSchedule: CommunityRoundSchedule;
 
   constructor(options: LobbyOverlayOptions) {
     this.localPlayerId = options.localPlayerId;
@@ -66,6 +72,7 @@ export class LobbyOverlay {
     this.onKick = options.onKick;
     this.onSendChat = options.onSendChat;
     this.state = options.initialState;
+    this.communityRoundSchedule = getCachedCommunityRoundSchedule();
     this.root.className = 'lobby-overlay';
     this.root.setAttribute('aria-labelledby', 'lobby-title');
     this.root.innerHTML = `
@@ -192,8 +199,9 @@ export class LobbyOverlay {
     this.trainingCompleteCountdown = this.root.querySelector<HTMLElement>(
       '.training-complete__countdown',
     );
-    this.trainingCompleteCalendarLink =
-      this.root.querySelector<HTMLAnchorElement>('.training-complete__calendar-link');
+    this.trainingCompleteCalendarLink = this.root.querySelector<HTMLAnchorElement>(
+      '.training-complete__calendar-link',
+    );
 
     const codeButton = this.root.querySelector<HTMLButtonElement>('.lobby-code');
     const code = codeButton?.querySelector('strong');
@@ -284,6 +292,16 @@ export class LobbyOverlay {
     options.parent.appendChild(this.root);
     this.renderState();
     this.clockHandle = window.setInterval(() => this.renderStatus(), 250);
+    if (options.trainingComplete) {
+      void loadCommunityRoundSchedule()
+        .then((schedule) => {
+          this.communityRoundSchedule = schedule;
+          this.renderTrainingCompleteSchedule();
+        })
+        .catch(() => {
+          // The bundled schedule remains available when the API is offline.
+        });
+    }
   }
 
   update(state: LobbyState): void {
@@ -427,13 +445,15 @@ export class LobbyOverlay {
 
   private renderTrainingCompleteSchedule(): void {
     if (!this.trainingCompleteCountdown) return;
-    const nextRound = getNextCommunityRoundState(new Date());
+    const nextRound = getNextCommunityRoundState(new Date(), this.communityRoundSchedule);
     this.trainingCompleteCountdown.textContent = formatCommunityRoundWait(
       nextRound.remainingMs,
     );
     if (this.trainingCompleteCalendarLink) {
-      this.trainingCompleteCalendarLink.href =
-        getCommunityRoundGoogleCalendarUrl(nextRound.occurrence);
+      this.trainingCompleteCalendarLink.href = getCommunityRoundGoogleCalendarUrl(
+        nextRound.occurrence,
+        this.communityRoundSchedule,
+      );
     }
   }
 

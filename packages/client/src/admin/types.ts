@@ -6,4 +6,5 @@ export type {
   AdminPage,
   AdminRoomSnapshot,
   AdminUserSummary,
+  CommunityRoundSchedule,
 } from '@labyrinth/shared';

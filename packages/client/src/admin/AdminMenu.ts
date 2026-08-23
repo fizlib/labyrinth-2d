@@ -5,8 +5,15 @@ import type {
   AdminPage,
   AdminRoomSnapshot,
   AdminUserSummary,
+  CommunityRoundSchedule,
 } from './types';
 import { AdminApiClient, AdminApiRequestError } from './AdminApiClient';
+import {
+  communityRoundStartAtFromZonedInput,
+  getCommunityRoundScheduleInputValues,
+  getNextCommunityRoundState,
+} from '../systems/CommunityRoundSchedule';
+import { cacheCommunityRoundSchedule } from '../systems/CommunityRoundScheduleApi';
 
 type AdminTab = 'users' | 'ongoing' | 'past';
 
@@ -49,6 +56,14 @@ function formatDuration(milliseconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
+function formatScheduledRoundDate(date: Date, schedule: CommunityRoundSchedule): string {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: schedule.timeZone,
+    dateStyle: 'full',
+    timeStyle: 'short',
+  }).format(date);
+}
+
 function compactId(value: string): string {
   return value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
 }
@@ -86,6 +101,9 @@ export class AdminMenu {
   private rounds: AdminPage<AdminCompletedRoundSummary> | null = null;
   private selectedUser: AdminUserSummary | null = null;
   private selectedRound: AdminCompletedRoundDetail | null = null;
+  private communityRoundSchedule: CommunityRoundSchedule | null = null;
+  private schedulePanelOpen = false;
+  private scheduleLoading = false;
   private usersFilter: PageFilters & { admin: string; suspension: string } = {
     page: 1,
     q: '',
@@ -612,12 +630,55 @@ export class AdminMenu {
     return this.pastMarkup();
   }
 
+  private schedulePanelMarkup(): string {
+    const schedule = this.communityRoundSchedule;
+    const content = this.scheduleLoading
+      ? '<p class="admin-empty">Loading scheduled rounds…</p>'
+      : !schedule
+        ? '<div class="admin-empty"><p>The scheduled rounds settings could not be loaded.</p><button id="retry-admin-schedule" type="button">Try again</button></div>'
+        : (() => {
+            const nextRound = getNextCommunityRoundState(new Date(), schedule);
+            const values = getCommunityRoundScheduleInputValues({
+              ...schedule,
+              startsAt: nextRound.occurrence.toISOString(),
+            });
+            const nextRoundLabel = formatScheduledRoundDate(
+              nextRound.occurrence,
+              schedule,
+            );
+            return `<form id="admin-schedule-form" class="admin-schedule-form">
+              <div class="admin-schedule-fields">
+                <label>Date<input name="date" type="date" required value="${escapeHtml(values.date)}" /></label>
+                <label>Time<input name="time" type="time" step="60" required value="${escapeHtml(values.time)}" /></label>
+                <label>Repeats<select name="frequency" required>
+                  <option value="daily" ${schedule.frequency === 'daily' ? 'selected' : ''}>Every day</option>
+                  <option value="weekly" ${schedule.frequency === 'weekly' ? 'selected' : ''}>Every week</option>
+                  <option value="monthly" ${schedule.frequency === 'monthly' ? 'selected' : ''}>Every month</option>
+                </select></label>
+              </div>
+              <p class="admin-schedule-zone">Times use <strong>${escapeHtml(schedule.timeZone)}</strong>. The date anchors weekly and monthly recurrence.</p>
+              <div class="admin-schedule-preview"><span>Next round</span><strong>${escapeHtml(nextRoundLabel)}</strong></div>
+              <div class="admin-schedule-actions">
+                <button id="cancel-admin-schedule" type="button">Cancel</button>
+                <button type="submit" ${this.busy ? 'disabled' : ''}>Save schedule</button>
+              </div>
+            </form>`;
+          })();
+    return `<div class="admin-schedule-backdrop">
+      <section class="admin-schedule-panel" role="dialog" aria-modal="true" aria-labelledby="admin-schedule-title">
+        <header><div><span class="admin-eyebrow">Community calendar</span><h2 id="admin-schedule-title">Scheduled rounds</h2></div><button id="close-admin-schedule" type="button" aria-label="Close scheduled rounds">×</button></header>
+        <p class="admin-schedule-intro">Set when the Community Round opens for players and how often it returns.</p>
+        ${content}
+      </section>
+    </div>`;
+  }
+
   private render(): void {
     if (this.destroyed) return;
     this.host.innerHTML = `<section class="admin-console" aria-labelledby="admin-menu-title">
       <header class="admin-header">
         <div><span class="admin-eyebrow">False Arrow operations</span><h1 id="admin-menu-title">Admin menu</h1><p id="admin-last-updated">${this.overview ? `Updated ${escapeHtml(formatDate(this.overview.generatedAt))}` : 'Connecting to the game server…'}</p></div>
-        <div class="admin-header-actions"><a class="admin-style-editor" href="/style-editor.html" target="_blank" rel="noopener">Style Editor</a><button id="admin-refresh" type="button" ${this.loading || this.busy ? 'disabled' : ''}>Refresh</button><button id="admin-back" type="button">Back</button></div>
+        <div class="admin-header-actions"><button id="open-admin-schedule" type="button" ${this.busy ? 'disabled' : ''}>Scheduled rounds</button><a class="admin-style-editor" href="/style-editor.html" target="_blank" rel="noopener">Style Editor</a><button id="admin-refresh" type="button" ${this.loading || this.busy ? 'disabled' : ''}>Refresh</button><button id="admin-back" type="button">Back</button></div>
       </header>
       ${this.summaryMarkup()}
       <nav class="admin-tabs" aria-label="Admin sections">
@@ -631,6 +692,7 @@ export class AdminMenu {
       ${this.error ? `<div class="app-alert app-alert--error" role="alert">${escapeHtml(this.error)}</div>` : ''}
       <div id="admin-notice" class="app-alert app-alert--success" role="status" ${this.notice ? '' : 'hidden'}>${escapeHtml(this.notice ?? '')}</div>
       <div class="admin-content">${this.tabContentMarkup()}</div>
+      ${this.schedulePanelOpen ? this.schedulePanelMarkup() : ''}
     </section>`;
     this.bindEvents();
   }
@@ -642,6 +704,33 @@ export class AdminMenu {
     this.host.querySelector('#admin-refresh')?.addEventListener('click', () => {
       void this.refreshCurrentTab();
     });
+    this.host.querySelector('#open-admin-schedule')?.addEventListener('click', () => {
+      void this.openSchedulePanel();
+    });
+    this.host.querySelector('#retry-admin-schedule')?.addEventListener('click', () => {
+      void this.openSchedulePanel();
+    });
+    this.host
+      .querySelectorAll('#close-admin-schedule, #cancel-admin-schedule')
+      .forEach((button) => {
+        button.addEventListener('click', () => {
+          if (this.busy) return;
+          this.schedulePanelOpen = false;
+          this.render();
+        });
+      });
+    const scheduleForm = this.host.querySelector<HTMLFormElement>('#admin-schedule-form');
+    scheduleForm?.addEventListener(
+      'submit',
+      (event) => void this.saveCommunityRoundSchedule(event),
+    );
+    scheduleForm
+      ?.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select')
+      .forEach((control) => {
+        control.addEventListener('input', () =>
+          this.updateCommunityRoundSchedulePreview(scheduleForm),
+        );
+      });
     this.host
       .querySelectorAll<HTMLButtonElement>('[data-admin-tab]')
       .forEach((button) => {
@@ -778,6 +867,95 @@ export class AdminMenu {
       this.busy = false;
       this.render();
     }
+  }
+
+  private async openSchedulePanel(): Promise<void> {
+    if (this.busy) return;
+    this.schedulePanelOpen = true;
+    this.error = null;
+    if (this.communityRoundSchedule) {
+      this.render();
+      return;
+    }
+    this.scheduleLoading = true;
+    this.render();
+    try {
+      this.communityRoundSchedule = cacheCommunityRoundSchedule(
+        await this.api.getCommunityRoundSchedule(),
+      );
+    } catch (error) {
+      this.handleError(error);
+    } finally {
+      this.scheduleLoading = false;
+      this.render();
+    }
+  }
+
+  private async saveCommunityRoundSchedule(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    if (this.busy || !this.communityRoundSchedule) return;
+    const form = event.currentTarget as HTMLFormElement;
+    const data = new FormData(form);
+    const startsAt = communityRoundStartAtFromZonedInput(
+      String(data.get('date') ?? ''),
+      String(data.get('time') ?? ''),
+      this.communityRoundSchedule.timeZone,
+    );
+    const frequency = String(data.get('frequency') ?? '');
+    if (!startsAt || !['daily', 'weekly', 'monthly'].includes(frequency)) {
+      this.error = 'Choose a valid scheduled round date, time, and frequency.';
+      this.render();
+      return;
+    }
+
+    this.busy = true;
+    this.error = null;
+    form
+      .querySelectorAll<
+        HTMLButtonElement | HTMLInputElement | HTMLSelectElement
+      >('button, input, select')
+      .forEach((control) => {
+        control.disabled = true;
+      });
+    try {
+      this.communityRoundSchedule = cacheCommunityRoundSchedule(
+        await this.api.updateCommunityRoundSchedule({
+          startsAt: startsAt.toISOString(),
+          frequency,
+        }),
+      );
+      this.schedulePanelOpen = false;
+      this.notice = 'Scheduled rounds updated.';
+    } catch (error) {
+      this.handleError(error);
+    } finally {
+      this.busy = false;
+      this.render();
+    }
+  }
+
+  private updateCommunityRoundSchedulePreview(form: HTMLFormElement): void {
+    if (!this.communityRoundSchedule) return;
+    const data = new FormData(form);
+    const startsAt = communityRoundStartAtFromZonedInput(
+      String(data.get('date') ?? ''),
+      String(data.get('time') ?? ''),
+      this.communityRoundSchedule.timeZone,
+    );
+    const frequency = String(data.get('frequency') ?? '');
+    const preview = form.querySelector<HTMLElement>('.admin-schedule-preview strong');
+    if (!startsAt || !preview || !['daily', 'weekly', 'monthly'].includes(frequency)) {
+      return;
+    }
+    const schedule = {
+      ...this.communityRoundSchedule,
+      startsAt: startsAt.toISOString(),
+      frequency: frequency as CommunityRoundSchedule['frequency'],
+    };
+    preview.textContent = formatScheduledRoundDate(
+      getNextCommunityRoundState(new Date(), schedule).occurrence,
+      schedule,
+    );
   }
 
   private async saveSelectedProfile(event: SubmitEvent): Promise<void> {

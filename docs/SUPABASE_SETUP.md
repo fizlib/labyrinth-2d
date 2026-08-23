@@ -26,6 +26,9 @@ transactional user-management safeguards, and the administrator audit ledger.
 Then apply
 `supabase/migrations/20260823130000_record_guest_match_participants.sql` so
 completed rounds retain guest display names, roles, outcomes, and final state.
+Finally apply
+`supabase/migrations/20260823140000_add_community_round_schedule.sql` so the
+player-facing Community Round calendar can be managed from the Admin menu.
 If the competitive-stats migration was already applied, apply only the newer
 unapplied migrations; do not rerun or edit its database migration record.
 
@@ -57,6 +60,8 @@ The migration:
   transactions that protect the acting and final active administrator;
 - records every profile, role, suspension, and reactivation change in the
   append-only `admin_audit_log`;
+- stores the singleton Community Round date, time, recurrence, and time zone
+  behind a service-role-only administrator mutation;
 - denies profile access to unauthenticated clients.
 
 Test the migration in a non-production project first. A failing Auth trigger
@@ -143,6 +148,9 @@ other exact browser origin to the comma-separated `ADMIN_ALLOWED_ORIGINS` server
 variable. The Admin API verifies the bearer token and re-reads `is_admin` and
 `suspended_at` for every request. It uses the secret key only on the server to
 list Auth users and synchronize Supabase Auth bans.
+The Community Round schedule has one public read-only Admin API endpoint so
+signed-in players and guests can render the same calendar. Updating it still
+requires a freshly verified active administrator.
 The Admin menu is directly addressable at `/admin`; the client Vercel config
 rewrites that path to the SPA entry point while client-side history keeps the
 URL synchronized with the Admin menu and its Back button.
@@ -195,10 +203,12 @@ profile counters to update.
     and can start a one-player lobby immediately.
 11. Confirm a regular signed-in user and a guest see neither admin control and
     cannot trigger the corresponding WebSocket actions manually.
-12. From Admin menu, confirm Users, Ongoing rounds, Past rounds, and Activity
-    load. Suspend a non-admin test account and verify its active room seat is
-    released immediately, it sees the suspended-account screen after reload,
-    and its audit entry includes the supplied reason.
+12. From Admin menu, confirm Users, Ongoing rounds, and Past rounds load. Open
+    **Scheduled rounds**, save a different date, time, and recurrence, and
+    confirm the Main Menu Community Round card updates. Suspend a non-admin test
+    account and verify its active room seat is released immediately, it sees the
+    suspended-account screen after reload, and its audit entry includes the
+    supplied reason.
 13. Reactivate that account and confirm **Check Again** returns it to Main Menu.
     Verify self-demotion, self-suspension, and removing the final active admin
     are rejected.

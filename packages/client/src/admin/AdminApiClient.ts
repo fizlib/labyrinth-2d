@@ -5,6 +5,7 @@ import type {
   AdminOverview,
   AdminPage,
   AdminUserSummary,
+  CommunityRoundSchedule,
 } from './types';
 import type { AdminApiError } from '@labyrinth/shared';
 import { getGameServerUrl } from '../net/GameServerUrl';
@@ -63,6 +64,20 @@ export class AdminApiClient {
 
   getOverview(): Promise<AdminOverview> {
     return this.request('overview');
+  }
+
+  getCommunityRoundSchedule(): Promise<CommunityRoundSchedule> {
+    return this.request('community-round-schedule');
+  }
+
+  updateCommunityRoundSchedule(values: {
+    startsAt: string;
+    frequency: string;
+  }): Promise<CommunityRoundSchedule> {
+    return this.request('community-round-schedule', {
+      method: 'PATCH',
+      body: JSON.stringify(values),
+    });
   }
 
   getUsers(query: URLSearchParams): Promise<AdminPage<AdminUserSummary>> {

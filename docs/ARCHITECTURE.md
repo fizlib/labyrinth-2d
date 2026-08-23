@@ -25,8 +25,11 @@ revalidates the caller's Supabase token, active `profiles.is_admin` permission,
 and `profiles.suspended_at` state on every request. A server-only Supabase client
 joins Auth email/sign-in metadata with profiles and player statistics, reads the
 protected completed-match ledger, and applies transactional profile, role, and
-suspension changes. Those changes are appended to `admin_audit_log`; the browser
-never receives a Supabase secret or direct access to protected tables.
+suspension changes. It also owns the persisted Community Round date, time, and
+daily/weekly/monthly recurrence. The schedule is publicly readable so every
+menu renders the same event, while its mutation remains active-admin-only.
+User changes are appended to `admin_audit_log`; the browser never receives a
+Supabase secret or direct access to protected tables.
 
 One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, treasure-chest state, sword-field state, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
@@ -254,9 +257,14 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 
 - Active administrators see **Admin menu** directly below **Tutorial**. The
   responsive DOM console contains registered Users, Ongoing rounds, Past
-  rounds with participant drilldown, and the administrator-only Style Editor
-  link. Administrative mutations remain recorded in the server-only audit
-  ledger but are not displayed in the console.
+  rounds with participant drilldown, the administrator-only Style Editor link,
+  and a Scheduled rounds dialog for the shared Community Round calendar.
+  Administrative mutations remain recorded in the server-only audit ledger but
+  are not displayed in the console.
+- Scheduled rounds store an anchor date, host-local time, IANA time zone, and
+  daily, weekly, or monthly recurrence. Calendar calculations retain that local
+  wall-clock time across daylight-saving changes; player menus fall back to the
+  bundled daily schedule if the public read endpoint is temporarily unavailable.
 - Summary and live-room snapshots refresh every ten seconds while the view is
   visible. Persistent counts are cached for thirty seconds; manual Refresh also
   reloads the active persistent tab.
@@ -599,7 +607,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `packages/shared/src/index.ts`
   - shared constants, protocol types, and re-exports
 - `packages/shared/src/admin.ts`
-  - typed Admin API pages, room snapshots, user records, round details, and audit entries
+  - typed Admin API pages, room snapshots, user records, round details, audit entries, and Community Round schedule
 - `packages/shared/src/lobby.ts`
   - lobby limits, room-code validation, voting thresholds, role counts, and public state contracts
 - `packages/shared/src/physics.ts`
@@ -616,7 +624,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `packages/server/src/index.ts`
   - WebSocket/HTTP server bootstrap and protocol routing
 - `packages/server/src/adminApi.ts` / `adminService.ts`
-  - bearer-authenticated administrator routes, protected Supabase queries, and mutations
+  - bearer-authenticated administrator routes, the public schedule read, protected Supabase queries, and mutations
 - `packages/server/src/Room.ts`
   - room lifecycle, hidden role seats/private inventories, authoritative state, tick loop, runestone logic, portal activation, wisdom-orb handling
 
@@ -625,7 +633,7 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `packages/client/src/main.ts`
   - Supabase and guest session restoration plus Auth/Main Menu/Profile/Admin DOM navigation
 - `packages/client/src/admin/`
-  - protected Admin API client and responsive user/round/activity console
+  - protected Admin API client and responsive user/round/activity/schedule console
 - `packages/client/src/navigation/AppShellRoute.ts`
   - canonical `/admin` route recognition and session-refresh view preservation
 - `packages/client/src/auth/supabase.ts`

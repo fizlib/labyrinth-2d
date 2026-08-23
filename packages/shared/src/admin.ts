@@ -1,6 +1,23 @@
 export const ADMIN_DEFAULT_PAGE_SIZE = 25;
 export const ADMIN_MAX_PAGE_SIZE = 100;
 
+export const COMMUNITY_ROUND_TIME_ZONE = 'Europe/Vilnius';
+export type CommunityRoundFrequency = 'daily' | 'weekly' | 'monthly';
+
+export interface CommunityRoundSchedule {
+  startsAt: string;
+  frequency: CommunityRoundFrequency;
+  timeZone: string;
+  updatedAt: string | null;
+}
+
+export const DEFAULT_COMMUNITY_ROUND_SCHEDULE: CommunityRoundSchedule = {
+  startsAt: '2026-01-01T19:00:00.000Z',
+  frequency: 'daily',
+  timeZone: COMMUNITY_ROUND_TIME_ZONE,
+  updatedAt: null,
+};
+
 export type AdminRoomPhase = 'waiting' | 'countdown' | 'loading' | 'running' | 'ended';
 
 export interface AdminRoomPlayer {

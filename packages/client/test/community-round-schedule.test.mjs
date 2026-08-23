@@ -2,12 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  communityRoundStartAtFromZonedInput,
   formatCommunityRoundCountdown,
   formatCommunityRoundWait,
+  getCommunityRoundScheduleInputValues,
   getCommunityRoundGoogleCalendarUrl,
   getCommunityRoundState,
   getNextCommunityRoundState,
 } from '../dist/systems/CommunityRoundSchedule.js';
+
+const weeklySchedule = {
+  startsAt: '2026-08-20T18:00:00.000Z',
+  frequency: 'weekly',
+  timeZone: 'Europe/Vilnius',
+  updatedAt: null,
+};
 
 test('unlocks the summer Vilnius round at 21:00', () => {
   const before = getCommunityRoundState(new Date('2026-08-20T17:59:00.000Z'), null);
@@ -58,6 +67,62 @@ test('returns the next future round after the current round opens', () => {
   assert.equal(after.occurrenceKey, '2026-08-21');
 });
 
+test('keeps a weekly schedule anchored to its configured weekday', () => {
+  const friday = getCommunityRoundState(
+    new Date('2026-08-21T10:00:00.000Z'),
+    null,
+    weeklySchedule,
+  );
+  assert.equal(friday.occurrence.toISOString(), '2026-08-27T18:00:00.000Z');
+  assert.equal(friday.isOpen, false);
+
+  const thursday = getCommunityRoundState(
+    new Date('2026-08-27T18:00:00.000Z'),
+    null,
+    weeklySchedule,
+  );
+  assert.equal(thursday.occurrenceKey, '2026-08-27');
+  assert.equal(thursday.isOpen, true);
+});
+
+test('clamps monthly schedules to the last available calendar day', () => {
+  const monthlySchedule = {
+    startsAt: '2026-01-31T19:00:00.000Z',
+    frequency: 'monthly',
+    timeZone: 'Europe/Vilnius',
+    updatedAt: null,
+  };
+  const february = getCommunityRoundState(
+    new Date('2026-02-28T19:00:00.000Z'),
+    null,
+    monthlySchedule,
+  );
+  assert.equal(february.occurrenceKey, '2026-02-28');
+  assert.equal(february.isOpen, true);
+
+  const march = getNextCommunityRoundState(
+    new Date('2026-02-28T19:01:00.000Z'),
+    monthlySchedule,
+  );
+  assert.equal(march.occurrence.toISOString(), '2026-03-31T18:00:00.000Z');
+});
+
+test('round-trips admin date and time inputs in the schedule time zone', () => {
+  const startsAt = communityRoundStartAtFromZonedInput(
+    '2026-08-23',
+    '21:30',
+    'Europe/Vilnius',
+  );
+  assert.equal(startsAt?.toISOString(), '2026-08-23T18:30:00.000Z');
+  assert.deepEqual(
+    getCommunityRoundScheduleInputValues({
+      ...weeklySchedule,
+      startsAt: startsAt.toISOString(),
+    }),
+    { date: '2026-08-23', time: '21:30' },
+  );
+});
+
 test('formats the compact wait shown after training', () => {
   assert.equal(formatCommunityRoundWait(0), '0m');
   assert.equal(formatCommunityRoundWait(1), '1m');
@@ -72,6 +137,16 @@ test('creates a daily 21:00 Vilnius Google Calendar reminder', () => {
   assert.equal(url.searchParams.get('dates'), '20260820T210000/20260820T220000');
   assert.equal(url.searchParams.get('ctz'), 'Europe/Vilnius');
   assert.equal(url.searchParams.get('recur'), 'RRULE:FREQ=DAILY');
+});
+
+test('uses the configured recurrence in Google Calendar reminders', () => {
+  const url = new URL(
+    getCommunityRoundGoogleCalendarUrl(
+      new Date('2026-08-20T18:00:00.000Z'),
+      weeklySchedule,
+    ),
+  );
+  assert.equal(url.searchParams.get('recur'), 'RRULE:FREQ=WEEKLY');
 });
 
 test('formats countdowns with stable tabular fields', () => {

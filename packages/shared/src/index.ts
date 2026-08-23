@@ -17,6 +17,10 @@ import type { TrapCellPlacement } from './maps/level1.js';
 export {
   ADMIN_DEFAULT_PAGE_SIZE,
   ADMIN_MAX_PAGE_SIZE,
+  COMMUNITY_ROUND_TIME_ZONE,
+  DEFAULT_COMMUNITY_ROUND_SCHEDULE,
+  type CommunityRoundFrequency,
+  type CommunityRoundSchedule,
   type AdminRoomPhase,
   type AdminRoomPlayer,
   type AdminRoomSnapshot,

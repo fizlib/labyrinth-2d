@@ -3,6 +3,7 @@ import { inject } from '@vercel/analytics';
 import {
   isValidRoomCode,
   normalizeRoomCode,
+  type CommunityRoundSchedule,
   type LobbyJoinMode,
 } from '@labyrinth/shared';
 import {
@@ -40,10 +41,13 @@ import {
   syncAudioToggleState,
 } from './systems/AudioToggle';
 import {
-  COMMUNITY_ROUND_TIME_ZONE,
   formatCommunityRoundCountdown,
   getCommunityRoundState,
 } from './systems/CommunityRoundSchedule';
+import {
+  getCachedCommunityRoundSchedule,
+  loadCommunityRoundSchedule,
+} from './systems/CommunityRoundScheduleApi';
 import { shouldWarmGameAssetsInBackground } from './assets/AssetPreloadPolicy';
 import { NetworkManager, type NetworkCallbacks } from './net/NetworkManager';
 import { getGameServerUrl } from './net/GameServerUrl';
@@ -252,9 +256,9 @@ function formatDate(value: string): string {
   }).format(date);
 }
 
-function formatCommunityRoundDate(date: Date): string {
+function formatCommunityRoundDate(date: Date, schedule: CommunityRoundSchedule): string {
   return new Intl.DateTimeFormat(undefined, {
-    timeZone: COMMUNITY_ROUND_TIME_ZONE,
+    timeZone: schedule.timeZone,
     weekday: 'long',
     month: 'long',
     day: 'numeric',
@@ -459,6 +463,8 @@ class AppController {
   >();
   private restoringInitialSession = true;
   private communityRoundTimer: number | null = null;
+  private communityRoundScheduleTimer: number | null = null;
+  private communityRoundSchedule = getCachedCommunityRoundSchedule();
   private adminMenu: AdminMenu | null = null;
   private requestedShellRoute = getInitialAppShellRoute();
   private readonly handlePopState = () => this.renderRouteFromLocation();
@@ -858,10 +864,7 @@ class AppController {
     return roomCode;
   }
 
-  private setShellRoute(
-    route: AppShellRoute,
-    historyMode: 'push' | 'replace',
-  ): void {
+  private setShellRoute(route: AppShellRoute, historyMode: 'push' | 'replace'): void {
     this.requestedShellRoute = route;
     const url = new URL(window.location.href);
     url.pathname = getAppShellRoutePath(route);
@@ -949,6 +952,7 @@ class AppController {
       return;
     }
     const isGuest = this.identityMode === 'guest';
+    this.communityRoundSchedule = getCachedCommunityRoundSchedule();
     const statusLabel = this.profile.is_admin ? 'Admin' : isGuest ? 'Guest' : 'Explorer';
     const ratingLabel = this.playerStats
       ? `Elo ${this.playerStats.rating} · ${this.playerStats.wins}W–${this.playerStats.losses}L`
@@ -956,6 +960,7 @@ class AppController {
     const communityRound = getCommunityRoundState(
       new Date(),
       loadStartedCommunityRound(this.profile.id),
+      this.communityRoundSchedule,
     );
     const communityRoundStatus = communityRound.isOpen
       ? 'Round is open'
@@ -979,7 +984,7 @@ class AppController {
           <nav class="menu-actions" aria-label="Main menu">
             <section id="community-round-card" class="community-round-card${communityRound.isOpen ? ' community-round-card--open' : ''}" aria-labelledby="community-round-title">
               <span class="community-round-card__eyebrow">Community Round</span>
-              <strong id="community-round-title" class="community-round-card__date">${escapeHtml(formatCommunityRoundDate(communityRound.occurrence))}</strong>
+              <strong id="community-round-title" class="community-round-card__date">${escapeHtml(formatCommunityRoundDate(communityRound.occurrence, this.communityRoundSchedule))}</strong>
               <span id="community-round-status" class="community-round-card__status" aria-live="polite">${escapeHtml(communityRoundStatus)}</span>
               <button id="community-round-join" class="community-round-card__button" type="button" data-occurrence-key="${communityRound.occurrenceKey}" ${communityRound.isOpen ? '' : 'disabled'}>${communityRound.isOpen ? 'Join Round' : '🔒 Join Round'}</button>
             </section>
@@ -1007,6 +1012,7 @@ class AppController {
         const currentRound = getCommunityRoundState(
           new Date(),
           loadStartedCommunityRound(this.profile.id),
+          this.communityRoundSchedule,
         );
         if (!currentRound.isOpen) {
           this.updateCommunityRoundCard();
@@ -1060,9 +1066,14 @@ class AppController {
 
     scheduleGameWarmup();
     this.updateCommunityRoundCard();
+    void this.refreshCommunityRoundSchedule();
     this.communityRoundTimer = window.setInterval(
       () => this.updateCommunityRoundCard(),
       1_000,
+    );
+    this.communityRoundScheduleTimer = window.setInterval(
+      () => void this.refreshCommunityRoundSchedule(),
+      60_000,
     );
 
     if (playAgain) {
@@ -1405,6 +1416,7 @@ class AppController {
     const communityRound = getCommunityRoundState(
       new Date(),
       loadStartedCommunityRound(profileId),
+      this.communityRoundSchedule,
     );
     const communityRoundOccurrenceKey =
       joinMode === 'quick' && communityRound.isOpen
@@ -1735,9 +1747,13 @@ class AppController {
     const communityRound = getCommunityRoundState(
       new Date(),
       loadStartedCommunityRound(this.profile.id),
+      this.communityRoundSchedule,
     );
     card.classList.toggle('community-round-card--open', communityRound.isOpen);
-    date.textContent = formatCommunityRoundDate(communityRound.occurrence);
+    date.textContent = formatCommunityRoundDate(
+      communityRound.occurrence,
+      this.communityRoundSchedule,
+    );
     status.textContent = communityRound.isOpen
       ? 'Round is open'
       : `Starts in ${formatCommunityRoundCountdown(communityRound.remainingMs)}`;
@@ -1746,10 +1762,27 @@ class AppController {
     button.textContent = communityRound.isOpen ? 'Join Round' : '🔒 Join Round';
   }
 
+  private async refreshCommunityRoundSchedule(): Promise<void> {
+    try {
+      this.communityRoundSchedule = await loadCommunityRoundSchedule(true);
+      this.updateCommunityRoundCard();
+    } catch (error) {
+      console.warn(
+        '[Community Round] Using the bundled schedule because the server schedule could not be loaded.',
+        error,
+      );
+    }
+  }
+
   private stopCommunityRoundTimer(): void {
-    if (this.communityRoundTimer === null) return;
-    window.clearInterval(this.communityRoundTimer);
-    this.communityRoundTimer = null;
+    if (this.communityRoundTimer !== null) {
+      window.clearInterval(this.communityRoundTimer);
+      this.communityRoundTimer = null;
+    }
+    if (this.communityRoundScheduleTimer !== null) {
+      window.clearInterval(this.communityRoundScheduleTimer);
+      this.communityRoundScheduleTimer = null;
+    }
   }
 }
 
