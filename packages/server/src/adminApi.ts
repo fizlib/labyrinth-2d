@@ -6,6 +6,7 @@ import {
   authorizeAdmin,
   getCommunityRoundSchedule,
   getAdminOverview,
+  getAdminTutorialReport,
   getCompletedRound,
   listAdminActivity,
   listAdminUsers,
@@ -213,6 +214,10 @@ async function handleAdminRequest(
     }
     if (method === 'get' && path === '/admin-api/rounds') {
       sendJson(res, context, 200, await listCompletedRounds(query));
+      return;
+    }
+    if (method === 'get' && path === '/admin-api/tutorials') {
+      sendJson(res, context, 200, await getAdminTutorialReport(query));
       return;
     }
     if (method === 'get' && path === '/admin-api/activity') {

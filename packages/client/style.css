@@ -5137,7 +5137,7 @@ body.recording-clean-ui .recording-studio__panel {
 
 .admin-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   margin-bottom: 16px;
   padding: 5px;
@@ -5170,6 +5170,22 @@ body.recording-clean-ui .recording-studio__panel {
 
 .admin-filters--past {
   grid-template-columns: minmax(230px, 1fr) repeat(2, minmax(130px, 0.38fr));
+}
+
+.admin-filters--tutorials {
+  grid-template-columns: minmax(230px, 1fr) repeat(2, minmax(150px, 0.42fr));
+}
+
+.admin-tutorial-summary {
+  grid-template-columns: repeat(9, minmax(112px, 1fr));
+  margin-top: 0;
+}
+
+.admin-tutorial-detail {
+  display: block;
+  margin-top: 5px;
+  color: #aab9ae;
+  font-size: 0.69rem;
 }
 
 .admin-filters label,

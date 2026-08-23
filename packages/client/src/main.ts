@@ -61,6 +61,11 @@ import type {
   TrainingQueueStatus,
   TrainingQueueSubscription,
 } from './systems/TrainingQueueBanner';
+import {
+  createTutorialReminderReporter,
+  flushPendingTutorialTelemetry,
+  TutorialTelemetrySession,
+} from './systems/TutorialTelemetry';
 import { AdminMenu } from './admin/AdminMenu';
 import {
   getAppShellRoute,
@@ -70,6 +75,7 @@ import {
 } from './navigation/AppShellRoute';
 
 inject();
+flushPendingTutorialTelemetry();
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 const COMMUNITY_ROUND_STARTED_STORAGE_PREFIX = 'labyrinth-community-round-started';
@@ -1426,6 +1432,9 @@ class AppController {
       joinMode === 'quick' &&
       existingReconnectSession !== undefined &&
       consumeTrainingCompleteReturn(profileId);
+    const trainingReminder = showTrainingCompletePrompt
+      ? createTutorialReminderReporter(profileId)
+      : null;
     this.stopCommunityRoundTimer();
     this.gameLaunchStarted = true;
     this.view = 'launching-game';
@@ -1450,6 +1459,7 @@ class AppController {
         reconnectSession,
         accessToken: this.session?.access_token,
         showTrainingCompletePrompt,
+        trainingReminder: trainingReminder ?? undefined,
         onMatchStarted: communityRoundOccurrenceKey
           ? () => saveStartedCommunityRound(profileId, communityRoundOccurrenceKey)
           : undefined,
@@ -1643,11 +1653,25 @@ class AppController {
       onTrainingComplete: () => this.returnFromQueuedTrainingToLobby(),
     };
 
+    const tutorialTelemetry = new TutorialTelemetrySession({
+      profileId: this.profile.id,
+      displayName: this.profile.display_name,
+      isGuest: this.identityMode === 'guest',
+      accessToken: this.session?.access_token ?? null,
+      source: 'first_time_queue',
+      persistForReminder: true,
+    });
+
     try {
       await gameModule.startTutorial({
         displayName: this.profile.display_name,
         isAdmin: this.profile.is_admin,
         queue,
+        telemetry: {
+          onStarted: () => tutorialTelemetry.start(),
+          onCompleted: () => tutorialTelemetry.complete(),
+          onLeft: () => tutorialTelemetry.leave('explicit_exit'),
+        },
       });
       this.view = 'game';
     } catch {
@@ -1670,6 +1694,8 @@ class AppController {
   private returnFromQueuedTrainingToLobby(): void {
     if (this.queuedMatchTransitionStarted || !this.profile) return;
     this.queuedMatchTransitionStarted = true;
+    // The schedule/reminder prompt belongs to the return from training, even
+    // when the player chose to leave before reaching the portal.
     markTrainingCompleteReturn(this.profile.id);
     window.location.reload();
   }
@@ -1713,9 +1739,22 @@ class AppController {
     }
 
     try {
+      const tutorialTelemetry = new TutorialTelemetrySession({
+        profileId: this.profile.id,
+        displayName: this.profile.display_name,
+        isGuest: this.identityMode === 'guest',
+        accessToken: this.session?.access_token ?? null,
+        source: 'main_menu',
+        persistForReminder: false,
+      });
       await gameModule.startTutorial({
         displayName: this.profile.display_name,
         isAdmin: this.profile.is_admin,
+        telemetry: {
+          onStarted: () => tutorialTelemetry.start(),
+          onCompleted: () => tutorialTelemetry.complete(),
+          onLeft: () => tutorialTelemetry.leave('explicit_exit'),
+        },
       });
       this.view = 'game';
     } catch {

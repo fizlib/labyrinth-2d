@@ -33,6 +33,8 @@ interface LobbyOverlayOptions {
     onWait?: () => void;
   };
   trainingComplete?: boolean;
+  onTrainingReminderOpened?: () => void;
+  onTrainingReminderClicked?: (provider: 'discord' | 'google_calendar') => void;
 }
 
 interface LobbyChatEntry {
@@ -276,10 +278,21 @@ export class LobbyOverlay {
       );
       this.root.classList.add('lobby-overlay--first-time');
       reminderButton?.addEventListener('click', () => {
+        options.onTrainingReminderOpened?.();
         reminderButton.hidden = true;
         if (reminderChoices) reminderChoices.hidden = false;
         reminderChoices?.querySelector<HTMLAnchorElement>('a')?.focus();
       });
+      trainingCompletePrompt
+        .querySelector<HTMLAnchorElement>('.training-complete__reminder-link--discord')
+        ?.addEventListener('click', () => {
+          options.onTrainingReminderClicked?.('discord');
+        });
+      trainingCompletePrompt
+        .querySelector<HTMLAnchorElement>('.training-complete__calendar-link')
+        ?.addEventListener('click', () => {
+          options.onTrainingReminderClicked?.('google_calendar');
+        });
       trainingCompletePrompt
         .querySelector<HTMLButtonElement>('.training-complete__wait')
         ?.addEventListener('click', keepWaiting);

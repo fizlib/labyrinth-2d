@@ -2,9 +2,9 @@
 
 The client uses Supabase Auth for Google OAuth and `public.profiles` for the
 authenticated player's display name, avatar, administrator status, and
-owner-private competitive record. Players
-can also continue as a guest without contacting Supabase; guest profiles live
-only in the current browser tab. The game server verifies signed-in access
+owner-private competitive record. Players can also continue as a guest without
+creating a Supabase account or profile; guest profiles live only in the current
+browser tab. The game server verifies signed-in access
 tokens with Supabase before attaching an account or granting any administrator
 capability. Every completed match is written by the trusted server; only
 eligible public matches change Elo, and only authenticated players have
@@ -29,6 +29,10 @@ completed rounds retain guest display names, roles, outcomes, and final state.
 Finally apply
 `supabase/migrations/20260823140000_add_community_round_schedule.sql` so the
 player-facing Community Round calendar can be managed from the Admin menu.
+Then apply
+`supabase/migrations/20260823150000_add_tutorial_analytics.sql` so authenticated
+and guest tutorial attempts, outcomes, elapsed time, and reminder choices are
+available to administrators.
 If the competitive-stats migration was already applied, apply only the newer
 unapplied migrations; do not rerun or edit its database migration record.
 
@@ -62,6 +66,8 @@ The migration:
   append-only `admin_audit_log`;
 - stores the singleton Community Round date, time, recurrence, and time zone
   behind a service-role-only administrator mutation;
+- stores server-authored tutorial attempts behind RLS, including guest identity
+  snapshots, completion/departure state, elapsed time, and reminder interactions;
 - denies profile access to unauthenticated clients.
 
 Test the migration in a non-production project first. A failing Auth trigger
@@ -133,15 +139,16 @@ ADMIN_ALLOWED_ORIGINS=https://staging.example.com,http://localhost:5173
 
 `SUPABASE_ANON_KEY` is also accepted for projects still using a legacy anon
 key. `SUPABASE_SERVICE_ROLE_KEY` is accepted in place of the newer secret key.
-The secret is required to record match results and serve the Admin menu; it must
+The secret is required to record match and tutorial results and serve the Admin menu; it must
 exist only in the game server environment. If it is missing, matches continue
 normally but no persistent match, win/loss, or rating updates are written and
 the Admin menu reports that its backend is unavailable. If token verification
 fails, the connection is treated as an unverified guest and cannot make a match
 eligible for rating or receive persistent counters.
 
-The client normally calls `/admin-api` through the same origin as `/ws`; Vite
-proxies both routes in development. When `VITE_SERVER_URL` points directly at a
+The client normally calls `/admin-api` and `/tutorial-api` through the same
+origin as `/ws`; Vite proxies all three routes in development. When
+`VITE_SERVER_URL` points directly at a
 different origin, the canonical `https://falsearrow.com` and
 `https://www.falsearrow.com` browser origins are allowed automatically. Add any
 other exact browser origin to the comma-separated `ADMIN_ALLOWED_ORIGINS` server
@@ -209,11 +216,17 @@ profile counters to update.
     account and verify its active room seat is released immediately, it sees the
     suspended-account screen after reload, and its audit entry includes the
     supplied reason.
-13. Reactivate that account and confirm **Check Again** returns it to Main Menu.
+13. Complete one tutorial and exit another early as both a signed-in player and
+    a guest. Confirm **Tutorials** appears after **Past rounds**, newest attempts
+    appear first, durations and statuses are correct, and Discord/Google clicks
+    update the matching completed attempt. Leave one tutorial tab inactive for
+    over ten minutes and confirm it becomes **Left · Timed out** when the report
+    reloads.
+14. Reactivate that account and confirm **Check Again** returns it to Main Menu.
     Verify self-demotion, self-suspension, and removing the final active admin
     are rejected.
 
 For RLS verification, use two test users: each user must be able to select and
 update only the row whose `id` equals their own Auth user ID. Neither user
 should be able to modify `id`, `is_admin`, `suspended_at`, `created_at`, or
-`updated_at`, read `admin_audit_log`, or delete a row.
+`updated_at`, read `admin_audit_log` or `tutorial_sessions`, or delete a row.

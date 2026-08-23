@@ -40,6 +40,7 @@ import {
 
 import { Room, type SocketData } from './Room.js';
 import { registerAdminApi } from './adminApi.js';
+import { registerTutorialApi } from './tutorialApi.js';
 import {
   isSupabasePlayerVerificationConfigured,
   isSupabaseMatchPersistenceConfigured,
@@ -323,6 +324,7 @@ function generatePlayerId(): string {
 
 const app = uWS.App();
 
+registerTutorialApi(app);
 registerAdminApi(app, {
   getRooms: () => Array.from(rooms.values(), (room) => room.getAdminSnapshot()),
   removeUserFromRooms: (userId) => {

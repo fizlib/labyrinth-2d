@@ -5,6 +5,12 @@ export type {
   AdminOverview,
   AdminPage,
   AdminRoomSnapshot,
+  AdminTutorialAttempt,
+  AdminTutorialReport,
+  AdminTutorialStatistics,
   AdminUserSummary,
   CommunityRoundSchedule,
+  TutorialDepartureReason,
+  TutorialSource,
+  TutorialStatus,
 } from '@labyrinth/shared';

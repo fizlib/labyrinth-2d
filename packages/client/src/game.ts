@@ -1969,12 +1969,21 @@ export interface GameLaunchOptions {
   accessToken?: string;
   onMatchStarted?: () => void;
   showTrainingCompletePrompt?: boolean;
+  trainingReminder?: {
+    onReminderOpened: () => void;
+    onReminderClicked: (provider: 'discord' | 'google_calendar') => void;
+  };
 }
 
 export interface TutorialLaunchOptions {
   displayName: string;
   isAdmin: boolean;
   queue?: TrainingQueueSubscription;
+  telemetry?: {
+    onStarted: () => void;
+    onCompleted: () => void;
+    onLeft: () => void;
+  };
 }
 
 const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
@@ -3228,6 +3237,7 @@ async function initializeGame(
   let tutorialRunestoneDialogueShown = false;
   let tutorialEscapeDialogueShown = false;
   let tutorialCompletionShown = false;
+  let tutorialTelemetryCompleted = false;
   let tutorialDialogueDismissAction: TutorialDialogueDismissAction | null = null;
   let trainingCompletePromptPending =
     !isTutorial &&
@@ -3302,6 +3312,14 @@ async function initializeGame(
             window.location.reload();
           },
           trainingComplete: showTrainingCompletePrompt,
+          onTrainingReminderOpened:
+            'trainingReminder' in options
+              ? options.trainingReminder?.onReminderOpened
+              : undefined,
+          onTrainingReminderClicked:
+            'trainingReminder' in options
+              ? options.trainingReminder?.onReminderClicked
+              : undefined,
         });
         syncMasterAudioToggle();
       }
@@ -4101,6 +4119,8 @@ async function initializeGame(
       );
       if (isTutorial && playerId === net.playerId && !tutorialCompletionShown) {
         tutorialCompletionShown = true;
+        tutorialTelemetryCompleted = true;
+        if ('telemetry' in options) options.telemetry?.onCompleted();
         window.setTimeout(() => {
           if ('queue' in options && options.queue) {
             returnToMainMenu(true);
@@ -4460,6 +4480,9 @@ async function initializeGame(
 
   const gameMenuToggle = document.querySelector<HTMLButtonElement>('#game-menu-toggle');
   const returnToMainMenu = (trainingComplete = false): void => {
+    if (isTutorial && !tutorialTelemetryCompleted && 'telemetry' in options) {
+      options.telemetry?.onLeft();
+    }
     net.leaveRoom();
     trainingQueueBanner?.destroy();
     if ('queue' in options && options.queue) {
@@ -4507,7 +4530,9 @@ async function initializeGame(
       onSoundEffectsMutedChange: (muted) => setSoundEffectsMuted(muted, true),
       areChatBubblesEnabled: () => chatBubblesEnabled,
       onChatBubblesEnabledChange: setChatBubblesEnabled,
-      onExitMatch: returnToMainMenu,
+      // Pixi passes the pointer event to listeners at runtime. Do not let that
+      // truthy event become returnToMainMenu's trainingComplete argument.
+      onExitMatch: () => returnToMainMenu(),
     },
     isTutorial
       ? {
@@ -5567,6 +5592,7 @@ async function initializeGame(
       displayName,
       'isAdmin' in options ? options.isAdmin : false,
     );
+    if ('telemetry' in options) options.telemetry?.onStarted();
   } else if (networkManager && 'reconnectSession' in options) {
     networkManager.connect(
       wsUrl,

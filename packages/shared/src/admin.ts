@@ -110,6 +110,51 @@ export interface AdminCompletedRoundDetail extends AdminCompletedRoundSummary {
   participants: AdminRoundParticipant[];
 }
 
+export type TutorialSource = 'main_menu' | 'first_time_queue';
+export type TutorialStatus = 'in_progress' | 'completed' | 'left';
+export type TutorialDepartureReason =
+  | 'explicit_exit'
+  | 'page_unload'
+  | 'inactivity_timeout';
+export type TutorialReminderProvider = 'discord' | 'google_calendar';
+
+export interface AdminTutorialAttempt {
+  id: string;
+  profileId: string | null;
+  participantId: string;
+  displayName: string;
+  isGuest: boolean;
+  source: TutorialSource;
+  status: TutorialStatus;
+  departureReason: TutorialDepartureReason | null;
+  startedAt: string;
+  lastActivityAt: string;
+  endedAt: string | null;
+  durationMs: number;
+  reminderOpenedAt: string | null;
+  discordReminderClickedAt: string | null;
+  googleCalendarClickedAt: string | null;
+}
+
+export interface AdminTutorialStatistics {
+  attempts: number;
+  uniquePeople: number;
+  inProgress: number;
+  completed: number;
+  left: number;
+  completionRate: number;
+  averageDurationMs: number;
+  reminderOpened: number;
+  discordReminderClicked: number;
+  googleCalendarClicked: number;
+}
+
+export interface AdminTutorialReport {
+  generatedAt: string;
+  statistics: AdminTutorialStatistics;
+  attempts: AdminPage<AdminTutorialAttempt>;
+}
+
 export type AdminAuditAction =
   | 'profile_update'
   | 'admin_grant'

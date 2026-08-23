@@ -4,6 +4,7 @@ import type {
   AdminMutationResult,
   AdminOverview,
   AdminPage,
+  AdminTutorialReport,
   AdminUserSummary,
   CommunityRoundSchedule,
 } from './types';
@@ -118,5 +119,9 @@ export class AdminApiClient {
 
   getRound(roundId: string): Promise<AdminCompletedRoundDetail> {
     return this.request(`rounds/${encodeURIComponent(roundId)}`);
+  }
+
+  getTutorials(query: URLSearchParams): Promise<AdminTutorialReport> {
+    return this.request(`tutorials?${query.toString()}`);
   }
 }

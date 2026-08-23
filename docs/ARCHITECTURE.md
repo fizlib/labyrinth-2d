@@ -1,6 +1,6 @@
 # False Arrow Architecture
 
-Last updated: 2026-08-23 - Server-backed administrator menu
+Last updated: 2026-08-23 - Persisted tutorial analytics
 
 ## Project Overview
 
@@ -30,6 +30,14 @@ daily/weekly/monthly recurrence. The schedule is publicly readable so every
 menu renders the same event, while its mutation remains active-admin-only.
 User changes are appended to `admin_audit_log`; the browser never receives a
 Supabase secret or direct access to protected tables.
+
+Browser-local tutorials report lifecycle events through a separate HTTP API.
+Authenticated starts are resolved from a freshly verified Supabase token;
+guests retain their tab-scoped identifier and display-name snapshot. The server
+stores all attempts in the RLS-protected `tutorial_sessions` ledger and returns
+an opaque per-attempt update credential. Heartbeats and best-effort unload
+events distinguish active, completed, and abandoned sessions without making
+analytics availability a prerequisite for local tutorial play.
 
 One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, treasure-chest state, sword-field state, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
@@ -257,8 +265,9 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 
 - Active administrators see **Admin menu** directly below **Tutorial**. The
   responsive DOM console contains registered Users, Ongoing rounds, Past
-  rounds with participant drilldown, the administrator-only Style Editor link,
-  and a Scheduled rounds dialog for the shared Community Round calendar.
+  rounds with participant drilldown, a Tutorials funnel/history tab, the
+  administrator-only Style Editor link, and a Scheduled rounds dialog for the
+  shared Community Round calendar.
   Administrative mutations remain recorded in the server-only audit ledger but
   are not displayed in the console.
 - Scheduled rounds store an anchor date, host-local time, IANA time zone, and
@@ -459,6 +468,15 @@ instruction. Verified admins keep
 the in-game admin panel in this local session; its state-changing actions are
 handled by the browser-local authority instead of a room server.
 
+Both Main Menu tutorials and first-time training while queued create one
+analytics attempt when the local session starts. The client sends a heartbeat
+every thirty seconds, completes the attempt on portal escape, and reports
+explicit exits or page unloads without blocking navigation. When an admin
+report is read, an in-progress attempt with no heartbeat for ten minutes is
+closed at its last activity time. Completed queued attempts retain their update
+credential across the lobby reload so opening the reminder choices and clicking
+Discord or Google Calendar are attributed to the same attempt.
+
 Guest profiles are created only after the naming form is submitted, use
 `sessionStorage`, never call Supabase, and are discarded
 when the guest leaves the session or closes the browser tab. They support the
@@ -624,7 +642,9 @@ The client currently has multiple UI subsystems, not just the minimap:
 - `packages/server/src/index.ts`
   - WebSocket/HTTP server bootstrap and protocol routing
 - `packages/server/src/adminApi.ts` / `adminService.ts`
-  - bearer-authenticated administrator routes, the public schedule read, protected Supabase queries, and mutations
+  - bearer-authenticated administrator routes, tutorial reports, the public schedule read, protected Supabase queries, and mutations
+- `packages/server/src/tutorialApi.ts` / `tutorialService.ts`
+  - non-blocking authenticated/guest tutorial lifecycle ingestion and protected persistence
 - `packages/server/src/Room.ts`
   - room lifecycle, hidden role seats/private inventories, authoritative state, tick loop, runestone logic, portal activation, wisdom-orb handling
 
@@ -642,6 +662,8 @@ The client currently has multiple UI subsystems, not just the minimap:
   - tab-local guest profile creation, restoration, validation, and updates
 - `packages/client/src/game.ts`
   - lazy Pixi app bootstrap, network entry, input, prediction, reconciliation, interpolation, camera, HUD orchestration
+- `packages/client/src/systems/TutorialTelemetry.ts`
+  - tutorial start/heartbeat/outcome tracking, unload recovery, and queued reminder attribution
 - `packages/client/src/net/NetworkManager.ts`
   - client WebSocket wrapper, reconnect backoff, and message dispatch
 - `packages/client/src/net/ReconnectSession.ts`

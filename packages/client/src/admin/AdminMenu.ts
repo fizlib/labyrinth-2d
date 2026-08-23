@@ -4,6 +4,7 @@ import type {
   AdminOverview,
   AdminPage,
   AdminRoomSnapshot,
+  AdminTutorialReport,
   AdminUserSummary,
   CommunityRoundSchedule,
 } from './types';
@@ -15,7 +16,7 @@ import {
 } from '../systems/CommunityRoundSchedule';
 import { cacheCommunityRoundSchedule } from '../systems/CommunityRoundScheduleApi';
 
-type AdminTab = 'users' | 'ongoing' | 'past';
+type AdminTab = 'users' | 'ongoing' | 'past' | 'tutorials';
 
 interface AdminMenuOptions {
   currentUserId: string;
@@ -99,6 +100,7 @@ export class AdminMenu {
   private overview: AdminOverview | null = null;
   private users: AdminPage<AdminUserSummary> | null = null;
   private rounds: AdminPage<AdminCompletedRoundSummary> | null = null;
+  private tutorials: AdminTutorialReport | null = null;
   private selectedUser: AdminUserSummary | null = null;
   private selectedRound: AdminCompletedRoundDetail | null = null;
   private communityRoundSchedule: CommunityRoundSchedule | null = null;
@@ -116,6 +118,12 @@ export class AdminMenu {
     winner: 'all',
     rated: 'all',
   };
+  private tutorialsFilter: PageFilters & { status: string; source: string } = {
+    page: 1,
+    q: '',
+    status: 'all',
+    source: 'all',
+  };
   private readonly expandedRoomIds = new Set<string>();
   private loading = true;
   private busy = false;
@@ -127,6 +135,8 @@ export class AdminMenu {
   private userFilterGeneration = 0;
   private roundFilterTimer: number | null = null;
   private roundFilterGeneration = 0;
+  private tutorialFilterTimer: number | null = null;
+  private tutorialFilterGeneration = 0;
   private destroyed = false;
   private readonly handleVisibilityChange = () => {
     if (document.hidden) this.stopPolling();
@@ -170,6 +180,7 @@ export class AdminMenu {
     this.stopPolling();
     this.clearUserFilterTimer();
     this.clearRoundFilterTimer();
+    this.clearTutorialFilterTimer();
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
   }
 
@@ -251,6 +262,64 @@ export class AdminMenu {
     this.roundFilterTimer = null;
   }
 
+  private clearTutorialFilterTimer(): void {
+    if (this.tutorialFilterTimer === null) return;
+    window.clearTimeout(this.tutorialFilterTimer);
+    this.tutorialFilterTimer = null;
+  }
+
+  private readTutorialFilters(form: HTMLFormElement): void {
+    const data = new FormData(form);
+    this.tutorialsFilter = {
+      page: 1,
+      q: String(data.get('q') ?? ''),
+      status: String(data.get('status') ?? 'all'),
+      source: String(data.get('source') ?? 'all'),
+    };
+  }
+
+  private requestTutorialFilterLoad(form: HTMLFormElement, debounce: boolean): void {
+    this.readTutorialFilters(form);
+    this.clearTutorialFilterTimer();
+    const generation = ++this.tutorialFilterGeneration;
+    const load = () => {
+      this.tutorialFilterTimer = null;
+      void this.loadFilteredTutorials(generation, debounce);
+    };
+    if (debounce) {
+      this.tutorialFilterTimer = window.setTimeout(load, FILTER_SEARCH_DEBOUNCE_MS);
+    } else {
+      load();
+    }
+  }
+
+  private async loadFilteredTutorials(
+    generation: number,
+    restoreSearchFocus: boolean,
+  ): Promise<void> {
+    this.loading = true;
+    this.error = null;
+    try {
+      const tutorials = await this.api.getTutorials(this.tutorialQuery());
+      if (this.destroyed || generation !== this.tutorialFilterGeneration) return;
+      this.tutorials = tutorials;
+    } catch (error) {
+      if (generation !== this.tutorialFilterGeneration) return;
+      this.handleError(error);
+    } finally {
+      if (this.destroyed || generation !== this.tutorialFilterGeneration) return;
+      this.loading = false;
+      this.render();
+      if (restoreSearchFocus) {
+        const input = this.host.querySelector<HTMLInputElement>(
+          '#admin-tutorial-filters input[name="q"]',
+        );
+        input?.focus({ preventScroll: true });
+        input?.setSelectionRange(input.value.length, input.value.length);
+      }
+    }
+  }
+
   private readRoundFilters(form: HTMLFormElement): void {
     const data = new FormData(form);
     this.roundsFilter = {
@@ -323,6 +392,16 @@ export class AdminMenu {
     });
   }
 
+  private tutorialQuery(): URLSearchParams {
+    return new URLSearchParams({
+      page: String(this.tutorialsFilter.page),
+      perPage: String(PAGE_SIZE),
+      q: this.tutorialsFilter.q,
+      status: this.tutorialsFilter.status,
+      source: this.tutorialsFilter.source,
+    });
+  }
+
   private async refreshOverview(silent = false): Promise<void> {
     if (this.destroyed || this.busy) return;
     try {
@@ -352,6 +431,11 @@ export class AdminMenu {
           this.api.getOverview(),
           this.api.getRounds(this.roundQuery()),
         ]);
+      } else if (this.activeTab === 'tutorials') {
+        [this.overview, this.tutorials] = await Promise.all([
+          this.api.getOverview(),
+          this.api.getTutorials(this.tutorialQuery()),
+        ]);
       } else {
         this.overview = await this.api.getOverview();
       }
@@ -369,6 +453,8 @@ export class AdminMenu {
     ++this.userFilterGeneration;
     this.clearRoundFilterTimer();
     ++this.roundFilterGeneration;
+    this.clearTutorialFilterTimer();
+    ++this.tutorialFilterGeneration;
     this.activeTab = tab;
     this.error = null;
     this.notice = null;
@@ -378,6 +464,9 @@ export class AdminMenu {
       if (tab === 'users') this.users = await this.api.getUsers(this.userQuery());
       if (tab === 'ongoing') this.overview = await this.api.getOverview();
       if (tab === 'past') this.rounds = await this.api.getRounds(this.roundQuery());
+      if (tab === 'tutorials') {
+        this.tutorials = await this.api.getTutorials(this.tutorialQuery());
+      }
     } catch (error) {
       this.handleError(error);
     } finally {
@@ -624,10 +713,105 @@ export class AdminMenu {
     </aside>`;
   }
 
+  private tutorialsMarkup(): string {
+    const statistics = this.tutorials?.statistics;
+    const attempts = this.tutorials?.attempts ?? null;
+    const items = attempts?.items ?? [];
+    const cards: Array<[string, string]> = [
+      ['Attempts', String(statistics?.attempts ?? 0)],
+      ['Unique people', String(statistics?.uniquePeople ?? 0)],
+      ['In progress', String(statistics?.inProgress ?? 0)],
+      ['Completed', String(statistics?.completed ?? 0)],
+      ['Left', String(statistics?.left ?? 0)],
+      ['Completion rate', `${Math.round((statistics?.completionRate ?? 0) * 100)}%`],
+      ['Average elapsed', formatDuration(statistics?.averageDurationMs ?? 0)],
+      ['Reminder opened', String(statistics?.reminderOpened ?? 0)],
+      [
+        'Discord / Google',
+        `${statistics?.discordReminderClicked ?? 0} / ${statistics?.googleCalendarClicked ?? 0}`,
+      ],
+    ];
+    return `<div class="admin-summary admin-tutorial-summary" aria-label="Tutorial statistics">
+      ${cards
+        .map(
+          ([label, value]) =>
+            `<article class="admin-stat-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`,
+        )
+        .join('')}
+    </div>
+    <form id="admin-tutorial-filters" class="admin-filters admin-filters--tutorials">
+      <label>Search<input name="q" type="search" placeholder="Player name or ID" value="${escapeHtml(this.tutorialsFilter.q)}" /></label>
+      <label>Status<select name="status">
+        <option value="all">All statuses</option>
+        <option value="in_progress" ${this.tutorialsFilter.status === 'in_progress' ? 'selected' : ''}>In progress</option>
+        <option value="completed" ${this.tutorialsFilter.status === 'completed' ? 'selected' : ''}>Completed</option>
+        <option value="left" ${this.tutorialsFilter.status === 'left' ? 'selected' : ''}>Left</option>
+      </select></label>
+      <label>Source<select name="source">
+        <option value="all">All tutorial sources</option>
+        <option value="main_menu" ${this.tutorialsFilter.source === 'main_menu' ? 'selected' : ''}>Main menu</option>
+        <option value="first_time_queue" ${this.tutorialsFilter.source === 'first_time_queue' ? 'selected' : ''}>First-time queue</option>
+      </select></label>
+    </form>
+    ${this.loading ? '<p class="admin-empty">Loading tutorial attempts…</p>' : ''}
+    ${!this.loading && items.length === 0 ? '<p class="admin-empty">No tutorial attempts match these filters.</p>' : ''}
+    <div class="admin-table-wrap" ${items.length === 0 ? 'hidden' : ''}>
+      <table class="admin-table admin-tutorial-table">
+        <thead><tr><th>Player</th><th>Source</th><th>Status</th><th>Started</th><th>Elapsed</th><th>Reminder</th></tr></thead>
+        <tbody>${items
+          .map((attempt) => {
+            const statusTone =
+              attempt.status === 'completed'
+                ? 'success'
+                : attempt.status === 'left'
+                  ? 'danger'
+                  : 'info';
+            const departure =
+              attempt.departureReason === 'explicit_exit'
+                ? 'Explicit exit'
+                : attempt.departureReason === 'page_unload'
+                  ? 'Page closed'
+                  : attempt.departureReason === 'inactivity_timeout'
+                    ? 'Timed out'
+                    : '';
+            const reminders = [
+              attempt.reminderOpenedAt ? 'Opened' : '',
+              attempt.discordReminderClickedAt ? 'Discord' : '',
+              attempt.googleCalendarClickedAt ? 'Google' : '',
+            ].filter(Boolean);
+            const reminderTitle = [
+              attempt.reminderOpenedAt
+                ? `Opened ${formatDate(attempt.reminderOpenedAt)}`
+                : '',
+              attempt.discordReminderClickedAt
+                ? `Discord ${formatDate(attempt.discordReminderClickedAt)}`
+                : '',
+              attempt.googleCalendarClickedAt
+                ? `Google ${formatDate(attempt.googleCalendarClickedAt)}`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' · ');
+            return `<tr>
+              <td data-label="Player"><span class="admin-user-summary"><strong>${escapeHtml(attempt.displayName)} ${attempt.isGuest ? statusBadge('Guest', 'neutral') : ''}</strong><small title="${escapeHtml(attempt.participantId)}">${escapeHtml(compactId(attempt.participantId))}</small></span></td>
+              <td data-label="Source">${attempt.source === 'main_menu' ? 'Main menu' : 'First-time queue'}</td>
+              <td data-label="Status">${statusBadge(attempt.status === 'in_progress' ? 'In progress' : attempt.status, statusTone)}${departure ? `<small class="admin-tutorial-detail">${escapeHtml(departure)}</small>` : ''}</td>
+              <td data-label="Started">${escapeHtml(formatDate(attempt.startedAt))}</td>
+              <td data-label="Elapsed">${escapeHtml(formatDuration(attempt.durationMs))}</td>
+              <td data-label="Reminder" title="${escapeHtml(reminderTitle)}">${reminders.length > 0 ? escapeHtml(reminders.join(' · ')) : 'None'}</td>
+            </tr>`;
+          })
+          .join('')}</tbody>
+      </table>
+    </div>
+    ${paginationMarkup(attempts, 'tutorials')}`;
+  }
+
   private tabContentMarkup(): string {
     if (this.activeTab === 'users') return this.usersMarkup();
     if (this.activeTab === 'ongoing') return this.ongoingMarkup();
-    return this.pastMarkup();
+    if (this.activeTab === 'past') return this.pastMarkup();
+    return this.tutorialsMarkup();
   }
 
   private schedulePanelMarkup(): string {
@@ -682,10 +866,10 @@ export class AdminMenu {
       </header>
       ${this.summaryMarkup()}
       <nav class="admin-tabs" aria-label="Admin sections">
-        ${(['users', 'ongoing', 'past'] as const)
+        ${(['users', 'ongoing', 'past', 'tutorials'] as const)
           .map(
             (tab) =>
-              `<button type="button" data-admin-tab="${tab}" aria-selected="${this.activeTab === tab}">${tab === 'ongoing' ? 'Ongoing rounds' : tab === 'past' ? 'Past rounds' : 'Users'}</button>`,
+              `<button type="button" data-admin-tab="${tab}" aria-selected="${this.activeTab === tab}">${tab === 'ongoing' ? 'Ongoing rounds' : tab === 'past' ? 'Past rounds' : tab === 'tutorials' ? 'Tutorials' : 'Users'}</button>`,
           )
           .join('')}
       </nav>
@@ -775,6 +959,23 @@ export class AdminMenu {
         this.requestRoundFilterLoad(roundFilters, false),
       );
     });
+    const tutorialFilters = this.host.querySelector<HTMLFormElement>(
+      '#admin-tutorial-filters',
+    );
+    tutorialFilters?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.requestTutorialFilterLoad(tutorialFilters, false);
+    });
+    tutorialFilters
+      ?.querySelector<HTMLInputElement>('input[name="q"]')
+      ?.addEventListener('input', () =>
+        this.requestTutorialFilterLoad(tutorialFilters, true),
+      );
+    tutorialFilters?.querySelectorAll<HTMLSelectElement>('select').forEach((select) => {
+      select.addEventListener('change', () =>
+        this.requestTutorialFilterLoad(tutorialFilters, false),
+      );
+    });
     this.host
       .querySelectorAll<HTMLButtonElement>('[data-page-kind]')
       .forEach((button) => {
@@ -791,6 +992,11 @@ export class AdminMenu {
             ++this.roundFilterGeneration;
             this.roundsFilter.page = page;
             void this.loadTab('past');
+          } else if (button.dataset.pageKind === 'tutorials') {
+            this.clearTutorialFilterTimer();
+            ++this.tutorialFilterGeneration;
+            this.tutorialsFilter.page = page;
+            void this.loadTab('tutorials');
           }
         });
       });

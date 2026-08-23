@@ -7,9 +7,14 @@ import type {
   AdminOverview,
   AdminPage,
   AdminRoomSnapshot,
+  AdminTutorialAttempt,
+  AdminTutorialReport,
   AdminUserSummary,
   CommunityRoundFrequency,
   CommunityRoundSchedule,
+  TutorialDepartureReason,
+  TutorialSource,
+  TutorialStatus,
 } from '@labyrinth/shared';
 import {
   ADMIN_DEFAULT_PAGE_SIZE,
@@ -102,6 +107,57 @@ interface CommunityRoundScheduleRow {
   frequency: CommunityRoundFrequency;
   time_zone: string;
   updated_at: string;
+}
+
+interface TutorialRow {
+  id: string;
+  profile_id: string | null;
+  participant_id: string;
+  display_name: string;
+  is_guest: boolean;
+  source: TutorialSource;
+  status: TutorialStatus;
+  departure_reason: TutorialDepartureReason | null;
+  started_at: string;
+  last_activity_at: string;
+  ended_at: string | null;
+  duration_ms: number | null;
+  reminder_opened_at: string | null;
+  discord_reminder_clicked_at: string | null;
+  google_calendar_clicked_at: string | null;
+}
+
+interface TutorialStatisticsRow {
+  attempts: number;
+  unique_people: number;
+  in_progress: number;
+  completed: number;
+  left_count: number;
+  average_duration_ms: number;
+  reminder_opened: number;
+  discord_reminder_clicked: number;
+  google_calendar_clicked: number;
+}
+
+export function mapTutorialStatistics(
+  row: Partial<TutorialStatisticsRow> | null | undefined,
+) {
+  const attempts = Number(row?.attempts ?? 0);
+  const completed = Number(row?.completed ?? 0);
+  const left = Number(row?.left_count ?? 0);
+  const finalized = completed + left;
+  return {
+    attempts,
+    uniquePeople: Number(row?.unique_people ?? 0),
+    inProgress: Number(row?.in_progress ?? 0),
+    completed,
+    left,
+    completionRate: finalized > 0 ? completed / finalized : 0,
+    averageDurationMs: Math.round(Number(row?.average_duration_ms ?? 0)),
+    reminderOpened: Number(row?.reminder_opened ?? 0),
+    discordReminderClicked: Number(row?.discord_reminder_clicked ?? 0),
+    googleCalendarClicked: Number(row?.google_calendar_clicked ?? 0),
+  };
 }
 
 type DirectoryUser = Omit<AdminUserSummary, 'currentRoomId'>;
@@ -680,6 +736,92 @@ export async function getCompletedRound(
     participants: [...registered, ...guests].sort((left, right) =>
       left.displayName.localeCompare(right.displayName),
     ),
+  };
+}
+
+function mapTutorialAttempt(row: TutorialRow, generatedAt: string): AdminTutorialAttempt {
+  const liveDuration = Math.max(0, Date.parse(generatedAt) - Date.parse(row.started_at));
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    participantId: row.participant_id,
+    displayName: row.display_name,
+    isGuest: row.is_guest,
+    source: row.source,
+    status: row.status,
+    departureReason: row.departure_reason,
+    startedAt: row.started_at,
+    lastActivityAt: row.last_activity_at,
+    endedAt: row.ended_at,
+    durationMs: row.duration_ms ?? liveDuration,
+    reminderOpenedAt: row.reminder_opened_at,
+    discordReminderClickedAt: row.discord_reminder_clicked_at,
+    googleCalendarClickedAt: row.google_calendar_clicked_at,
+  };
+}
+
+export async function getAdminTutorialReport(
+  query: URLSearchParams,
+): Promise<AdminTutorialReport> {
+  requireConfiguration();
+  const generatedAt = new Date().toISOString();
+  const staleBefore = new Date(Date.parse(generatedAt) - 10 * 60_000).toISOString();
+  const client = getSupabaseAdminClient();
+  const { error: finalizeError } = await client.rpc('finalize_stale_tutorial_sessions', {
+    p_stale_before: staleBefore,
+  });
+  if (finalizeError) {
+    throw new AdminServiceError(502, 'SUPABASE_ERROR', finalizeError.message);
+  }
+
+  const { page, perPage } = readPagination(query);
+  const offset = (page - 1) * perPage;
+  const search = (query.get('q') ?? '').trim().replace(/[%_,()]/g, '');
+  const status = query.get('status') ?? 'all';
+  const source = query.get('source') ?? 'all';
+  let attemptsRequest = client
+    .from('tutorial_sessions')
+    .select(
+      'id, profile_id, participant_id, display_name, is_guest, source, status, departure_reason, started_at, last_activity_at, ended_at, duration_ms, reminder_opened_at, discord_reminder_clicked_at, google_calendar_clicked_at',
+      { count: 'exact' },
+    )
+    .order('started_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(offset, offset + perPage - 1);
+  if (search) {
+    attemptsRequest = attemptsRequest.or(
+      `display_name.ilike.%${search}%,participant_id.ilike.%${search}%`,
+    );
+  }
+  if (['in_progress', 'completed', 'left'].includes(status)) {
+    attemptsRequest = attemptsRequest.eq('status', status);
+  }
+  if (source === 'main_menu' || source === 'first_time_queue') {
+    attemptsRequest = attemptsRequest.eq('source', source);
+  }
+
+  const [attemptsResult, statisticsResult] = await Promise.all([
+    attemptsRequest,
+    client.rpc('get_tutorial_statistics'),
+  ]);
+  if (attemptsResult.error) {
+    throw new AdminServiceError(502, 'SUPABASE_ERROR', attemptsResult.error.message);
+  }
+  if (statisticsResult.error) {
+    throw new AdminServiceError(502, 'SUPABASE_ERROR', statisticsResult.error.message);
+  }
+  const statisticsRow = (statisticsResult.data as TutorialStatisticsRow[] | null)?.[0];
+  return {
+    generatedAt,
+    statistics: mapTutorialStatistics(statisticsRow),
+    attempts: {
+      items: ((attemptsResult.data ?? []) as TutorialRow[]).map((row) =>
+        mapTutorialAttempt(row, generatedAt),
+      ),
+      page,
+      perPage,
+      total: attemptsResult.count ?? 0,
+    },
   };
 }
 
