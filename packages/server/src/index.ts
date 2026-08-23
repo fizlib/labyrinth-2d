@@ -39,6 +39,7 @@ import {
 } from '@labyrinth/shared';
 
 import { Room, type SocketData } from './Room.js';
+import { registerAdminApi } from './adminApi.js';
 import {
   isSupabasePlayerVerificationConfigured,
   isSupabaseMatchPersistenceConfigured,
@@ -171,6 +172,10 @@ async function handleJoinRoom(
   try {
     let identity = await verifyPlayerAccessToken(msg.accessToken);
     if (!data.connected) return;
+    if (identity?.suspendedAt) {
+      sendError(ws, 'ACCOUNT_SUSPENDED', 'This account is suspended.');
+      return;
+    }
 
     const pendingMatchWrite = identity
       ? pendingMatchWritesByUserId.get(identity.userId)
@@ -180,6 +185,10 @@ async function handleJoinRoom(
       if (!data.connected) return;
       identity = await verifyPlayerAccessToken(msg.accessToken);
       if (!data.connected) return;
+      if (identity?.suspendedAt) {
+        sendError(ws, 'ACCOUNT_SUSPENDED', 'This account is suspended.');
+        return;
+      }
     }
 
     data.userId = identity?.userId ?? null;
@@ -312,8 +321,23 @@ function generatePlayerId(): string {
 
 // ── uWebSockets.js Application ──────────────────────────────────────────────
 
-uWS
-  .App()
+const app = uWS.App();
+
+registerAdminApi(app, {
+  getRooms: () => Array.from(rooms.values(), (room) => room.getAdminSnapshot()),
+  removeUserFromRooms: (userId) => {
+    const room = roomsByUserId.get(userId);
+    room?.removeAuthenticatedUser(
+      userId,
+      'Your account was suspended by an administrator.',
+    );
+  },
+  setUserAdminInRooms: (userId, isAdmin) => {
+    roomsByUserId.get(userId)?.setAuthenticatedUserAdmin(userId, isAdmin);
+  },
+});
+
+app
   .ws<SocketData>('/*', {
     /* ── Connection Settings ─────────────────────────────────── */
     compression: uWS.SHARED_COMPRESSOR,

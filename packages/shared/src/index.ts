@@ -15,6 +15,24 @@ import type { LobbyJoinMode, LobbyState } from './lobby.js';
 import type { TrapCellPlacement } from './maps/level1.js';
 
 export {
+  ADMIN_DEFAULT_PAGE_SIZE,
+  ADMIN_MAX_PAGE_SIZE,
+  type AdminRoomPhase,
+  type AdminRoomPlayer,
+  type AdminRoomSnapshot,
+  type AdminOverview,
+  type AdminUserSummary,
+  type AdminCompletedRoundSummary,
+  type AdminRoundParticipant,
+  type AdminCompletedRoundDetail,
+  type AdminAuditAction,
+  type AdminAuditEntry,
+  type AdminPage,
+  type AdminMutationResult,
+  type AdminApiError,
+} from './admin.js';
+
+export {
   LOBBY_MAX_PLAYERS,
   LOBBY_MIN_PLAYERS,
   LOBBY_VOTE_DELAY_MS,

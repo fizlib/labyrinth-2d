@@ -1,6 +1,6 @@
 # False Arrow Architecture
 
-Last updated: 2026-08-14 - Cooperative spike-gate obstacle chains
+Last updated: 2026-08-23 - Server-backed administrator menu
 
 ## Project Overview
 
@@ -19,6 +19,14 @@ server-only RPC atomically records every completed-match ledger, updates every
 authenticated player's win/loss record, and changes ratings only for eligible
 matches. Supabase does not participate in the live
 authoritative simulation.
+
+The Main Menu administrator console is also server-authoritative. Its HTTP API
+revalidates the caller's Supabase token, active `profiles.is_admin` permission,
+and `profiles.suspended_at` state on every request. A server-only Supabase client
+joins Auth email/sign-in metadata with profiles and player statistics, reads the
+protected completed-match ledger, and applies transactional profile, role, and
+suspension changes. Those changes are appended to `admin_audit_log`; the browser
+never receives a Supabase secret or direct access to protected tables.
 
 One room owns one maze instance. The server is authoritative for player state, hidden role seats, runestones, treasure-chest state, sword-field state, portal state, and wisdom orbs. The client predicts local movement for responsiveness, reconciles against server snapshots, and interpolates remote players for smoother motion.
 
@@ -233,14 +241,38 @@ Waiting-room chat uses the same normalization, 120-character limit, and per-play
 
 ### Competitive Records and Team Elo
 
-- Every authenticated profile has a `player_stats` row starting at `1200` Elo with zero total matches, rated matches, wins, and losses. The main menu and profile read these owner-private counters directly from Supabase; completed-match history is stored in `matches` and authenticated roster results in `match_participants`.
+- Every authenticated profile has a `player_stats` row starting at `1200` Elo with zero total matches, rated matches, wins, and losses. The main menu and profile read these owner-private counters directly from Supabase; completed-match history is stored in `matches`, authenticated roster results in `match_participants`, and guest names, roles, outcomes, and final states in `match_guest_participants`.
 - To keep low-population queues usable, Quick Play still fills the first available public lobby without a rating filter. Rating-aware queue grouping is deferred until concurrency supports it.
 - A match is rated only when a public room starts normally with a full roster of 9 distinct authenticated profiles and server-side match persistence is configured. Underfilled games, private games, guest-containing games, administrator-altered games, and debugged matches are unranked.
-- Every completed match gets a persistent ledger row. It increments total matches and either wins or losses for each authenticated starting player, even when the match is private, underfilled, contains guests, or is otherwise unranked. Guest-only matches have no profile counters to update.
+- Every completed match gets a persistent ledger row. It increments total matches and either wins or losses for each authenticated starting player, even when the match is private, underfilled, contains guests, or is otherwise unranked. Guests are retained only as match participants and never receive profiles, Elo, or account counters; guest-only matches therefore have no profile counters to update.
 - The server captures the complete starting roster before play. Permanent leavers remain in the result ledger and are marked abandoned, so leaving cannot erase a loss or match result.
 - Survivor and Warden team strength use average rating because the sides have different player counts. The first ten rated matches use `K=40`; established players use `K=24`; ratings have a floor of `100`.
 - Only the team result affects Elo. Escapes and abandonment are retained for auditing and future statistics but do not award performance bonuses.
-- Every match has a server-generated UUID. The service-role-only `record_match_result` database function locks all authenticated participant records and writes the match, participants, all-match counters, and any eligible rating changes in one idempotent transaction. Unranked participants receive a zero rating change, and only `rated_matches` controls the provisional K-factor.
+- Every match has a server-generated UUID. The service-role-only `record_match_result_with_guests` database function wraps the authenticated match/counter update and guest roster insert in one idempotent transaction. Unranked authenticated participants receive a zero rating change, guests receive no rating fields, and only `rated_matches` controls the provisional K-factor.
+
+### Administrator Operations
+
+- Active administrators see **Admin menu** directly below **Tutorial**. The
+  responsive DOM console contains registered Users, Ongoing rounds, Past
+  rounds with participant drilldown, and the administrator-only Style Editor
+  link. Administrative mutations remain recorded in the server-only audit
+  ledger but are not displayed in the console.
+- Summary and live-room snapshots refresh every ten seconds while the view is
+  visible. Persistent counts are cached for thirty seconds; manual Refresh also
+  reloads the active persistent tab.
+- Users are Auth accounts joined to `profiles` and `player_stats`; transient
+  guests appear in live room rosters and aggregate online counts. Once a round
+  completes, its guest display names and roles are also visible in that
+  round's participant details.
+- Profile edits, admin-role changes, suspensions, and reactivations use
+  service-role-only database functions. An administrator cannot demote or
+  suspend themselves, promote a suspended user, or remove the final active
+  administrator.
+- Suspension first sets the application block, removes any live seat, records
+  abandonment, disables Elo for the altered round, and then applies a long
+  Supabase Auth ban. Reactivation clears the Auth ban before removing the app
+  block. Existing bearer tokens are rejected through `suspended_at` even before
+  their JWT expires.
 
 ### Hidden Roles and Wisdom Orbs
 
@@ -380,7 +412,9 @@ The client first runs a lightweight DOM app shell with these states:
    existing guest profile;
 4. load or create the signed-in user's `public.profiles` row and require a new
    account to choose its display name once;
-5. show Main Menu, Join by Code, Tutorial, or Profile;
+5. show Main Menu, Join by Code, Tutorial, Profile, or the server-backed Admin
+   menu for an active administrator; suspended accounts instead receive a
+   blocked-account screen with Sign Out and Check Again;
 6. after Main Menu renders, lazily import PixiJS and prime the runtime texture
    cache during idle menu time; all small authored texture requests begin as one
    batch so a cold cache does not create a category-by-category waterfall;
@@ -564,6 +598,8 @@ The client currently has multiple UI subsystems, not just the minimap:
 
 - `packages/shared/src/index.ts`
   - shared constants, protocol types, and re-exports
+- `packages/shared/src/admin.ts`
+  - typed Admin API pages, room snapshots, user records, round details, and audit entries
 - `packages/shared/src/lobby.ts`
   - lobby limits, room-code validation, voting thresholds, role counts, and public state contracts
 - `packages/shared/src/physics.ts`
@@ -578,14 +614,20 @@ The client currently has multiple UI subsystems, not just the minimap:
 ### Server Package
 
 - `packages/server/src/index.ts`
-  - WebSocket server bootstrap and protocol routing
+  - WebSocket/HTTP server bootstrap and protocol routing
+- `packages/server/src/adminApi.ts` / `adminService.ts`
+  - bearer-authenticated administrator routes, protected Supabase queries, and mutations
 - `packages/server/src/Room.ts`
   - room lifecycle, hidden role seats/private inventories, authoritative state, tick loop, runestone logic, portal activation, wisdom-orb handling
 
 ### Client Package
 
 - `packages/client/src/main.ts`
-  - Supabase and guest session restoration plus Auth/Main Menu/Profile DOM navigation
+  - Supabase and guest session restoration plus Auth/Main Menu/Profile/Admin DOM navigation
+- `packages/client/src/admin/`
+  - protected Admin API client and responsive user/round/activity console
+- `packages/client/src/navigation/AppShellRoute.ts`
+  - canonical `/admin` route recognition and session-refresh view preservation
 - `packages/client/src/auth/supabase.ts`
   - browser-safe Supabase configuration, OAuth helpers, profile loading, validation, and updates
 - `packages/client/src/auth/guest.ts`

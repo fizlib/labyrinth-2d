@@ -1,4 +1,5 @@
 import type { MatchRecord } from './Room.js';
+import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_REQUEST_TIMEOUT_MS = 5_000;
 const MATCH_WRITE_ATTEMPTS = 3;
@@ -19,6 +20,7 @@ export interface VerifiedPlayerIdentity {
   isAdmin: boolean;
   rating: number;
   ratedMatches: number;
+  suspendedAt: string | null;
 }
 
 function readSupabaseUrl(): string | null {
@@ -64,6 +66,25 @@ const persistenceConfiguration = readPersistenceConfiguration();
 
 export const isSupabasePlayerVerificationConfigured = authConfiguration !== null;
 export const isSupabaseMatchPersistenceConfigured = persistenceConfiguration !== null;
+export const isSupabaseAdminConfigured =
+  authConfiguration !== null && persistenceConfiguration !== null;
+
+const supabaseAdminClient = persistenceConfiguration
+  ? createClient(persistenceConfiguration.url, persistenceConfiguration.secretKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false,
+      },
+    })
+  : null;
+
+export function getSupabaseAdminClient() {
+  if (!supabaseAdminClient) {
+    throw new Error('Supabase administrator access is not configured.');
+  }
+  return supabaseAdminClient;
+}
 
 function bearerHeaders(accessToken: string): Record<string, string> {
   return {
@@ -101,7 +122,7 @@ export async function verifyPlayerAccessToken(
     if (typeof user.id !== 'string' || !user.id) return null;
 
     const profileUrl = new URL(`${authConfiguration.url}/rest/v1/profiles`);
-    profileUrl.searchParams.set('select', 'display_name,is_admin');
+    profileUrl.searchParams.set('select', 'display_name,is_admin,suspended_at');
     profileUrl.searchParams.set('id', `eq.${user.id}`);
     profileUrl.searchParams.set('limit', '1');
 
@@ -119,6 +140,7 @@ export async function verifyPlayerAccessToken(
     const profiles = (await profileResponse.json()) as Array<{
       display_name?: unknown;
       is_admin?: unknown;
+      suspended_at?: unknown;
     }>;
     const stats = (await statsResponse.json()) as Array<{
       rating?: unknown;
@@ -142,6 +164,7 @@ export async function verifyPlayerAccessToken(
       isAdmin: profile.is_admin === true,
       rating: playerStats.rating,
       ratedMatches: playerStats.rated_matches,
+      suspendedAt: typeof profile.suspended_at === 'string' ? profile.suspended_at : null,
     };
   } catch (error) {
     console.warn(
@@ -171,7 +194,25 @@ function persistenceHeaders(): Record<string, string> {
   return headers;
 }
 
-/** Persist one completed match through the service-role-only atomic RPC. */
+async function callPersistenceRpc(
+  name: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const response = await fetch(
+    `${persistenceConfiguration!.url}/rest/v1/rpc/${name}`,
+    {
+      method: 'POST',
+      headers: persistenceHeaders(),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Supabase ${name} returned HTTP ${response.status}`);
+  }
+}
+
+/** Persist one completed match and its complete roster through one atomic RPC. */
 export async function recordMatchResult(record: MatchRecord): Promise<void> {
   if (!persistenceConfiguration) {
     throw new Error('Supabase match persistence is not configured.');
@@ -180,30 +221,19 @@ export async function recordMatchResult(record: MatchRecord): Promise<void> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < MATCH_WRITE_ATTEMPTS; attempt++) {
     try {
-      const signal = AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS);
-      const response = await fetch(
-        `${persistenceConfiguration.url}/rest/v1/rpc/record_match_result`,
-        {
-          method: 'POST',
-          headers: persistenceHeaders(),
-          body: JSON.stringify({
-            p_match_id: record.matchId,
-            p_room_id: record.roomId,
-            p_winner: record.winner,
-            p_player_count: record.playerCount,
-            p_rated: record.rated,
-            p_started_at: record.startedAt,
-            p_ended_at: record.endedAt,
-            p_participants: record.participants,
-          }),
-          signal,
-        },
-      );
-      if (!response.ok) {
-        throw new Error(`Supabase returned HTTP ${response.status}`);
-      }
+      await callPersistenceRpc('record_match_result_with_guests', {
+        p_match_id: record.matchId,
+        p_room_id: record.roomId,
+        p_winner: record.winner,
+        p_player_count: record.playerCount,
+        p_rated: record.rated,
+        p_started_at: record.startedAt,
+        p_ended_at: record.endedAt,
+        p_participants: record.participants,
+        p_guest_participants: record.guestParticipants,
+      });
       console.info(
-        `[Match] Recorded ${record.rated ? 'rated' : 'unrated'} match ${record.matchId} (${record.participants.length}/${record.playerCount} authenticated players)`,
+        `[Match] Recorded ${record.rated ? 'rated' : 'unrated'} match ${record.matchId} (${record.participants.length} authenticated, ${record.guestParticipants.length} guests)`,
       );
       return;
     } catch (error) {

@@ -20,6 +20,12 @@ apply `supabase/migrations/20260811120000_add_profile_admin.sql` and
 `supabase/migrations/20260813130000_require_display_name_choice.sql` and
 `supabase/migrations/20260813140000_record_all_completed_matches.sql`, then
 `supabase/migrations/20260813150000_reset_match_schema.sql`, in order.
+Finally apply
+`supabase/migrations/20260823120000_add_admin_menu.sql` for account suspension,
+transactional user-management safeguards, and the administrator audit ledger.
+Then apply
+`supabase/migrations/20260823130000_record_guest_match_participants.sql` so
+completed rounds retain guest display names, roles, outcomes, and final state.
 If the competitive-stats migration was already applied, apply only the newer
 unapplied migrations; do not rerun or edit its database migration record.
 
@@ -41,8 +47,16 @@ The migration:
   display-name onboarding flag;
 - stores `is_admin` while preventing authenticated clients from changing it;
 - creates owner-readable `player_stats` plus server-only `matches` and
-  `match_participants` ledgers;
-- installs one service-role-only, idempotent transaction for completed matches;
+  authenticated `match_participants` ledgers;
+- stores guest starting-roster results separately in
+  `match_guest_participants`, without creating profiles, ratings, or account
+  statistics for guests;
+- installs one service-role-only, idempotent transaction for completed matches
+  and both authenticated and guest roster entries;
+- stores application suspensions and exposes service-role-only user-management
+  transactions that protect the acting and final active administrator;
+- records every profile, role, suspension, and reactivation change in the
+  append-only `admin_audit_log`;
 - denies profile access to unauthenticated clients.
 
 Test the migration in a non-production project first. A failing Auth trigger
@@ -108,15 +122,28 @@ Copy-Item packages/server/.env.example packages/server/.env.local
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
 SUPABASE_SECRET_KEY=sb_secret_YOUR_SERVER_KEY
+# Required only when the browser calls a different admin-API origin:
+ADMIN_ALLOWED_ORIGINS=https://game.example.com,http://localhost:5173
 ```
 
 `SUPABASE_ANON_KEY` is also accepted for projects still using a legacy anon
 key. `SUPABASE_SERVICE_ROLE_KEY` is accepted in place of the newer secret key.
-The secret is required to record match results and must exist only in the game
-server environment. If it is missing, matches continue normally but no
-persistent match, win/loss, or rating updates are written. If token verification
+The secret is required to record match results and serve the Admin menu; it must
+exist only in the game server environment. If it is missing, matches continue
+normally but no persistent match, win/loss, or rating updates are written and
+the Admin menu reports that its backend is unavailable. If token verification
 fails, the connection is treated as an unverified guest and cannot make a match
 eligible for rating or receive persistent counters.
+
+The client normally calls `/admin-api` through the same origin as `/ws`; Vite
+proxies both routes in development. When `VITE_SERVER_URL` points directly at a
+different origin, add the exact browser origin to the comma-separated
+`ADMIN_ALLOWED_ORIGINS` server variable. The Admin API verifies the bearer token
+and re-reads `is_admin` and `suspended_at` for every request. It uses the secret
+key only on the server to list Auth users and synchronize Supabase Auth bans.
+The Admin menu is directly addressable at `/admin`; the client Vercel config
+rewrites that path to the SPA entry point while client-side history keeps the
+URL synchronized with the Admin menu and its Back button.
 
 Grant administrator status only from a trusted SQL or backend context:
 
@@ -162,11 +189,19 @@ profile counters to update.
    is created. Edit the guest profile, reload the tab to confirm it is restored,
    then choose Leave Guest Session and confirm the local profile is cleared.
 10. Set one test profile's `is_admin` to true from trusted SQL. Confirm that
-    account sees the debug menu and can start a one-player lobby immediately.
+    account sees **Admin menu** below **Tutorial**, sees the in-game debug menu,
+    and can start a one-player lobby immediately.
 11. Confirm a regular signed-in user and a guest see neither admin control and
     cannot trigger the corresponding WebSocket actions manually.
+12. From Admin menu, confirm Users, Ongoing rounds, Past rounds, and Activity
+    load. Suspend a non-admin test account and verify its active room seat is
+    released immediately, it sees the suspended-account screen after reload,
+    and its audit entry includes the supplied reason.
+13. Reactivate that account and confirm **Check Again** returns it to Main Menu.
+    Verify self-demotion, self-suspension, and removing the final active admin
+    are rejected.
 
 For RLS verification, use two test users: each user must be able to select and
 update only the row whose `id` equals their own Auth user ID. Neither user
-should be able to modify `id`, `is_admin`, `created_at`, or `updated_at`, or
-delete a row.
+should be able to modify `id`, `is_admin`, `suspended_at`, `created_at`, or
+`updated_at`, read `admin_audit_log`, or delete a row.

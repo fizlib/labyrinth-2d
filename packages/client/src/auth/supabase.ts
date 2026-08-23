@@ -12,6 +12,7 @@ export interface Profile {
   display_name: string;
   avatar_url: string | null;
   is_admin: boolean;
+  suspended_at: string | null;
   display_name_chosen: boolean;
   created_at: string;
   updated_at: string;
@@ -80,7 +81,7 @@ export type SupabaseConfiguration =
   | { client: null; error: SupabaseConfigurationError };
 
 const PROFILE_COLUMNS =
-  'id, display_name, avatar_url, is_admin, display_name_chosen, created_at, updated_at';
+  'id, display_name, avatar_url, is_admin, suspended_at, display_name_chosen, created_at, updated_at';
 const PLAYER_STATS_COLUMNS =
   'profile_id, rating, matches_played, rated_matches, wins, losses, created_at, updated_at';
 const MAX_DISPLAY_NAME_LENGTH = 32;

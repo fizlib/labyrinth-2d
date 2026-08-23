@@ -57,6 +57,13 @@ import type {
   TrainingQueueStatus,
   TrainingQueueSubscription,
 } from './systems/TrainingQueueBanner';
+import { AdminMenu } from './admin/AdminMenu';
+import {
+  getAppShellRoute,
+  getAppShellRoutePath,
+  preservesViewDuringSessionRefresh,
+  type AppShellRoute,
+} from './navigation/AppShellRoute';
 
 inject();
 
@@ -64,11 +71,26 @@ const PLAY_AGAIN_STORAGE_KEY = 'labyrinth-play-again';
 const COMMUNITY_ROUND_STARTED_STORAGE_PREFIX = 'labyrinth-community-round-started';
 const TRAINING_COMPLETE_RETURN_STORAGE_KEY = 'labyrinth-training-complete-return-v1';
 const DEPLOYMENT_RELOAD_STORAGE_KEY = 'labyrinth-deployment-reload-at';
+const ADMIN_RETURN_STORAGE_KEY = 'false-arrow-admin-return-v1';
 const DEPLOYMENT_RELOAD_COOLDOWN_MS = 60_000;
 
 let deploymentReloadScheduled = false;
 let gameModulePromise: Promise<typeof import('./game')> | null = null;
 let gameWarmupScheduled = false;
+
+function getInitialAppShellRoute(): AppShellRoute {
+  const route = getAppShellRoute(window.location.pathname);
+  if (route === 'admin') return route;
+  try {
+    if (window.sessionStorage.getItem(ADMIN_RETURN_STORAGE_KEY) === '1') {
+      window.sessionStorage.removeItem(ADMIN_RETURN_STORAGE_KEY);
+      return 'admin';
+    }
+  } catch {
+    // Direct routing still works when session storage is unavailable.
+  }
+  return route;
+}
 
 function loadGameModule(): Promise<typeof import('./game')> {
   gameModulePromise ??= import('./game');
@@ -108,6 +130,8 @@ type AppView =
   | 'guest-name'
   | 'account-name'
   | 'menu'
+  | 'admin'
+  | 'suspended'
   | 'join'
   | 'profile'
   | 'launching-game'
@@ -435,6 +459,9 @@ class AppController {
   >();
   private restoringInitialSession = true;
   private communityRoundTimer: number | null = null;
+  private adminMenu: AdminMenu | null = null;
+  private requestedShellRoute = getInitialAppShellRoute();
+  private readonly handlePopState = () => this.renderRouteFromLocation();
   private pendingRoomCode = (() => {
     const code = normalizeRoomCode(
       new URL(window.location.href).searchParams.get('room'),
@@ -443,6 +470,7 @@ class AppController {
   })();
 
   async start(): Promise<void> {
+    window.addEventListener('popstate', this.handlePopState);
     this.renderRestoring('Restoring your passage…');
     const client = this.configuration.client;
 
@@ -524,6 +552,7 @@ class AppController {
     this.session = session;
 
     if (!session) {
+      this.disposeAdminMenu();
       if (this.identityMode === 'guest') return;
       this.identityMode = null;
       this.profile = null;
@@ -537,17 +566,16 @@ class AppController {
     this.identityMode = 'authenticated';
 
     if (this.profile?.id === session.user.id) {
+      if (this.profile.suspended_at) {
+        if (this.view !== 'suspended') this.renderSuspended();
+        return;
+      }
       if (!this.profile.display_name_chosen) {
         if (this.view !== 'account-name') this.renderAccountName();
         return;
       }
-      if (
-        this.view !== 'profile' &&
-        this.view !== 'launching-game' &&
-        this.view !== 'game'
-      ) {
-        this.view = 'menu';
-        this.renderMenu();
+      if (!preservesViewDuringSessionRefresh(this.view)) {
+        this.renderRequestedShellRoute();
       }
       return;
     }
@@ -566,12 +594,15 @@ class AppController {
       this.playerStats = playerStats;
       this.profileError = null;
       this.authError = null;
+      if (profile.suspended_at) {
+        this.renderSuspended();
+        return;
+      }
       if (!profile.display_name_chosen) {
         this.renderAccountName();
         return;
       }
-      this.view = 'menu';
-      this.renderMenu();
+      this.renderRequestedShellRoute();
     } catch (error) {
       if (revision !== this.sessionRevision) return;
       this.profile = null;
@@ -752,8 +783,7 @@ class AppController {
         },
         true,
       );
-      this.view = 'menu';
-      this.renderMenu();
+      this.renderRequestedShellRoute();
     } catch (accountNameError) {
       if (saveButton) saveButton.disabled = false;
       if (cancelButton) cancelButton.disabled = false;
@@ -779,8 +809,7 @@ class AppController {
     this.authError = null;
     this.profileError = null;
     this.profileNotice = null;
-    this.view = 'menu';
-    this.renderMenu();
+    this.renderRequestedShellRoute();
   }
 
   private async signInWithGoogle(): Promise<void> {
@@ -794,12 +823,25 @@ class AppController {
     if (status) status.textContent = 'Opening Google sign-in…';
     this.authError = null;
 
+    if (this.requestedShellRoute === 'admin') {
+      try {
+        window.sessionStorage.setItem(ADMIN_RETURN_STORAGE_KEY, '1');
+      } catch {
+        // The direct /admin URL remains available when storage is disabled.
+      }
+    }
+
     const { error } = await client.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: getOAuthRedirectUrl() },
     });
 
     if (error) {
+      try {
+        window.sessionStorage.removeItem(ADMIN_RETURN_STORAGE_KEY);
+      } catch {
+        // Nothing to clean up when storage is unavailable.
+      }
       this.authError = `Google sign-in could not start: ${error.message}`;
       this.renderAuth();
     }
@@ -816,8 +858,56 @@ class AppController {
     return roomCode;
   }
 
+  private setShellRoute(
+    route: AppShellRoute,
+    historyMode: 'push' | 'replace',
+  ): void {
+    this.requestedShellRoute = route;
+    const url = new URL(window.location.href);
+    url.pathname = getAppShellRoutePath(route);
+    url.searchParams.delete('room');
+    url.hash = '';
+    const destination = `${url.pathname}${url.search}`;
+    const state = { falseArrowRoute: route };
+    if (historyMode === 'push') window.history.pushState(state, '', destination);
+    else window.history.replaceState(state, '', destination);
+  }
+
+  private renderRequestedShellRoute(): void {
+    if (!this.profile || !this.identityMode) return;
+    if (
+      this.requestedShellRoute === 'admin' &&
+      this.session &&
+      this.identityMode === 'authenticated' &&
+      this.profile.is_admin &&
+      !this.profile.suspended_at
+    ) {
+      this.setShellRoute('admin', 'replace');
+      this.renderAdminMenu();
+      return;
+    }
+    if (this.requestedShellRoute === 'admin') this.setShellRoute('menu', 'replace');
+    this.view = 'menu';
+    this.renderMenu();
+  }
+
+  private renderRouteFromLocation(): void {
+    this.requestedShellRoute = getAppShellRoute(window.location.pathname);
+    if (!this.profile || !this.identityMode) return;
+    if (this.view === 'launching-game' || this.view === 'game') {
+      if (this.requestedShellRoute === 'admin') this.setShellRoute('menu', 'replace');
+      return;
+    }
+    this.renderRequestedShellRoute();
+  }
+
   private renderMenu(): void {
     if (!this.profile || !this.identityMode) return;
+    if (this.profile.suspended_at) {
+      this.renderSuspended();
+      return;
+    }
+    this.disposeAdminMenu();
     this.stopCommunityRoundTimer();
 
     const playAgain = window.sessionStorage.getItem(PLAY_AGAIN_STORAGE_KEY) === '1';
@@ -897,7 +987,7 @@ class AppController {
             <button id="create-game" class="pixel-button" type="button">Create Private Game</button>
             <button id="join-game" class="pixel-button" type="button">Join with Code</button>
             <button id="tutorial" class="pixel-button" type="button">Tutorial</button>
-            ${this.profile.is_admin ? '<a id="open-style-editor" class="pixel-button" href="/style-editor.html" target="_blank" rel="noopener">Style Editor</a>' : ''}
+            ${this.profile.is_admin ? '<button id="open-admin-menu" class="pixel-button" type="button">Admin menu</button>' : ''}
             <button id="sign-out" class="menu-sign-out" type="button">${isGuest ? 'Leave Guest Session' : 'Sign Out'}</button>
             ${discordInviteMarkup()}
           </nav>
@@ -950,6 +1040,12 @@ class AppController {
         void this.launchTutorial();
       });
     document
+      .querySelector<HTMLButtonElement>('#open-admin-menu')
+      ?.addEventListener('click', () => {
+        this.setShellRoute('admin', 'push');
+        this.renderAdminMenu();
+      });
+    document
       .querySelector<HTMLButtonElement>('#open-profile-avatar')
       ?.addEventListener('click', () => {
         this.profileNotice = null;
@@ -972,6 +1068,120 @@ class AppController {
     if (playAgain) {
       window.setTimeout(() => void this.launchGame('quick'), 0);
     }
+  }
+
+  private renderAdminMenu(): void {
+    if (
+      !this.profile ||
+      !this.session ||
+      this.identityMode !== 'authenticated' ||
+      !this.profile.is_admin ||
+      this.profile.suspended_at
+    ) {
+      this.setShellRoute('menu', 'replace');
+      this.renderMenu();
+      return;
+    }
+    this.stopCommunityRoundTimer();
+    this.disposeAdminMenu();
+    this.view = 'admin';
+    root.innerHTML = shellMarkup(
+      '<div id="admin-menu-root" class="admin-menu-root"></div>',
+      'app-screen--admin',
+    );
+    const host = root.querySelector<HTMLElement>('#admin-menu-root');
+    if (!host) return;
+    this.adminMenu = new AdminMenu(host, {
+      currentUserId: this.profile.id,
+      getAccessToken: () => this.session?.access_token ?? null,
+      onBack: () => {
+        this.disposeAdminMenu();
+        this.setShellRoute('menu', 'replace');
+        this.view = 'menu';
+        this.renderMenu();
+      },
+      onAccessLost: () => void this.reloadProfileAfterAdminAccessLoss(),
+      onCurrentUserUpdated: (user) => {
+        if (!this.profile || this.profile.id !== user.id) return;
+        this.profile = {
+          ...this.profile,
+          display_name: user.displayName,
+          avatar_url: user.avatarUrl,
+          is_admin: user.isAdmin,
+          suspended_at: user.suspendedAt,
+          updated_at: user.updatedAt,
+        };
+      },
+    });
+    void this.adminMenu.start();
+  }
+
+  private async reloadProfileAfterAdminAccessLoss(): Promise<void> {
+    this.disposeAdminMenu();
+    const session = this.session;
+    this.profile = null;
+    this.playerStats = null;
+    if (session) await this.reconcileSession(session);
+    else this.renderAuth();
+  }
+
+  private renderSuspended(): void {
+    if (!this.profile || this.identityMode !== 'authenticated') return;
+    this.disposeAdminMenu();
+    this.stopCommunityRoundTimer();
+    this.view = 'suspended';
+    root.innerHTML = shellMarkup(
+      `<section class="app-panel app-panel--compact" aria-labelledby="suspended-title">
+        <span class="app-panel__eyebrow">Account access</span>
+        <h1 id="suspended-title" class="app-panel__heading">Account suspended</h1>
+        <p>Your account cannot enter False Arrow or use administrator tools. Contact an administrator if you believe this is a mistake.</p>
+        <div id="suspended-error" class="app-alert app-alert--error" role="alert" hidden></div>
+        <p id="suspended-status" class="app-status" aria-live="polite"></p>
+        <div class="error-actions">
+          <button id="check-suspension" class="pixel-button pixel-button--primary" type="button">Check Again</button>
+          <button id="suspended-sign-out" class="pixel-button pixel-button--quiet" type="button">Sign Out</button>
+        </div>
+      </section>`,
+      'app-screen--profile',
+    );
+    root
+      .querySelector<HTMLButtonElement>('#check-suspension')
+      ?.addEventListener('click', () => {
+        void this.checkSuspensionStatus();
+      });
+    root
+      .querySelector<HTMLButtonElement>('#suspended-sign-out')
+      ?.addEventListener('click', () => {
+        void this.signOut('#suspended-status');
+      });
+  }
+
+  private async checkSuspensionStatus(): Promise<void> {
+    const button = root.querySelector<HTMLButtonElement>('#check-suspension');
+    const status = root.querySelector<HTMLElement>('#suspended-status');
+    const errorBox = root.querySelector<HTMLElement>('#suspended-error');
+    if (!this.session || !button) return;
+    button.disabled = true;
+    if (status) status.textContent = 'Checking account status…';
+    if (errorBox) errorBox.hidden = true;
+    try {
+      const session = this.session;
+      this.profile = null;
+      this.playerStats = null;
+      await this.reconcileSession(session);
+    } catch (error) {
+      if (errorBox) {
+        errorBox.textContent = errorMessage(error, 'Unable to check account status.');
+        errorBox.hidden = false;
+      }
+      button.disabled = false;
+      if (status) status.textContent = '';
+    }
+  }
+
+  private disposeAdminMenu(): void {
+    this.adminMenu?.destroy();
+    this.adminMenu = null;
   }
 
   private renderJoinRoom(initialCode = ''): void {

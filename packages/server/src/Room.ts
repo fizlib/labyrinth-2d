@@ -162,6 +162,7 @@ import {
   type PlayerEscapedMessage,
   type MatchEndedMessage,
   type MatchWinner,
+  type AdminRoomSnapshot,
   type ServerToClientMessage,
 } from '@labyrinth/shared';
 
@@ -270,6 +271,14 @@ export interface MatchParticipantRecord {
   ratingAfter: number;
 }
 
+export interface GuestMatchParticipantRecord {
+  participantId: string;
+  displayName: string;
+  role: PlayerRole;
+  escaped: boolean;
+  abandoned: boolean;
+}
+
 export interface MatchRecord {
   matchId: string;
   roomId: string;
@@ -279,6 +288,7 @@ export interface MatchRecord {
   startedAt: string;
   endedAt: string;
   participants: MatchParticipantRecord[];
+  guestParticipants: GuestMatchParticipantRecord[];
 }
 
 export type ReconnectResult = 'resumed' | 'in-use' | 'not-found';
@@ -418,6 +428,7 @@ function isPlayerOverlappingWorldBounds(
 export class Room {
   readonly id: string;
   readonly isPublic: boolean;
+  private readonly createdAtMs = Date.now();
   private state: RoomState;
   private readonly seats = new Map<string, RoomSeat>();
   private sockets: Map<string, PlayerSocket> = new Map();
@@ -741,6 +752,93 @@ export class Room {
       this.countdownHandle === null &&
       !this.isFull
     );
+  }
+
+  /** Read-only operational state exposed only through the authenticated admin API. */
+  getAdminSnapshot(now = Date.now()): AdminRoomSnapshot {
+    const phase =
+      this.state.match.status === 'waiting' && this.countdownHandle !== null
+        ? 'countdown'
+        : this.state.match.status;
+    const players = Array.from(this.seats.values()).map((seat) => {
+      const player = this.state.players.find((candidate) => candidate.id === seat.id);
+      const participant = this.matchRoster.find(
+        (candidate) => candidate.playerId === seat.id,
+      );
+      return {
+        playerId: seat.id,
+        profileId: seat.userId,
+        displayName: seat.displayName,
+        isGuest: seat.userId === null,
+        isAdmin: seat.isAdmin,
+        connected: this.sockets.has(seat.id),
+        role: player?.role ?? participant?.role ?? null,
+        escaped: player?.escaped ?? participant?.escaped ?? false,
+        abandoned: participant?.abandoned ?? false,
+      };
+    });
+    const authenticatedCount = players.filter((player) => !player.isGuest).length;
+    return {
+      roomId: this.id,
+      isPublic: this.isPublic,
+      phase,
+      createdAt: new Date(this.createdAtMs).toISOString(),
+      startedAt:
+        this.matchStartedAtMs === null
+          ? null
+          : new Date(this.matchStartedAtMs).toISOString(),
+      matchId: this.matchId,
+      remainingMs:
+        this.state.match.status === 'running' && this.matchEndsAtMs !== null
+          ? Math.max(0, this.matchEndsAtMs - now)
+          : this.state.match.remainingMs,
+      rated: this.matchIsRanked,
+      playerCount: players.length,
+      connectedCount: players.filter((player) => player.connected).length,
+      authenticatedCount,
+      guestCount: players.length - authenticatedCount,
+      players,
+    };
+  }
+
+  /** Immediately remove a suspended authenticated profile from this room. */
+  removeAuthenticatedUser(userId: string, message: string): boolean {
+    const targetSeat = Array.from(this.seats.values()).find(
+      (seat) => seat.userId === userId,
+    );
+    if (!targetSeat) return false;
+
+    if (
+      this.state.match.status === 'waiting' ||
+      this.state.match.status === 'loading' ||
+      this.state.match.status === 'running'
+    ) {
+      this.disableRanking('administrator suspended a player');
+    }
+    const targetSocket = this.sockets.get(targetSeat.id);
+    if (targetSocket) {
+      const kickedMessage: LobbyKickedMessage = {
+        type: MessageType.LobbyKicked,
+        message,
+      };
+      this.send(targetSocket, kickedMessage);
+    }
+    this.removePlayer(targetSeat.id);
+    targetSocket?.end(4003, 'Account suspended');
+    return true;
+  }
+
+  /** Keep live game permissions aligned with a trusted profile-role change. */
+  setAuthenticatedUserAdmin(userId: string, isAdmin: boolean): boolean {
+    const seat = Array.from(this.seats.values()).find(
+      (candidate) => candidate.userId === userId,
+    );
+    if (!seat) return false;
+    seat.isAdmin = isAdmin;
+    const socketData = this.sockets.get(seat.id)?.getUserData();
+    if (socketData) socketData.isAdmin = isAdmin;
+    if (!isAdmin) this.debugToolsEnabledPlayerIds.delete(seat.id);
+    return true;
   }
 
   addPlayer(ws: PlayerSocket, reconnectToken: string): boolean {
@@ -1870,6 +1968,15 @@ export class Room {
           };
         },
       );
+      const guestParticipants: GuestMatchParticipantRecord[] = this.matchRoster
+        .filter((participant) => participant.userId === null)
+        .map((participant) => ({
+          participantId: participant.playerId,
+          displayName: participant.displayName,
+          role: participant.role,
+          escaped: participant.escaped,
+          abandoned: participant.abandoned,
+        }));
 
       this.onMatchEnded({
         matchId: this.matchId,
@@ -1880,6 +1987,7 @@ export class Room {
         startedAt: new Date(this.matchStartedAtMs).toISOString(),
         endedAt: new Date(endedAtMs).toISOString(),
         participants,
+        guestParticipants,
       });
     } catch (error) {
       console.error(

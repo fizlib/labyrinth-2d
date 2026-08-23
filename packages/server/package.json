@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@labyrinth/shared": "*",
+    "@supabase/supabase-js": "^2.90.1",
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.60.0"
   },
   "devDependencies": {

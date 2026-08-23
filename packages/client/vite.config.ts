@@ -396,6 +396,9 @@ export default defineConfig(({ command, mode }) => {
           target: 'ws://127.0.0.1:9001',
           ws: true,
         },
+        '/admin-api': {
+          target: 'http://127.0.0.1:9001',
+        },
       },
       watch: {
         // These files are an immutable source library, not authored modules.

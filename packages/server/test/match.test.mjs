@@ -486,6 +486,7 @@ test('authenticated public starting rosters emit one Elo result', (t) => {
   assert.equal(records.length, 1);
   assert.equal(records[0].rated, true);
   assert.equal(records[0].participants.length, 9);
+  assert.equal(records[0].guestParticipants.length, 0);
   assert.ok(
     records[0].participants.every((participant) => participant.ratedMatchesBefore === 10),
   );
@@ -589,9 +590,14 @@ test('private, guest-containing, guest-only, and underfilled matches record with
   assert.equal(guestRecord.rated, false);
   assert.equal(guestRecord.playerCount, 6);
   assert.equal(guestRecord.participants.length, 5);
+  assert.equal(guestRecord.guestParticipants.length, 1);
+  assert.equal(guestRecord.guestParticipants[0].displayName, 'public-player-0');
+  assert.ok(['survivor', 'warden'].includes(guestRecord.guestParticipants[0].role));
   assert.equal(guestOnlyRecord.rated, false);
   assert.equal(guestOnlyRecord.playerCount, 1);
   assert.equal(guestOnlyRecord.participants.length, 0);
+  assert.equal(guestOnlyRecord.guestParticipants.length, 1);
+  assert.equal(guestOnlyRecord.guestParticipants[0].displayName, 'guest-only-player');
   assert.equal(underfilledRecord.rated, false);
   assert.equal(underfilledRecord.playerCount, 6);
   assert.equal(underfilledRecord.participants.length, 6);
