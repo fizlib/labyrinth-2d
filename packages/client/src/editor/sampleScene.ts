@@ -38,6 +38,8 @@ import {
   type TileMapData,
 } from '@labyrinth/shared';
 import {
+  BRIDGE_COLLAPSE_DECORATION_SPRITES,
+  BRIDGE_COLLAPSE_REFERENCE_ROW,
   BRIDGE_OBSTACLE_SPRITES,
   BRIDGE_OBSTACLE_TERRAIN_SPRITES,
   BRIDGE_OBSTACLE_HIDDEN_FOREST_SPRITES,
@@ -149,6 +151,8 @@ const BRIDGE_NATIVE_SIZE_BY_ASSET: Partial<
   f1537: [18, 15],
   f1542: [18, 15],
   f1591: [32, 13],
+  a106Front: [32, 10],
+  a106FrontShadow: [32, 10],
   watergrass3: [31, 32],
   watergrass6: [25, 23],
 };
@@ -183,6 +187,10 @@ function fiorwoodsAsset(assetId: number): string {
 }
 
 function bridgeAssetName(asset: BridgeObstacleAsset): string {
+  if (asset === 'a106Front') return 'Sprite_Ancient_Ruins_106_front';
+  if (asset === 'a106FrontShadow') {
+    return 'Sprite_Ancient_Ruins_106_front_shadow';
+  }
   if (asset.startsWith('f')) return `Sprite_Fiorwoods_${asset.slice(1)}`;
   if (asset.startsWith('a')) return `Sprite_Ancient Ruins_${asset.slice(1)}`;
   if (asset === 'buried') return 'burriedTreasureCircle';
@@ -190,6 +198,7 @@ function bridgeAssetName(asset: BridgeObstacleAsset): string {
 }
 
 function bridgeAssetRole(asset: BridgeObstacleAsset, zIndex: number): SemanticRole {
+  if (asset === 'a106FrontShadow') return 'shadow';
   if (zIndex < 500) return 'ground.grass';
   return asset === 'watergrass3' || asset === 'watergrass6' ? 'bush' : 'decoration';
 }
@@ -596,6 +605,25 @@ function addBridgeObstacleElements(
     // The source export's added elements sort before the atlas's element-* IDs
     // at equal z, which is significant for the two z=0 background sprites.
     bridgeElement.id = `bridge-added-${String(index + 1).padStart(2, '0')}`;
+    elements.push(bridgeElement);
+  }
+
+  for (const spec of BRIDGE_COLLAPSE_DECORATION_SPRITES) {
+    if (spec.row !== BRIDGE_COLLAPSE_REFERENCE_ROW) continue;
+    const [nativeWidth, nativeHeight] = bridgeNativeSize(spec.asset);
+    const bridgeElement = assetElement(
+      bridgeAssetName(spec.asset),
+      bridgeAssetRole(spec.asset, spec.z),
+      getBridgeObstacleAssetPath(spec.asset),
+      nativeWidth,
+      nativeHeight,
+      localX + spec.x,
+      localY + spec.y,
+      spec.w,
+      spec.h,
+      spec.z,
+    );
+    bridgeElement.id = `bridge-collapse-${spec.collapseKind}-${spec.column ?? 'row'}`;
     elements.push(bridgeElement);
   }
 

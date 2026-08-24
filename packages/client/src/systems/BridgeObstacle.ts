@@ -10,11 +10,14 @@ import {
   type BridgePlacement,
 } from '@labyrinth/shared';
 import {
+  BRIDGE_COLLAPSE_DECORATION_SPRITES,
   BRIDGE_OBSTACLE_SPRITES,
   BRIDGE_OBSTACLE_TERRAIN_SPRITES,
   getBridgeObstacleAssetPath,
   getBridgeRepairCircleSideForSpec,
+  getBridgeRowShadowLayout,
   getBridgeWalkwayTileForSpec,
+  type BridgeCollapseDecorationSpriteSpec,
   type BridgeObstacleSpriteSpec,
 } from './BridgeObstacleLayout';
 
@@ -23,6 +26,8 @@ const BRIDGE_TILE_FALL_DURATION = 0.25;
 const BRIDGE_TILE_RISE_DURATION = BRIDGE_TILE_RESTORE_DURATION_MS / 1000;
 const BRIDGE_TILE_FALL_STAGGER = 0.05;
 const BRIDGE_TILE_FALL_DISTANCE = 8;
+const BRIDGE_COLLAPSE_FRONT_Z_INDEX = 0;
+const BRIDGE_COLLAPSE_SHADOW_Z_INDEX = -1;
 const BRIDGE_REPAIR_PARTICLE_COUNT = 6;
 const BRIDGE_WISDOM_HINT_STEP_DURATION = 0.14;
 const BRIDGE_WISDOM_HINT_SPARKLE_LIFETIME = 0.8;
@@ -34,9 +39,19 @@ interface TrackedBridgeSprite {
   originalY: number;
 }
 
+interface TrackedBridgeShadow extends TrackedBridgeSprite {
+  originalX: number;
+  originalWidth: number;
+}
+
 interface BridgeTileVisual {
   sprites: TrackedBridgeSprite[];
+  collapseFront: TrackedBridgeSprite | null;
   wisdomSparkle: Container | null;
+}
+
+interface BridgeRowVisual {
+  collapseShadow: TrackedBridgeShadow | null;
 }
 
 interface BridgeWrongTileFeedback {
@@ -66,11 +81,21 @@ interface BridgeWisdomHintVisual {
   sparkleAges: Map<number, number>;
 }
 
+function isBridgeCollapseDecorationSpec(
+  spec: BridgeObstacleSpriteSpec,
+): spec is BridgeCollapseDecorationSpriteSpec {
+  return 'collapseKind' in spec;
+}
+
 /** Mutable visual controller for one bridge's 12 central puzzle stones. */
 export class BridgeObstacleVisual {
   private readonly tiles: BridgeTileVisual[] = Array.from(
     { length: BRIDGE_WALKWAY_ROWS * BRIDGE_WALKWAY_COLUMNS },
-    () => ({ sprites: [], wisdomSparkle: null }),
+    () => ({ sprites: [], collapseFront: null, wisdomSparkle: null }),
+  );
+  private readonly rows: BridgeRowVisual[] = Array.from(
+    { length: BRIDGE_WALKWAY_ROWS },
+    () => ({ collapseShadow: null }),
   );
   private readonly animations = new Map<number, BridgeTileAnimation>();
   private readonly repairMagic = new Map<BridgeEntrySide, BridgeRepairMagicVisual>();
@@ -85,6 +110,27 @@ export class BridgeObstacleVisual {
   private wisdomHintSuppressed = false;
 
   constructor(private readonly scale: number) {}
+
+  addCollapseDecoration(spec: BridgeCollapseDecorationSpriteSpec, sprite: Sprite): void {
+    const tracked = { sprite, originalY: sprite.y };
+    if (spec.collapseKind === 'shadow') {
+      const row = this.rows[spec.row];
+      if (row) {
+        row.collapseShadow = {
+          ...tracked,
+          originalX: sprite.x,
+          originalWidth: sprite.width,
+        };
+      }
+      return;
+    }
+
+    sprite.visible = true;
+    if (spec.column === undefined) return;
+    const tileIndex = spec.row * BRIDGE_WALKWAY_COLUMNS + spec.column;
+    const tile = this.tiles[tileIndex];
+    if (tile) tile.collapseFront = tracked;
+  }
 
   addSprite(row: number, column: number, sprite: Sprite): void {
     const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
@@ -197,7 +243,10 @@ export class BridgeObstacleVisual {
     const newlyCollapsedMask = mask & ~this.collapsedTileMask;
     this.collapsedTileMask = mask;
     this.syncWisdomHintSuppression();
-    if (newlyCollapsedMask === 0) return;
+    if (newlyCollapsedMask === 0) {
+      this.syncRowShadows();
+      return;
+    }
 
     if (!animate) {
       for (let row = 0; row < BRIDGE_WALKWAY_ROWS; row++) {
@@ -207,6 +256,7 @@ export class BridgeObstacleVisual {
           }
         }
       }
+      this.syncRowShadows();
       return;
     }
 
@@ -221,10 +271,12 @@ export class BridgeObstacleVisual {
     collapsedRows.sort((a, b) => (northbound ? b - a : a - b));
 
     for (const [rowOrder, row] of collapsedRows.entries()) {
+      this.hideCollapseShadow(row);
       for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
         if ((newlyCollapsedMask & getBridgeTileBit(row, column)) === 0) continue;
         const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
         const tile = this.tiles[tileIndex];
+        this.hideCollapseFront(tileIndex);
         for (const tracked of tile.sprites) {
           tracked.sprite.visible = true;
           tracked.sprite.alpha = 1;
@@ -238,10 +290,12 @@ export class BridgeObstacleVisual {
         });
       }
     }
+    this.syncRowShadows();
   }
 
   update(dt: number): void {
     this.animationElapsed += dt;
+    let animationCompleted = false;
     for (const [tileIndex, animation] of this.animations) {
       animation.elapsed += dt;
       const duration =
@@ -254,19 +308,39 @@ export class BridgeObstacleVisual {
 
       if (animation.mode === 'fall') {
         const easedProgress = progress * progress;
-        for (const tracked of this.tiles[animation.tileIndex].sprites) {
-          tracked.sprite.y =
-            tracked.originalY +
-            Math.round(BRIDGE_TILE_FALL_DISTANCE * this.scale * easedProgress);
+        const fallOffset = Math.round(
+          BRIDGE_TILE_FALL_DISTANCE * this.scale * easedProgress,
+        );
+        const tile = this.tiles[animation.tileIndex];
+        for (const tracked of tile.sprites) {
+          tracked.sprite.y = tracked.originalY + fallOffset;
           tracked.sprite.alpha = 1 - progress;
           if (progress >= 1) tracked.sprite.visible = false;
         }
+        if (tile.collapseFront) {
+          tile.collapseFront.sprite.visible = progress < 1;
+          tile.collapseFront.sprite.y = tile.collapseFront.originalY + fallOffset;
+          tile.collapseFront.sprite.alpha = 1 - progress;
+        }
+
+        const column = animation.tileIndex % BRIDGE_WALKWAY_COLUMNS;
+        if (column === 0) {
+          const row = Math.floor(animation.tileIndex / BRIDGE_WALKWAY_COLUMNS);
+          const shadow = this.rows[row]?.collapseShadow;
+          if (shadow) {
+            shadow.sprite.visible = progress < 1;
+            shadow.sprite.y = shadow.originalY;
+            shadow.sprite.alpha = 1 - progress;
+          }
+        }
       } else {
         const easedProgress = 1 - (1 - progress) * (1 - progress);
-        for (const tracked of this.tiles[animation.tileIndex].sprites) {
-          tracked.sprite.y =
-            tracked.originalY +
-            Math.round(BRIDGE_TILE_FALL_DISTANCE * this.scale * (1 - easedProgress));
+        const riseOffset = Math.round(
+          BRIDGE_TILE_FALL_DISTANCE * this.scale * (1 - easedProgress),
+        );
+        const tile = this.tiles[animation.tileIndex];
+        for (const tracked of tile.sprites) {
+          tracked.sprite.y = tracked.originalY + riseOffset;
           tracked.sprite.alpha = progress;
           tracked.sprite.visible = true;
           if (progress >= 1) {
@@ -274,9 +348,22 @@ export class BridgeObstacleVisual {
             tracked.sprite.alpha = 1;
           }
         }
+        if (tile.collapseFront) {
+          tile.collapseFront.sprite.y = tile.collapseFront.originalY + riseOffset;
+          tile.collapseFront.sprite.alpha = progress;
+          tile.collapseFront.sprite.visible = true;
+          if (progress >= 1) {
+            tile.collapseFront.sprite.y = tile.collapseFront.originalY;
+            tile.collapseFront.sprite.alpha = 1;
+          }
+        }
       }
-      if (progress >= 1) this.animations.delete(tileIndex);
+      if (progress >= 1) {
+        this.animations.delete(tileIndex);
+        animationCompleted = true;
+      }
     }
+    if (animationCompleted) this.syncRowShadows();
 
     this.updateRepairMagic(dt);
     this.updateMagicalTiles();
@@ -296,6 +383,12 @@ export class BridgeObstacleVisual {
       tracked.sprite.alpha = 1;
       tracked.sprite.y = tracked.originalY;
       tracked.sprite.tint = 0xff683e;
+    }
+    if (tile.collapseFront) {
+      tile.collapseFront.sprite.visible = true;
+      tile.collapseFront.sprite.alpha = 1;
+      tile.collapseFront.sprite.y = tile.collapseFront.originalY;
+      tile.collapseFront.sprite.tint = 0xff683e;
     }
   }
 
@@ -317,6 +410,10 @@ export class BridgeObstacleVisual {
       tracked.sprite.y = tracked.originalY + Math.round(dip);
       tracked.sprite.tint = flash;
     }
+    if (tile.collapseFront) {
+      tile.collapseFront.sprite.y = tile.collapseFront.originalY + Math.round(dip);
+      tile.collapseFront.sprite.tint = flash;
+    }
 
     if (progress >= 1) this.resetWrongTileFeedback();
   }
@@ -328,6 +425,10 @@ export class BridgeObstacleVisual {
     for (const tracked of tile?.sprites ?? []) {
       tracked.sprite.y = tracked.originalY;
       tracked.sprite.tint = 0xffffff;
+    }
+    if (tile?.collapseFront) {
+      tile.collapseFront.sprite.y = tile.collapseFront.originalY;
+      tile.collapseFront.sprite.tint = 0xffffff;
     }
     this.wrongTileFeedback = null;
   }
@@ -426,6 +527,8 @@ export class BridgeObstacleVisual {
     const blue = Math.round(255 - 55 * strength);
     const tint = (0xff << 16) | (green << 8) | blue;
     for (const tracked of this.tiles[tileIndex].sprites) tracked.sprite.tint = tint;
+    const front = this.tiles[tileIndex].collapseFront;
+    if (front?.sprite.visible) front.sprite.tint = tint;
   }
 
   private setWisdomHintTileActive(tileIndex: number, active: boolean): void {
@@ -438,6 +541,7 @@ export class BridgeObstacleVisual {
     }
     if (!active) {
       for (const tracked of tile.sprites) tracked.sprite.tint = 0xffffff;
+      if (tile.collapseFront) tile.collapseFront.sprite.tint = 0xffffff;
     }
   }
 
@@ -466,6 +570,53 @@ export class BridgeObstacleVisual {
     hint.currentStep = -1;
   }
 
+  private syncRowShadows(): void {
+    for (let row = 0; row < this.rows.length; row++) {
+      let rowIsFalling = false;
+      for (let column = 0; column < BRIDGE_WALKWAY_COLUMNS; column++) {
+        const animation = this.animations.get(row * BRIDGE_WALKWAY_COLUMNS + column);
+        if (animation?.mode === 'fall') {
+          rowIsFalling = true;
+          break;
+        }
+      }
+      if (rowIsFalling) continue;
+      const shadow = this.rows[row].collapseShadow;
+      if (!shadow) continue;
+      const layout = getBridgeRowShadowLayout(this.collapsedTileMask, row);
+      shadow.sprite.y = shadow.originalY;
+      shadow.sprite.alpha = 1;
+      if (!layout) {
+        shadow.sprite.x = shadow.originalX;
+        shadow.sprite.width = shadow.originalWidth;
+        shadow.sprite.visible = false;
+        continue;
+      }
+      shadow.sprite.x = layout.x * this.scale;
+      shadow.sprite.width = layout.width * this.scale;
+      shadow.sprite.visible = true;
+    }
+  }
+
+  private hideCollapseFront(tileIndex: number): void {
+    const front = this.tiles[tileIndex]?.collapseFront;
+    if (!front) return;
+    front.sprite.y = front.originalY;
+    front.sprite.alpha = 1;
+    front.sprite.tint = 0xffffff;
+    front.sprite.visible = false;
+  }
+
+  private hideCollapseShadow(row: number): void {
+    const shadow = this.rows[row]?.collapseShadow;
+    if (!shadow) return;
+    shadow.sprite.y = shadow.originalY;
+    shadow.sprite.x = shadow.originalX;
+    shadow.sprite.width = shadow.originalWidth;
+    shadow.sprite.alpha = 1;
+    shadow.sprite.visible = false;
+  }
+
   private animateRestoreTile(row: number, column: number): void {
     const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
     this.animations.delete(tileIndex);
@@ -473,6 +624,13 @@ export class BridgeObstacleVisual {
       tracked.sprite.y = tracked.originalY + BRIDGE_TILE_FALL_DISTANCE * this.scale;
       tracked.sprite.alpha = 0;
       tracked.sprite.visible = true;
+    }
+    const front = this.tiles[tileIndex].collapseFront;
+    if (front) {
+      front.sprite.y = front.originalY + BRIDGE_TILE_FALL_DISTANCE * this.scale;
+      front.sprite.alpha = 0;
+      front.sprite.tint = 0xffffff;
+      front.sprite.visible = true;
     }
     this.animations.set(tileIndex, {
       tileIndex,
@@ -490,11 +648,20 @@ export class BridgeObstacleVisual {
       tracked.sprite.alpha = 1;
       tracked.sprite.visible = true;
     }
+    const front = this.tiles[tileIndex].collapseFront;
+    if (front) {
+      front.sprite.y = front.originalY;
+      front.sprite.alpha = 1;
+      front.sprite.tint = 0xffffff;
+      front.sprite.visible = true;
+    }
   }
 
   private hideTile(row: number, column: number): void {
     const tileIndex = row * BRIDGE_WALKWAY_COLUMNS + column;
     this.animations.delete(tileIndex);
+    this.hideCollapseFront(tileIndex);
+    this.hideCollapseShadow(row);
     for (const tracked of this.tiles[tileIndex].sprites) {
       tracked.sprite.y = tracked.originalY;
       tracked.sprite.alpha = 0;
@@ -551,6 +718,12 @@ export class BridgeObstacleVisual {
           tracked.sprite.tint = 0xffffff;
           tracked.sprite.alpha = 1;
         }
+        const front = this.tiles[tileIndex].collapseFront;
+        if (front?.sprite.visible) {
+          front.sprite.y = front.originalY + hoverOffset;
+          front.sprite.tint = 0xffffff;
+          front.sprite.alpha = 1;
+        }
       }
     }
   }
@@ -565,6 +738,12 @@ export class BridgeObstacleVisual {
           if (!this.animations.has(tileIndex)) tracked.sprite.y = tracked.originalY;
           tracked.sprite.tint = 0xffffff;
           if (!this.animations.has(tileIndex)) tracked.sprite.alpha = 1;
+        }
+        const front = this.tiles[tileIndex].collapseFront;
+        if (front && !this.animations.has(tileIndex)) {
+          front.sprite.y = front.originalY;
+          front.sprite.tint = 0xffffff;
+          front.sprite.alpha = 1;
         }
       }
     }
@@ -584,9 +763,10 @@ export function addBridgeObstacles(
     ...BRIDGE_OBSTACLE_SPRITES.filter((spec) => spec.z === 0),
     ...BRIDGE_OBSTACLE_TERRAIN_SPRITES,
   ].sort((a, b) => a.z - b.z);
-  const detailSpecs = BRIDGE_OBSTACLE_SPRITES.filter((spec) => spec.z > 0).sort(
-    (a, b) => a.z - b.z,
-  );
+  const detailSpecs: readonly BridgeObstacleSpriteSpec[] = [
+    ...BRIDGE_OBSTACLE_SPRITES.filter((spec) => spec.z > 0),
+    ...BRIDGE_COLLAPSE_DECORATION_SPRITES,
+  ].sort((a, b) => a.z - b.z);
   const visuals: BridgeObstacleVisual[] = [];
 
   for (const bridge of bridges) {
@@ -615,8 +795,17 @@ export function addBridgeObstacles(
         sprite.y = spec.y * scale;
         sprite.width = spec.w * scale;
         sprite.height = spec.h * scale;
-        sprite.zIndex = spec.z;
+        sprite.zIndex = isBridgeCollapseDecorationSpec(spec)
+          ? spec.collapseKind === 'front'
+            ? BRIDGE_COLLAPSE_FRONT_Z_INDEX
+            : BRIDGE_COLLAPSE_SHADOW_Z_INDEX
+          : spec.z;
         container.addChild(sprite);
+
+        if (isBridgeCollapseDecorationSpec(spec)) {
+          visual.addCollapseDecoration(spec, sprite);
+          continue;
+        }
 
         const walkwayTile = getBridgeWalkwayTileForSpec(spec);
         if (walkwayTile) {

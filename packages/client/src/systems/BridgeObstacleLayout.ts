@@ -1,5 +1,11 @@
-import { BRIDGE_WALKWAY_ROW_Y, type BridgeEntrySide } from '@labyrinth/shared';
-import { getFiorwoodsRuntimeAssetPath } from '../assets/runtimeAssetPaths';
+import {
+  BRIDGE_WALKWAY_COLUMNS,
+  BRIDGE_WALKWAY_ROWS,
+  BRIDGE_WALKWAY_ROW_Y,
+  getBridgeTileBit,
+  type BridgeEntrySide,
+} from '@labyrinth/shared';
+import { getFiorwoodsRuntimeAssetPath } from '../assets/runtimeAssetPaths.js';
 
 export interface BridgeObstacleSpriteSpec {
   asset: BridgeObstacleAsset;
@@ -8,6 +14,12 @@ export interface BridgeObstacleSpriteSpec {
   w: number;
   h: number;
   z: number;
+}
+
+export interface BridgeCollapseDecorationSpriteSpec extends BridgeObstacleSpriteSpec {
+  collapseKind: 'front' | 'shadow';
+  row: number;
+  column?: number;
 }
 
 export interface BridgeObstacleHiddenForestSpriteSpec {
@@ -44,6 +56,8 @@ const BRIDGE_OBSTACLE_ASSET_PATH_BY_ID = {
   a108: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_108.png',
   a109: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_109.png',
   a110: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_110.png',
+  a106Front: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_106_front.png',
+  a106FrontShadow: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_106_front_shadow.png',
   a819: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_819.png',
   a820: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_820.png',
   a821: '/assets/bridge-obstacle/Sprite_Ancient_Ruins_821.png',
@@ -93,6 +107,42 @@ export const BRIDGE_OBSTACLE_SPRITES: readonly BridgeObstacleSpriteSpec[] = [
   { asset: 'a820', x: 48, y: 131, w: 16, h: 16, z: 500 },
   { asset: 'buried', x: 64, y: 144, w: 16, h: 16, z: 500 },
 ];
+
+/**
+ * Collapse-only depth sprites repeated for every walkway row. Row 4 matches
+ * the representative composition authored in style-editor export (73): the
+ * two stone faces begin one pixel above the row's south edge and the shared
+ * shadow begins immediately below them.
+ */
+export const BRIDGE_COLLAPSE_REFERENCE_ROW = 4;
+
+export const BRIDGE_COLLAPSE_DECORATION_SPRITES: readonly BridgeCollapseDecorationSpriteSpec[] =
+  Array.from({ length: BRIDGE_WALKWAY_ROWS }, (_, row) => {
+    const topY = BRIDGE_WALKWAY_ROW_Y[row];
+    return [
+      {
+        asset: 'a106FrontShadow' as const,
+        x: 32,
+        y: topY + 19,
+        w: 32,
+        h: 5,
+        z: 499,
+        collapseKind: 'shadow' as const,
+        row,
+      },
+      ...Array.from({ length: BRIDGE_WALKWAY_COLUMNS }, (_, column) => ({
+        asset: 'a106Front' as const,
+        x: 32 + column * 16,
+        y: topY + 14,
+        w: 16,
+        h: 5,
+        z: 500,
+        collapseKind: 'front' as const,
+        row,
+        column,
+      })),
+    ];
+  }).flat();
 
 const BRIDGE_WATER_ROW_OFFSETS = [48, 64, 80, 96, 112, 128] as const;
 const BRIDGE_WEST_WATER_ROW_OFFSETS = [32, 48, 64, 80, 96, 112, 128, 144] as const;
@@ -233,6 +283,20 @@ export function getBridgeRepairCircleSideForSpec(
   if (spec.asset !== 'buried') return null;
   if (spec.x === 16 && spec.y === 10) return 'north';
   if (spec.x === 64 && spec.y === 144) return 'south';
+  return null;
+}
+
+/** Shadow span beneath the intact stones in one partially repaired row. */
+export function getBridgeRowShadowLayout(
+  collapsedTileMask: number,
+  row: number,
+): { x: number; width: number } | null {
+  if (row < 0 || row >= BRIDGE_WALKWAY_ROWS) return null;
+  const leftIntact = (collapsedTileMask & getBridgeTileBit(row, 0)) === 0;
+  const rightIntact = (collapsedTileMask & getBridgeTileBit(row, 1)) === 0;
+  if (leftIntact && rightIntact) return { x: 32, width: 32 };
+  if (leftIntact) return { x: 32, width: 16 };
+  if (rightIntact) return { x: 48, width: 16 };
   return null;
 }
 
