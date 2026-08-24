@@ -12,6 +12,9 @@ const MINUTE_MS = 60 * SECOND_MS;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
+/** How long an occurrence accepts players after its scheduled start. */
+export const COMMUNITY_ROUND_DURATION_MS = HOUR_MS;
+
 interface CalendarDate {
   year: number;
   month: number;
@@ -201,9 +204,9 @@ function formatGoogleCalendarDateTime(date: Date, timeZone: string): string {
 }
 
 /**
- * Return the occurrence for today when one is scheduled. It remains open after
- * its start time until that host-local day ends. Once this player's match
- * starts, the card advances to the next configured occurrence.
+ * Return the current joinable occurrence or the next configured occurrence.
+ * An occurrence remains open for its one-hour event window. Once that window
+ * ends, or once this player's match starts, the card advances to the next one.
  */
 export function getCommunityRoundState(
   now: Date,
@@ -218,17 +221,50 @@ export function getCommunityRoundState(
   };
   const anchor = getScheduleParts(schedule);
   let occurrenceDate = getOccurrenceDateOnOrAfter(today, anchor, schedule.frequency);
-  if (startedOccurrenceKey === getOccurrenceKey(occurrenceDate)) {
-    occurrenceDate = getNextOccurrenceDate(occurrenceDate, anchor, schedule.frequency);
-  }
-  const occurrence = getUtcDateForZonedTime(
+  let occurrence = getUtcDateForZonedTime(
     occurrenceDate,
     anchor.hour,
     anchor.minute,
     schedule.timeZone,
   );
-  const isToday = compareCalendarDates(occurrenceDate, today) === 0;
-  const isOpen = isToday && now.getTime() >= occurrence.getTime();
+
+  // A late-night occurrence can remain open briefly after the host-local date
+  // changes, so consider yesterday before settling on today's next occurrence.
+  const priorCandidateDate = getOccurrenceDateOnOrAfter(
+    addCalendarDays(today, -1),
+    anchor,
+    schedule.frequency,
+  );
+  if (compareCalendarDates(priorCandidateDate, today) < 0) {
+    const priorCandidate = getUtcDateForZonedTime(
+      priorCandidateDate,
+      anchor.hour,
+      anchor.minute,
+      schedule.timeZone,
+    );
+    if (
+      now.getTime() >= priorCandidate.getTime() &&
+      now.getTime() < priorCandidate.getTime() + COMMUNITY_ROUND_DURATION_MS
+    ) {
+      occurrenceDate = priorCandidateDate;
+      occurrence = priorCandidate;
+    }
+  }
+  if (
+    startedOccurrenceKey === getOccurrenceKey(occurrenceDate) ||
+    now.getTime() >= occurrence.getTime() + COMMUNITY_ROUND_DURATION_MS
+  ) {
+    occurrenceDate = getNextOccurrenceDate(occurrenceDate, anchor, schedule.frequency);
+    occurrence = getUtcDateForZonedTime(
+      occurrenceDate,
+      anchor.hour,
+      anchor.minute,
+      schedule.timeZone,
+    );
+  }
+  const isOpen =
+    now.getTime() >= occurrence.getTime() &&
+    now.getTime() < occurrence.getTime() + COMMUNITY_ROUND_DURATION_MS;
 
   return {
     occurrence,
@@ -362,7 +398,7 @@ export function getCommunityRoundGoogleCalendarUrl(
   occurrence: Date,
   schedule: CommunityRoundSchedule = DEFAULT_COMMUNITY_ROUND_SCHEDULE,
 ): string {
-  const end = new Date(occurrence.getTime() + HOUR_MS);
+  const end = new Date(occurrence.getTime() + COMMUNITY_ROUND_DURATION_MS);
   const url = new URL('https://calendar.google.com/calendar/render');
   url.searchParams.set('action', 'TEMPLATE');
   url.searchParams.set('text', 'False Arrow Community Round');

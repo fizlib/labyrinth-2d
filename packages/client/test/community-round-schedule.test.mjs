@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  COMMUNITY_ROUND_DURATION_MS,
   communityRoundStartAtFromZonedInput,
   formatCommunityRoundCountdown,
   formatCommunityRoundDate,
@@ -30,6 +31,39 @@ test('unlocks the summer Vilnius round at 21:00', () => {
   assert.equal(open.occurrence.toISOString(), '2026-08-20T18:00:00.000Z');
   assert.equal(open.isOpen, true);
   assert.equal(open.remainingMs, 0);
+});
+
+test('advances ended rounds for players who did not participate', () => {
+  const stillOpen = getCommunityRoundState(
+    new Date('2026-08-20T18:59:59.999Z'),
+    null,
+  );
+  assert.equal(COMMUNITY_ROUND_DURATION_MS, 60 * 60_000);
+  assert.equal(stillOpen.occurrenceKey, '2026-08-20');
+  assert.equal(stillOpen.isOpen, true);
+
+  const ended = getCommunityRoundState(new Date('2026-08-20T19:00:00.000Z'), null);
+  assert.equal(ended.occurrence.toISOString(), '2026-08-21T18:00:00.000Z');
+  assert.equal(ended.occurrenceKey, '2026-08-21');
+  assert.equal(ended.isOpen, false);
+  assert.equal(ended.remainingMs, 23 * 60 * 60_000);
+});
+
+test('keeps a late occurrence open across host-local midnight', () => {
+  const lateSchedule = {
+    startsAt: '2026-08-20T20:30:00.000Z',
+    frequency: 'daily',
+    timeZone: 'Europe/Vilnius',
+    updatedAt: null,
+  };
+  const afterMidnight = getCommunityRoundState(
+    new Date('2026-08-20T21:15:00.000Z'),
+    null,
+    lateSchedule,
+  );
+  assert.equal(afterMidnight.occurrence.toISOString(), '2026-08-20T20:30:00.000Z');
+  assert.equal(afterMidnight.occurrenceKey, '2026-08-20');
+  assert.equal(afterMidnight.isOpen, true);
 });
 
 test('keeps 21:00 Vilnius across the winter daylight-saving offset', () => {
