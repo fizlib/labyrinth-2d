@@ -3,7 +3,8 @@
 export const RUNTIME_ATLAS_PATH = 'assets/runtime/runtime-atlas.png';
 export const RUNTIME_ATLAS_WIDTH = 1088;
 export const RUNTIME_ATLAS_HEIGHT = 640;
-export const RUNTIME_ATLAS_SOURCE_DIGEST = '2beb412c438a98e92361c722c82af62cfcdeea93147172bf12aad5cf3d9bd8af';
+export const RUNTIME_ATLAS_SOURCE_DIGEST = '2dbfdad9246cdfe7790311456836cb96c3199f237bb1b587767ca81ff4891b57';
+export const RUNTIME_ATLAS_PNG_DIGEST = 'e2004083a40a2a7f580dd48b1094afafdc8c25c7ec0e9569b0c182c2a6824f17';
 
 export const RUNTIME_ATLAS_FRAMES = {
   "assets/bridge-obstacle/Sprite_Ancient_Ruins_105.png": [

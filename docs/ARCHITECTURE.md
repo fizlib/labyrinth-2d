@@ -537,6 +537,12 @@ and loading remains eager. The separately generated character atlas retains
 all 612 animation frames; together, the two atlases replace 456 individual PNG
 requests with two.
 
+Production builds run the dependency-free Node verifier in
+`scripts/verify-runtime-atlas.mjs`; it checks source, atlas, and dimension
+digests without requiring Pillow on the deployment image. The Python generator
+remains the source of truth for rebuilding the committed atlas, and
+`verify:runtime-atlas:exact` performs its byte-for-byte local verification.
+
 The loader attempts to load atlas-backed authored PNG assets first, falls back
 to their individual source URLs if the generated atlas is unavailable, and
 retains generated texture fallbacks for core art. Nested legacy sheets remain

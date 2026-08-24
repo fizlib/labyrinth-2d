@@ -115,7 +115,11 @@ def source_paths() -> list[Path]:
             "Missing runtime atlas sources:\n"
             + "\n".join(f"- {path}" for path in missing)
         )
-    return sorted(set(paths))
+    # Native Path ordering differs between WindowsPath and PosixPath when file
+    # names contain uppercase characters. Always order by the deployed asset
+    # URL so generated digests and duplicate canonical paths are identical on
+    # local Windows machines and Linux CI/deployment images.
+    return sorted(set(paths), key=relative_asset_path)
 
 
 def relative_asset_path(path: Path) -> str:
@@ -334,6 +338,8 @@ def render_outputs() -> tuple[bytes, str, dict[str, int]]:
 
     atlas_buffer = io.BytesIO()
     atlas.save(atlas_buffer, format="PNG", optimize=True, compress_level=9)
+    atlas_bytes = atlas_buffer.getvalue()
+    atlas_digest = hashlib.sha256(atlas_bytes).hexdigest()
 
     manifest_json = json.dumps(
         dict(sorted(manifest_frames.items())), indent=2, ensure_ascii=False
@@ -344,6 +350,7 @@ export const RUNTIME_ATLAS_PATH = 'assets/runtime/runtime-atlas.png';
 export const RUNTIME_ATLAS_WIDTH = {width};
 export const RUNTIME_ATLAS_HEIGHT = {height};
 export const RUNTIME_ATLAS_SOURCE_DIGEST = '{source_digest}';
+export const RUNTIME_ATLAS_PNG_DIGEST = '{atlas_digest}';
 
 export const RUNTIME_ATLAS_FRAMES = {manifest_json} as const satisfies Readonly<
   Record<string, readonly [x: number, y: number, width: number, height: number]>
@@ -355,9 +362,9 @@ export const RUNTIME_ATLAS_FRAMES = {manifest_json} as const satisfies Readonly<
         "duplicate_count": len(paths) - len(frames),
         "width": width,
         "height": height,
-        "png_bytes": len(atlas_buffer.getvalue()),
+        "png_bytes": len(atlas_bytes),
     }
-    return atlas_buffer.getvalue(), manifest_source, stats
+    return atlas_bytes, manifest_source, stats
 
 
 def verify_file(path: Path, expected: bytes) -> bool:
