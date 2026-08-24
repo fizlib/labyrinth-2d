@@ -94,6 +94,7 @@ export interface RecordingStudioOptions {
   tileSize: number;
   getLocalPosition: () => { x: number; y: number; facing: FacingDirection };
   moveActor: (
+    actorId: string,
     pose: { x: number; y: number; facing: FacingDirection },
     input: RecordingMoveInput,
     dt: number,
@@ -703,6 +704,44 @@ export class RecordingStudio {
     return this.actors.map((actor) => this.spriteIdFor(actor.id));
   }
 
+  getTimelineTime(): number {
+    return this.currentTime;
+  }
+
+  /** Sample actor movement at an arbitrary timeline position for world rebuilds. */
+  getActorStatesAtTime(time: number): RecordingActorRenderState[] {
+    return this.buildActorStates(Math.max(0, time), false);
+  }
+
+  /** Apply local world reactions, persisting corrections made to the active take. */
+  applyActorPositionOverrides(
+    overrides: readonly { actorId: string; x: number; y: number }[],
+  ): void {
+    for (const override of overrides) {
+      const pose = this.poses.get(override.actorId);
+      if (!pose) continue;
+      const correctedPose = {
+        ...pose,
+        x: override.x,
+        y: override.y,
+        isMoving: false,
+      };
+      this.poses.set(override.actorId, correctedPose);
+
+      if (this.mode !== 'recording' || override.actorId !== this.selectedActorId) {
+        continue;
+      }
+      const actor = this.getSelectedActor();
+      if (!actor) continue;
+      const lastFrame = actor.frames.at(-1);
+      if (lastFrame && Math.abs(lastFrame.time - this.currentTime) < 0.000_001) {
+        actor.frames[actor.frames.length - 1] = { ...correctedPose };
+      } else {
+        actor.frames.push({ ...correctedPose, time: this.currentTime });
+      }
+    }
+  }
+
   getCameraOverride(): RecordingCameraState | null {
     if (this.cameraActive) return { x: this.cameraX, y: this.cameraY };
     if (!this.cameraActorId) return null;
@@ -741,12 +780,25 @@ export class RecordingStudio {
   }
 
   getActorStates(): RecordingActorRenderState[] {
+    return this.buildActorStates(this.currentTime, true);
+  }
+
+  private buildActorStates(
+    time: number,
+    useLivePoses: boolean,
+  ): RecordingActorRenderState[] {
     const captureByActorId = new Map(
-      this.getTrapCaptures().map((capture) => [capture.actorId, capture]),
+      deriveRecordingTrapCaptures(
+        this.actors,
+        time,
+        this.options.trapCells,
+        this.options.tileSize,
+      ).map((capture) => [capture.actorId, capture]),
     );
     return this.actors.map((actor) => {
       const recordedPose =
-        this.poses.get(actor.id) ?? sampleRecordingActor(actor, this.currentTime);
+        (useLivePoses ? this.poses.get(actor.id) : null) ??
+        sampleRecordingActor(actor, time);
       const capture = captureByActorId.get(actor.id);
       const pose = capture
         ? {
@@ -758,8 +810,7 @@ export class RecordingStudio {
         : recordedPose;
       const cue = actor.messages.find(
         (candidate) =>
-          this.currentTime >= candidate.time &&
-          this.currentTime < candidate.time + candidate.duration,
+          time >= candidate.time && time < candidate.time + candidate.duration,
       );
       return {
         actorId: actor.id,
@@ -773,7 +824,7 @@ export class RecordingStudio {
         facing: pose.facing,
         isMoving: pose.isMoving,
         chatText:
-          this.mode === 'playing' || this.mode === 'recording'
+          useLivePoses && (this.mode === 'playing' || this.mode === 'recording')
             ? (cue?.text ?? null)
             : null,
       };
@@ -1277,7 +1328,7 @@ export class RecordingStudio {
     }
 
     const previous = this.poses.get(actor.id) ?? sampleRecordingActor(actor, 0);
-    const moved = this.options.moveActor(previous, this.movementKeys, dt);
+    const moved = this.options.moveActor(actor.id, previous, this.movementKeys, dt);
     const isMoving =
       this.movementKeys.up ||
       this.movementKeys.down ||

@@ -2903,7 +2903,7 @@ body {
   }
 
   .lobby-chat__log {
-    min-height: 180px;
+    height: 180px;
     flex: none;
   }
 

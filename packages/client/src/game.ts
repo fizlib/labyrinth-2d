@@ -133,6 +133,7 @@ import {
   getRecordingWorldAudioEvents,
   type RecordingWorldState,
 } from './systems/RecordingPlateSimulation';
+import { RecordingBridgeSimulation } from './systems/RecordingBridgeSimulation';
 
 // ── Player sprite dimensions ────────────────────────────────────────────────
 const SURVIVOR_SPAWN_DIALOGUE_PAGES = [
@@ -2121,6 +2122,7 @@ async function initializeGame(
   let isAdminSession = false;
   let recordingStudio: RecordingStudio | null = null;
   let recordingStudioMapSeed: number | null = null;
+  const recordingBridgeSimulation = new RecordingBridgeSimulation();
   let recordingWorldState: RecordingWorldState | null = null;
   let currentRecordingActorStates: RecordingActorRenderState[] = [];
   let currentRecordingCageStates: CageState[] = [];
@@ -2599,6 +2601,7 @@ async function initializeGame(
     recordingStudio.destroy();
     recordingStudio = null;
     recordingStudioMapSeed = null;
+    recordingBridgeSimulation.reset();
     recordingWorldState = null;
     currentRecordingActorStates = [];
     currentRecordingCageStates = [];
@@ -2624,7 +2627,7 @@ async function initializeGame(
       trapCells: currentLayout.trapCells,
       tileSize: currentMap.tileSize,
       getLocalPosition: () => ({ x: localX, y: localY, facing: localFacing }),
-      moveActor: (pose, input: RecordingMoveInput, dt) => {
+      moveActor: (actorId, pose, input: RecordingMoveInput, dt) => {
         const moving = input.up || input.down || input.left || input.right;
         const facing = moving ? deriveFacingDirection(input, pose.facing) : pose.facing;
         const state = latestServerState;
@@ -2639,13 +2642,13 @@ async function initializeGame(
           currentMap,
           state.portal,
           currentLayout.bridges,
-          state.bridgeStates,
+          recordingWorldState?.bridgeStates ?? state.bridgeStates,
           currentLayout.swamps,
           currentLayout.chestDeadEnds,
           currentLayout.swordFields,
           state.swordFieldStates,
           getEffectiveCageStates(state.cageStates),
-          undefined,
+          `recording-actor:${actorId}`,
           currentLayout.tIntersectionDecorations,
           currentLayout.decoratedVerticalPassages,
           currentLayout.spikeGateObstacles,
@@ -2677,10 +2680,26 @@ async function initializeGame(
     }
     currentRecordingActorStates = recordingStudio.getActorStates();
     currentRecordingCageStates = recordingStudio.getRecordingCageStates();
+    const recordingBridgeFrame = recordingBridgeSimulation.update(
+      currentLayout.bridges,
+      currentLayout.map.tileSize,
+      gameState.bridgeStates,
+      currentRecordingActorStates,
+      recordingStudio.getTimelineTime(),
+      (time) => recordingStudio?.getActorStatesAtTime(time) ?? [],
+    );
+    recordingStudio.applyActorPositionOverrides(
+      recordingBridgeFrame.actorPositionOverrides,
+    );
+    if (recordingBridgeFrame.actorPositionOverrides.length > 0) {
+      currentRecordingActorStates = recordingStudio.getActorStates();
+      currentRecordingCageStates = recordingStudio.getRecordingCageStates();
+    }
     recordingWorldState = deriveRecordingWorldState(
       currentLayout,
       gameState,
       currentRecordingActorStates,
+      recordingBridgeFrame.bridgeStates,
     );
     return recordingWorldState;
   }
@@ -2823,7 +2842,10 @@ async function initializeGame(
 
     if (latestServerState) {
       const effectiveRecordingState = refreshRecordingWorldState(latestServerState);
-      replacementRenderer.syncBridgeStates(latestServerState.bridgeStates, false);
+      replacementRenderer.syncBridgeStates(
+        effectiveRecordingState?.bridgeStates ?? latestServerState.bridgeStates,
+        false,
+      );
       replacementRenderer.syncSwordFieldStates(
         latestServerState.swordFieldStates,
         latestServerState.tick,
@@ -3203,6 +3225,18 @@ async function initializeGame(
         continue;
       }
 
+      if (event.kind === 'bridge-collapse') {
+        const source = getBridgeAudioPoint(event.bridgeIndex);
+        if (source) worldAudio.playBridgeCollapse(event.bridgeIndex, source, listener);
+        continue;
+      }
+
+      if (event.kind === 'bridge-repair') {
+        const source = getBridgeAudioPoint(event.bridgeIndex);
+        if (source) worldAudio.playBridgeRepair(event.bridgeIndex, source, listener);
+        continue;
+      }
+
       const obstacleIndex = Math.floor(event.spikeGateIndex / SPIKE_GATES_PER_OBSTACLE);
       const gateIndex = event.spikeGateIndex % SPIKE_GATES_PER_OBSTACLE;
       const obstacle = currentLayout.spikeGateObstacles[obstacleIndex];
@@ -3508,7 +3542,10 @@ async function initializeGame(
         syncAuthoritativeTrapCells(gameState.trapCells);
         if (isAdmin) ensureRecordingStudio(mapSeed);
         const initialRecordingWorldState = refreshRecordingWorldState(gameState);
-        activeTilemapRenderer.syncBridgeStates(gameState.bridgeStates, false);
+        activeTilemapRenderer.syncBridgeStates(
+          initialRecordingWorldState?.bridgeStates ?? gameState.bridgeStates,
+          false,
+        );
         activeTilemapRenderer.syncSwordFieldStates(
           gameState.swordFieldStates,
           gameState.tick,
@@ -3730,7 +3767,10 @@ async function initializeGame(
       // snapshot. Otherwise the 20 Hz authoritative closed state repeatedly
       // cancels the local spike-gate opening animation before it can advance.
       const effectiveRecordingState = refreshRecordingWorldState(gameState);
-      tilemapRenderer?.syncBridgeStates(gameState.bridgeStates, true);
+      tilemapRenderer?.syncBridgeStates(
+        effectiveRecordingState?.bridgeStates ?? gameState.bridgeStates,
+        true,
+      );
       tilemapRenderer?.syncSwordFieldStates(
         gameState.swordFieldStates,
         gameState.tick,
@@ -4967,13 +5007,19 @@ async function initializeGame(
     }
     updatePortalEscapeAnimations(dtSeconds);
 
-    // ── 2b. Admin recording actors + local plate simulation ─────────
+    // ── 2b. Admin recording actors + local obstacle simulation ──────
     const previousRecordingCageIds = new Set(
       currentRecordingCageStates.map((cage) => cage.cageId),
     );
+    const previousRecordingWorldState = recordingWorldState;
     recordingStudio?.update(dtSeconds);
-    currentRecordingActorStates = recordingStudio?.getActorStates() ?? [];
-    currentRecordingCageStates = recordingStudio?.getRecordingCageStates() ?? [];
+    const nextRecordingWorldState = latestServerState
+      ? refreshRecordingWorldState(latestServerState)
+      : null;
+    if (!nextRecordingWorldState) {
+      currentRecordingActorStates = recordingStudio?.getActorStates() ?? [];
+      currentRecordingCageStates = recordingStudio?.getRecordingCageStates() ?? [];
+    }
     syncRecordingCameraRoleUi();
     for (const cage of currentRecordingCageStates) {
       if (!previousRecordingCageIds.has(cage.cageId)) {
@@ -5020,14 +5066,8 @@ async function initializeGame(
       syncRecordingActorBubble(actor, data);
     }
 
-    if (recordingStudio && currentLayout && latestServerState) {
-      const nextRecordingWorldState = deriveRecordingWorldState(
-        currentLayout,
-        latestServerState,
-        currentRecordingActorStates,
-      );
-      syncRecordingWorldAudio(recordingWorldState, nextRecordingWorldState);
-      recordingWorldState = nextRecordingWorldState;
+    if (recordingStudio && currentLayout && latestServerState && recordingWorldState) {
+      syncRecordingWorldAudio(previousRecordingWorldState, recordingWorldState);
       if (tilemapRenderer && currentMap) {
         for (const gate of recordingWorldState.gateStates) {
           applyGateState(
@@ -5039,6 +5079,7 @@ async function initializeGame(
             assets,
           );
         }
+        tilemapRenderer.syncBridgeStates(recordingWorldState.bridgeStates, true);
         tilemapRenderer.syncSpikeGateStates(
           recordingWorldState.spikeGateStates,
           recordingWorldState.spikePlateStates,

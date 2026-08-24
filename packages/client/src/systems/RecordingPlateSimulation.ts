@@ -7,6 +7,7 @@ import {
 } from '@labyrinth/shared';
 import type {
   GameState,
+  BridgeState,
   GateState,
   GeneratedMazeLayout,
   PressurePlateState,
@@ -16,6 +17,7 @@ import type {
 import type { RecordingActorRenderState } from './RecordingStudio';
 
 export interface RecordingWorldState {
+  bridgeStates: BridgeState[];
   gateStates: GateState[];
   pressurePlateStates: PressurePlateState[];
   spikeGateStates: SpikeGateState[];
@@ -34,7 +36,9 @@ export type RecordingWorldAudioEvent =
       state: 'pressed' | 'released' | 'latched';
     }
   | { kind: 'gate'; gateIndex: number; open: boolean }
-  | { kind: 'spike-gate'; spikeGateIndex: number; open: boolean };
+  | { kind: 'spike-gate'; spikeGateIndex: number; open: boolean }
+  | { kind: 'bridge-collapse'; bridgeIndex: number }
+  | { kind: 'bridge-repair'; bridgeIndex: number };
 
 /** Return audible mechanism changes caused between two local recording frames. */
 export function getRecordingWorldAudioEvents(
@@ -101,6 +105,21 @@ export function getRecordingWorldAudioEvents(
     }
   }
 
+  for (const bridge of next.bridgeStates ?? []) {
+    const before = previous.bridgeStates?.find(
+      (candidate) => candidate.bridgeIndex === bridge.bridgeIndex,
+    );
+    if (!before) continue;
+    const newlyCollapsed = bridge.collapsedTileMask & ~before.collapsedTileMask;
+    const newlyRestored = before.collapsedTileMask & ~bridge.collapsedTileMask;
+    if (newlyCollapsed !== 0) {
+      events.push({ kind: 'bridge-collapse', bridgeIndex: bridge.bridgeIndex });
+    }
+    if (newlyRestored !== 0 || (bridge.repairActive && !before.repairActive)) {
+      events.push({ kind: 'bridge-repair', bridgeIndex: bridge.bridgeIndex });
+    }
+  }
+
   return events;
 }
 
@@ -125,6 +144,7 @@ export function deriveRecordingWorldState(
   layout: GeneratedMazeLayout,
   gameState: GameState,
   actors: readonly RecordingActorRenderState[],
+  bridgeStates: readonly BridgeState[] = gameState.bridgeStates ?? [],
 ): RecordingWorldState {
   const occupiedStandardPlates = new Map<number, Set<string>>();
   for (const plate of layout.pressurePlates) {
@@ -202,6 +222,7 @@ export function deriveRecordingWorldState(
   });
 
   return {
+    bridgeStates: bridgeStates.map((state) => ({ ...state })),
     gateStates,
     pressurePlateStates,
     spikeGateStates,
