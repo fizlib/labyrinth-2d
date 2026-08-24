@@ -73,11 +73,10 @@ async function readPngSize(filePath: string): Promise<{ width: number; height: n
 function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boolean): Plugin {
   let cached: CatalogAsset[] | null = null;
   let pendingScan: Promise<CatalogAsset[]> | null = null;
+  let assetRevision = 0;
 
+  const authoredAssetsRoot = path.join(publicDir, 'assets');
   const styleLibraryRoot = path.join(publicDir, 'assets', 'chained-echoes-assets-sorted');
-  const supplementalStyleAssetFiles = [
-    path.join(publicDir, 'assets', 'bridge-obstacle', 'Sprite_Ancient_Ruins_106_front.png'),
-  ];
   const characterFrameSourceRoots = ['lenne', 'glenn', 'amalia', 'robb', 'sienna'].map(
     (name) => path.join(publicDir, 'assets', name),
   );
@@ -91,6 +90,62 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
     if (characterFrameSourceRoots.some((root) => isWithin(root, candidate))) return false;
     if (!isWithin(styleLibraryRoot, candidate)) return true;
     return includeFullStyleLibrary;
+  };
+
+  const sameFile = (left: string, right: string): boolean => {
+    const normalizedLeft = path.resolve(left);
+    const normalizedRight = path.resolve(right);
+    return process.platform === 'win32'
+      ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+      : normalizedLeft === normalizedRight;
+  };
+
+  const catalogRelativePathForFile = (candidate: string): string | null => {
+    if (isWithin(styleLibraryRoot, candidate)) {
+      return includeFullStyleLibrary
+        ? path.relative(styleLibraryRoot, candidate).split(path.sep).join('/')
+        : null;
+    }
+    if (!isWithin(authoredAssetsRoot, candidate)) return null;
+    if (characterFrameSourceRoots.some((root) => isWithin(root, candidate))) return null;
+    return path.relative(publicDir, candidate).split(path.sep).join('/');
+  };
+
+  const styleAssetPathForFile = (candidate: string): string | null => {
+    const relativePath = catalogRelativePathForFile(candidate);
+    if (!relativePath) return null;
+    const { source } = catalogLocation(relativePath);
+    const safeId = crypto.createHash('sha1').update(relativePath).digest('hex').slice(0, 20);
+    return `/style-assets/${source}/${safeId}.png`;
+  };
+
+  const publicAssetPathForFile = (candidate: string): string | null => {
+    if (!isWithin(publicDir, candidate)) return null;
+    const relativePath = path.relative(publicDir, candidate).split(path.sep).join('/');
+    return `/${relativePath}`;
+  };
+
+  const catalogAssetForFile = async (filePath: string, relativePath: string): Promise<CatalogAsset> => {
+    const name = path.basename(filePath);
+    const size = await readPngSize(filePath);
+    const { source, collection } = catalogLocation(relativePath);
+    const safeId = crypto.createHash('sha1').update(relativePath).digest('hex').slice(0, 20);
+    return {
+      id: relativePath,
+      path: `/style-assets/${source}/${safeId}.png`,
+      relativePath,
+      name: name.replace(/\.png$/i, ''),
+      source,
+      collection,
+      category: classifyAsset(name, relativePath),
+      width: size.width,
+      height: size.height,
+      filePath,
+    };
+  };
+
+  const sortCatalog = (assets: CatalogAsset[]): void => {
+    assets.sort((a, b) => naturalSort.compare(a.name, b.name) || naturalSort.compare(a.source, b.source));
   };
 
   const scan = async (): Promise<CatalogAsset[]> => {
@@ -128,21 +183,6 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
         });
       }
 
-      for (const filePath of supplementalStyleAssetFiles) {
-        try {
-          const stats = await fs.promises.stat(filePath);
-          if (!stats.isFile()) continue;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-          throw error;
-        }
-        candidates.push({
-          name: path.basename(filePath),
-          filePath,
-          relativePath: path.relative(publicDir, filePath).split(path.sep).join('/'),
-        });
-      }
-
       while (directories.length > 0) {
         const directory = directories.pop()!;
         let entries: fs.Dirent[];
@@ -165,30 +205,42 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
         }
       }
 
+      // Authored runtime art is small enough to discover automatically. Keep
+      // the imported style library and raw character frame directories out of
+      // this traversal: the former is scanned separately above, while the
+      // latter is represented by the generated character atlas.
+      const authoredDirectories = [authoredAssetsRoot];
+      while (authoredDirectories.length > 0) {
+        const directory = authoredDirectories.pop()!;
+        let entries: fs.Dirent[];
+        try {
+          entries = await fs.promises.readdir(directory, { withFileTypes: true });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw error;
+        }
+        for (const entry of entries) {
+          const filePath = path.join(directory, entry.name);
+          if (entry.isDirectory()) {
+            if (sameFile(filePath, styleLibraryRoot)) continue;
+            if (characterFrameSourceRoots.some((root) => sameFile(filePath, root))) continue;
+            authoredDirectories.push(filePath);
+          } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.png')) {
+            const relativePath = catalogRelativePathForFile(filePath);
+            if (relativePath) candidates.push({ name: entry.name, filePath, relativePath });
+          }
+        }
+      }
+
       const result: CatalogAsset[] = [];
       const batchSize = 128;
       for (let index = 0; index < candidates.length; index += batchSize) {
-        const batch = await Promise.all(candidates.slice(index, index + batchSize).map(async ({ name, filePath, relativePath }) => {
-          const size = await readPngSize(filePath);
-          const { source, collection } = catalogLocation(relativePath);
-          const safeId = crypto.createHash('sha1').update(relativePath).digest('hex').slice(0, 20);
-          return {
-            id: relativePath,
-            path: `/style-assets/${source}/${safeId}.png`,
-            relativePath,
-            name: name.replace(/\.png$/i, ''),
-            source,
-            collection,
-            category: classifyAsset(name, relativePath),
-            width: size.width,
-            height: size.height,
-            filePath,
-          } satisfies CatalogAsset;
-        }));
+        const batch = await Promise.all(candidates.slice(index, index + batchSize)
+          .map(({ filePath, relativePath }) => catalogAssetForFile(filePath, relativePath)));
         result.push(...batch);
       }
 
-      result.sort((a, b) => naturalSort.compare(a.name, b.name) || naturalSort.compare(a.source, b.source));
+      sortCatalog(result);
       cached = result;
       return result;
     })().finally(() => {
@@ -252,7 +304,14 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
           }
           res.setHeader('Content-Type', contentType(filePath));
           res.setHeader('Cache-Control', 'no-cache');
-          fs.createReadStream(filePath).pipe(res);
+          if (path.extname(filePath).toLowerCase() === '.png') {
+            // Release the source PNG before writing the response. This keeps
+            // Windows art tools free to replace the file while the browser is
+            // still receiving a previous version.
+            res.end(await fs.promises.readFile(filePath));
+          } else {
+            fs.createReadStream(filePath).pipe(res);
+          }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
             next();
@@ -282,13 +341,7 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
 
     for (let index = 0; index < files.length; index += 128) {
       await Promise.all(files.slice(index, index + 128).map(async ({ source, target }) => {
-        try {
-          await fs.promises.link(source, target);
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code === 'EEXIST') return;
-          await fs.promises.copyFile(source, target);
-        }
+        await fs.promises.copyFile(source, target);
       }));
     }
   };
@@ -303,8 +356,11 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
       return true;
     }
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    fs.createReadStream(asset.filePath).pipe(res);
+    res.setHeader('Cache-Control', 'no-store');
+    // Buffering closes the source handle before the response is sent. The
+    // files are small sprites, and avoiding a long-lived stream matters on
+    // Windows when Aseprite atomically replaces the file during Save.
+    res.end(await fs.promises.readFile(asset.filePath));
     return true;
   };
 
@@ -321,6 +377,61 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
     configureServer(server) {
       installPublicMiddleware(server);
       installAssetMiddleware(server);
+
+      const pendingAssetChanges = new Map<string, ReturnType<typeof setTimeout>>();
+      const onAssetChange = (eventName: string, changedFile: string) => {
+        if (!['add', 'change', 'unlink'].includes(eventName)) return;
+        const filePath = path.resolve(changedFile);
+        if (!isWithin(publicDir, filePath) || path.extname(filePath).toLowerCase() !== '.png') return;
+
+        const existingTimer = pendingAssetChanges.get(filePath);
+        if (existingTimer) clearTimeout(existingTimer);
+        pendingAssetChanges.set(filePath, setTimeout(() => {
+          pendingAssetChanges.delete(filePath);
+          void (async () => {
+            const relativePath = catalogRelativePathForFile(filePath);
+            let catalogChanged = relativePath !== null && eventName !== 'change';
+            if (eventName === 'unlink') {
+              if (cached) {
+                cached = cached.filter((asset) => !sameFile(asset.filePath, filePath));
+              }
+            } else {
+              const matchingAssets = cached?.filter((asset) => sameFile(asset.filePath, filePath)) ?? [];
+              if (matchingAssets.length > 0) {
+                const size = await readPngSize(filePath);
+                for (const asset of matchingAssets) {
+                  asset.width = size.width;
+                  asset.height = size.height;
+                }
+              } else if (relativePath && cached) {
+                cached.push(await catalogAssetForFile(filePath, relativePath));
+                sortCatalog(cached);
+              }
+            }
+
+            const paths = [publicAssetPathForFile(filePath), styleAssetPathForFile(filePath)]
+              .filter((assetPath): assetPath is string => Boolean(assetPath));
+            if (paths.length === 0) return;
+            assetRevision += 1;
+            server.ws.send({
+              type: 'custom',
+              event: 'style-asset-change',
+              data: {
+                paths,
+                revision: `${Date.now().toString(36)}-${assetRevision.toString(36)}`,
+                catalogChanged,
+              },
+            });
+          })().catch((error) => server.config.logger.error(`Style asset refresh failed: ${String(error)}`));
+        }, 100));
+      };
+      server.watcher.on('all', onAssetChange);
+      server.httpServer?.once('close', () => {
+        server.watcher.off('all', onAssetChange);
+        for (const timer of pendingAssetChanges.values()) clearTimeout(timer);
+        pendingAssetChanges.clear();
+      });
+
       server.middlewares.use('/__style-assets', (req, res, next) => {
         void (async () => {
           const assets = await scan();
@@ -364,11 +475,7 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
         const target = path.join(options.dir, asset.path.replace(/^\//, ''));
         fs.mkdirSync(path.dirname(target), { recursive: true });
         if (fs.existsSync(target)) continue;
-        try {
-          fs.linkSync(asset.filePath, target);
-        } catch {
-          fs.copyFileSync(asset.filePath, target);
-        }
+        fs.copyFileSync(asset.filePath, target);
       }
     },
   };
@@ -422,9 +529,10 @@ export default defineConfig(({ command, mode }) => {
         },
       },
       watch: {
-        // These files are an immutable source library, not authored modules.
-        // Watching the full PNG library stalls Vite's request loop on Windows.
-        ignored: ['**/public/assets/**', '**/public/tilesets/**'],
+        // This imported library contains more than 140k immutable files.
+        // Other public assets are authored locally and stay watched so the
+        // style editor can preview Aseprite saves without a server restart.
+        ignored: ['**/public/assets/chained-echoes-assets-sorted/**'],
       },
     },
 

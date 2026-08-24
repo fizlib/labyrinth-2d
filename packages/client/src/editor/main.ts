@@ -120,6 +120,8 @@ let shiftHeld = false;
 const spriteById = new Map<string, Sprite>();
 const colliderGraphicById = new Map<string, Graphics>();
 let framedTextures: Texture[] = [];
+const assetRevisionByPath = new Map<string, string>();
+const loadedTextureRequestByPath = new Map<string, string>();
 
 const history: string[] = [JSON.stringify(documentState)];
 let historyIndex = 0;
@@ -302,20 +304,31 @@ function applyElementToSprite(element: EditorElement, sprite: Sprite): void {
   sprite.zIndex = element.zIndex;
 }
 
-async function textureFor(path: string): Promise<Texture> {
+function revisionedAssetPath(assetPath: string): string {
+  const revision = assetRevisionByPath.get(assetPath);
+  if (!revision) return assetPath;
+  const hashIndex = assetPath.indexOf('#');
+  const base = hashIndex === -1 ? assetPath : assetPath.slice(0, hashIndex);
+  const hash = hashIndex === -1 ? '' : assetPath.slice(hashIndex);
+  const separator = base.includes('?') ? '&' : '?';
+  return `${base}${separator}styleAssetRevision=${encodeURIComponent(revision)}${hash}`;
+}
+
+async function textureFor(assetPath: string): Promise<{ texture: Texture; requestPath: string }> {
+  const requestPath = revisionedAssetPath(assetPath);
   try {
-    const texture = await Assets.load<Texture>(path);
+    const texture = await Assets.load<Texture>(requestPath);
     texture.source.scaleMode = 'nearest';
-    return texture;
+    return { texture, requestPath };
   } catch {
-    return Texture.WHITE;
+    return { texture: Texture.WHITE, requestPath };
   }
 }
 
 async function rebuildScene(): Promise<void> {
   const generation = ++renderGeneration;
   const uniquePaths = [...new Set(documentState.elements.map((element) => element.assetPath))];
-  const textures = new Map<string, Texture>();
+  const textures = new Map<string, { texture: Texture; requestPath: string }>();
   await Promise.all(uniquePaths.map(async (path) => textures.set(path, await textureFor(path))));
   if (generation !== renderGeneration) return;
 
@@ -325,7 +338,7 @@ async function rebuildScene(): Promise<void> {
   spriteById.clear();
   const sorted = [...documentState.elements].sort((a, b) => a.zIndex - b.zIndex || a.id.localeCompare(b.id));
   for (const element of sorted) {
-    const baseTexture = textures.get(element.assetPath) ?? Texture.WHITE;
+    const baseTexture = textures.get(element.assetPath)?.texture ?? Texture.WHITE;
     let spriteTexture = baseTexture;
     if (element.sourceRect && baseTexture !== Texture.WHITE) {
       const frame = element.sourceRect;
@@ -343,6 +356,18 @@ async function rebuildScene(): Promise<void> {
     sprite.on('pointerdown', (event: FederatedPointerEvent) => onElementPointerDown(event, element.id));
     sceneLayer.addChild(sprite);
     spriteById.set(element.id, sprite);
+  }
+  const previousRequestPaths = new Map(loadedTextureRequestByPath);
+  const nextRequestPaths = new Set<string>();
+  loadedTextureRequestByPath.clear();
+  for (const [assetPath, loaded] of textures) {
+    loadedTextureRequestByPath.set(assetPath, loaded.requestPath);
+    nextRequestPaths.add(loaded.requestPath);
+  }
+  for (const [assetPath, previousRequestPath] of previousRequestPaths) {
+    if (loadedTextureRequestByPath.get(assetPath) !== previousRequestPath && !nextRequestPaths.has(previousRequestPath)) {
+      void Assets.unload(previousRequestPath).catch(() => undefined);
+    }
   }
   rebuildColliders();
   updateSelectionOverlay();
@@ -1093,7 +1118,7 @@ async function refreshCatalog(): Promise<void> {
       card.title = `${asset.name}\n${asset.collection}\n${asset.width}×${asset.height}px`;
       const image = document.createElement('img');
       image.loading = 'lazy';
-      image.src = asset.path;
+      image.src = revisionedAssetPath(asset.path);
       image.alt = asset.name;
       const label = document.createElement('span');
       label.textContent = asset.name;
@@ -1104,18 +1129,50 @@ async function refreshCatalog(): Promise<void> {
       card.addEventListener('dblclick', () => selectedElement() ? replaceSelectedAsset() : addAssetAtViewportCenter());
       assetGrid.appendChild(card);
     }
+    const refreshedSelection = selectedAsset
+      ? page.assets.find((asset) => asset.id === selectedAsset?.id)
+      : undefined;
+    if (refreshedSelection) {
+      selectedAsset = refreshedSelection;
+      renderSelectedAssetPreview();
+    }
   } catch (error) {
     assetGrid.innerHTML = `<div class="readout">${escapeHtml(error instanceof Error ? error.message : 'Asset catalog failed')}</div>`;
   }
 }
 
+function renderSelectedAssetPreview(): void {
+  if (!selectedAsset) return;
+  selectedAssetView.innerHTML = `<img src="${revisionedAssetPath(selectedAsset.path)}" alt=""><div><strong>${escapeHtml(selectedAsset.name)}</strong><small>${escapeHtml(selectedAsset.collection)} · ${escapeHtml(selectedAsset.category)}</small><small>${selectedAsset.width}×${selectedAsset.height}px · ${selectedAsset.source}</small></div>`;
+}
+
 function selectAsset(asset: AssetCatalogEntry): void {
   selectedAsset = asset;
   selectedAssetView.classList.remove('empty');
-  selectedAssetView.innerHTML = `<img src="${asset.path}" alt=""><div><strong>${escapeHtml(asset.name)}</strong><small>${escapeHtml(asset.collection)} · ${escapeHtml(asset.category)}</small><small>${asset.width}×${asset.height}px · ${asset.source}</small></div>`;
+  renderSelectedAssetPreview();
   replaceAssetButton.disabled = !selectedElement();
   addAssetButton.disabled = false;
   void refreshCatalog();
+}
+
+interface StyleAssetChange {
+  paths: string[];
+  revision: string;
+  catalogChanged: boolean;
+}
+
+if (import.meta.hot) {
+  import.meta.hot.on('style-asset-change', ({ paths, revision, catalogChanged }: StyleAssetChange) => {
+    for (const assetPath of paths) assetRevisionByPath.set(assetPath, revision);
+    if (documentState.elements.some((element) => paths.includes(element.assetPath))) {
+      void rebuildScene();
+    }
+    if (selectedAsset && paths.includes(selectedAsset.path)) renderSelectedAssetPreview();
+    void (async () => {
+      if (catalogChanged) await refreshCatalogMeta();
+      await refreshCatalog();
+    })();
+  });
 }
 
 function addAssetAtViewportCenter(): void {
@@ -1123,17 +1180,30 @@ function addAssetAtViewportCenter(): void {
   addSelectedAssetAt(center);
 }
 
-async function initializeCatalog(): Promise<void> {
+async function refreshCatalogMeta(): Promise<void> {
   const meta = await loadCatalogMeta();
+  const currentSource = assetSource.value;
+  const currentCategory = assetCategory.value;
+  assetSource.replaceChildren(new Option('All sources', ''));
+  assetCategory.replaceChildren(new Option('All categories', ''));
   for (const source of meta.sources) assetSource.add(new Option(source, source));
   for (const category of meta.categories) assetCategory.add(new Option(category, category));
+  if (meta.sources.includes(currentSource)) assetSource.value = currentSource;
+  else catalogQuery.source = '';
+  if (meta.categories.includes(currentCategory)) assetCategory.value = currentCategory;
+  else catalogQuery.category = '';
+
   const collectionFragment = document.createDocumentFragment();
   for (const collection of meta.collections) {
     const option = document.createElement('option');
     option.value = collection;
     collectionFragment.appendChild(option);
   }
-  assetCollections.appendChild(collectionFragment);
+  assetCollections.replaceChildren(collectionFragment);
+}
+
+async function initializeCatalog(): Promise<void> {
+  await refreshCatalogMeta();
   await refreshCatalog();
 }
 
