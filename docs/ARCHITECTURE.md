@@ -1,6 +1,6 @@
 # False Arrow Architecture
 
-Last updated: 2026-08-23 - Persisted tutorial analytics
+Last updated: 2026-08-24 - Runtime sprite atlases
 
 ## Project Overview
 
@@ -433,8 +433,9 @@ The client first runs a lightweight DOM app shell with these states:
    menu for an active administrator; suspended accounts instead receive a
    blocked-account screen with Sign Out and Check Again;
 6. after Main Menu renders, lazily import PixiJS and prime the runtime texture
-   cache during idle menu time; all small authored texture requests begin as one
-   batch so a cold cache does not create a category-by-category waterfall;
+   cache during idle menu time; one generated environment atlas, one character
+   atlas, and the two pixel fonts load eagerly so a cold cache does not create a
+   category-by-category waterfall;
 7. after Quick Play, Create Private Game, or Join Room is selected, initialize
    the Pixi application and start the authoritative waiting-room connection,
    reusing any warmed assets and showing the DOM lobby overlay as soon as
@@ -487,7 +488,7 @@ empty naming form before the menu or an invited lobby can open.
 
 Auth and display-name screens retain the lightweight DOM-only path. After Main
 Menu first renders, a delayed warmup imports the game module and starts the
-aggregate runtime asset request, but it does not create a Pixi application or
+four-file runtime asset request, but it does not create a Pixi application or
 canvas, construct `NetworkManager`, or open a WebSocket. The selected Quick
 Play/private-room connection begins inside `startGame()` and uses the profile
 display name. Any remaining asset progress continues in the background while
@@ -525,9 +526,24 @@ and environment configuration.
 
 ### Asset Loading and Fallbacks
 
-Asset loading lives in `packages/client/src/assets/AssetLoader.ts`.
+Asset loading lives in `packages/client/src/assets/AssetLoader.ts`. The
+deterministic `scripts/build-runtime-atlas.py` generator packs all 455 eagerly
+used environment, obstacle, UI, and nested-sheet PNG paths into
+`assets/runtime/runtime-atlas.png`. Pixel-identical sources share one frame,
+and every unique frame receives an extruded edge plus a transparent guard pixel
+to prevent texture bleeding. `RuntimeTextureAtlas.ts` exposes the original
+asset paths as Pixi texture views, so layouts retain their existing path keys
+and loading remains eager. The separately generated character atlas retains
+all 612 animation frames; together, the two atlases replace 456 individual PNG
+requests with two.
 
-The loader attempts to load authored PNG assets first and falls back to generated textures if a file is missing. `assets/tiles.png` is a `272 x 32` atlas: row 0 contains the existing floor, wall, and grass slices, and row 1 columns `0..9` contain the dirt transition set used for gate approaches. Current supported assets include:
+The loader attempts to load atlas-backed authored PNG assets first, falls back
+to their individual source URLs if the generated atlas is unavailable, and
+retains generated texture fallbacks for core art. Nested legacy sheets remain
+addressable inside the environment atlas: `assets/tiles.png` is a `272 x 32`
+sheet whose row 0 contains the existing floor, wall, and grass slices, while
+row 1 columns `0..9` contain the dirt transition set used for gate approaches.
+Current supported source assets include:
 
 - `assets/tiles.png`
 - `assets/oak-tree.png`

@@ -7,7 +7,7 @@
 // Step 9: 5 tile textures — floor, floor shadow, wall face variants, wall top, wall interior.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Assets, Texture, Rectangle } from 'pixi.js';
+import { Assets, Texture } from 'pixi.js';
 import { SQUAD_COLORS, type SquadColor } from '@labyrinth/shared';
 import {
   generateGrassTexture,
@@ -43,115 +43,21 @@ import { CAGE_GROUND_ASSET_PATHS } from '../systems/CageGroundLayout';
 import { T_INTERSECTION_DECORATION_ASSET_PATHS } from '../systems/TIntersectionDecorationLayout';
 import { DECORATED_VERTICAL_PASSAGE_ASSET_PATHS } from '../systems/DecoratedVerticalPassageLayout';
 import { CENTRAL_HUB_ASSET_PATHS } from '../systems/CentralHubLayout.generated';
+import {
+  FIORWOODS_FACE_ROW_STARTS,
+  FIORWOODS_STYLE_DECORATION_IDS,
+} from './runtimeAtlasPaths';
+import { RUNTIME_ATLAS_PATH } from './runtimeAtlasManifest';
+import { createRelativeTexture, loadRuntimeAtlasTexture } from './RuntimeTextureAtlas';
 
-const FOREST_ASSET_NAMES = [
-  'tree_primary_02.png',
-  'tree_primary_03.png',
-  ...Array.from({ length: 8 }, (_, index) => `fior_canopy_${index}.png`),
-  'tree_small_04.png',
-  'tree_small_05.png',
-  'tree_small_06.png',
-  'bush_01.png',
-  'bush_02.png',
-  'bush_03.png',
-  'bush_04.png',
-  ...Array.from({ length: 4 }, (_, index) => `fior_grass_${index}.png`),
-  ...Array.from({ length: 4 }, (_, index) => `fior_ground_${index}.png`),
-  'path_center.png',
-  'path_plain_alt.png',
-  'path_n.png',
-  'path_ne.png',
-  'path_e.png',
-  'path_se.png',
-  'path_s.png',
-  'path_sw.png',
-  'path_w.png',
-  'path_nw.png',
-  'tree_shadow.png',
-];
-
-const FIORWOODS_FACE_ROW_STARTS = [38, 88, 138, 188, 238, 288, 338, 388];
-const FIORWOODS_STYLE_DECORATION_IDS = [
-  110, 160, 438, 439, 440, 441, 442, 443, 492, 493, 539, 543, 549, 550, 580, 587, 589,
-  590, 592, 593, 599, 600, 636, 637, 643, 832, 833, 847, 848, 849, 880, 881, 882, 897,
-  898, 899, 930, 931, 932, 946, 947, 948, 949, 980, 981, 982, 983, 996, 997, 998, 999,
-  1030, 1031, 1032, 1033, 1046, 1047, 1048, 1049, 1080, 1081, 1082, 1089, 1131, 1181,
-  1231, 1232, 1281, 1282,
-];
-const FIORWOODS_RUNTIME_ASSET_IDS = [
-  ...new Set([
-    ...FIORWOODS_FACE_ROW_STARTS.flatMap((start) =>
-      Array.from({ length: 6 }, (_, column) => start + column),
-    ),
-    381,
-    382,
-    380,
-    80,
-    31,
-    32,
-    379,
-    301,
-    438,
-    439,
-    440,
-    441,
-    442,
-    443,
-    549,
-    550,
-    599,
-    600,
-    1131,
-    1181,
-    1231,
-    1232,
-    1281,
-    1282,
-    ...FIORWOODS_STYLE_DECORATION_IDS,
-    102,
-    105,
-    108,
-    154,
-  ]),
-];
-
-// Desktop menu warmup starts every small runtime request together. Phones and
-// tablets deliberately skip that warmup because decoding the authored texture
-// library while Pixi creates its renderer can exhaust their tab process.
+// Desktop menu warmup eagerly loads the two sprite atlases plus the fonts. The
+// runtime atlas replaces 455 individual PNG requests without changing when the
+// game art becomes available.
 const GAME_ASSET_PATHS = [
-  ...new Set([
-    'assets/tiles.png',
-    'assets/wall_tiles.png',
-    'assets/gates.png',
-    'assets/oak-tree.png',
-    ...FOREST_ASSET_NAMES.map((name) => `assets/forest/${name}`),
-    ...FIORWOODS_RUNTIME_ASSET_IDS.map(getFiorwoodsRuntimeAssetPath),
-    'assets/shadow_top.png',
-    'assets/shadow_left.png',
-    'assets/shadow_corner.png',
-    CHARACTER_ATLAS_PATH,
-    'assets/runestones.png',
-    ...CENTRAL_HUB_ASSET_PATHS,
-    'assets/portal_spritesheet.png',
-    ...PORTAL_PLATFORM_ASSET_PATHS,
-    ...BRIDGE_OBSTACLE_ASSET_PATHS,
-    ...SWAMP_OBSTACLE_ASSET_PATHS,
-    ...SWORD_FIELD_ASSET_PATHS,
-    ...SPIKE_GATE_ASSET_PATHS,
-    ...CHEST_DEAD_END_ASSET_PATHS,
-    ...T_INTERSECTION_DECORATION_ASSET_PATHS,
-    ...DECORATED_VERTICAL_PASSAGE_ASSET_PATHS,
-    'assets/cage/birdCage1.png',
-    'assets/cage/birdCage2.png',
-    'assets/cage/birdCage3.png',
-    ...CAGE_GROUND_ASSET_PATHS,
-    'assets/wisdom_orb.png',
-    'assets/expand_button.png',
-    'assets/contract_button.png',
-    'assets/pixel_operator/PixelOperator.ttf',
-    'assets/pixel_operator/PixelOperator8.ttf',
-    'assets/plate_spritesheet.png',
-  ]),
+  RUNTIME_ATLAS_PATH,
+  CHARACTER_ATLAS_PATH,
+  'assets/pixel_operator/PixelOperator.ttf',
+  'assets/pixel_operator/PixelOperator8.ttf',
 ];
 
 let assetPreloadPromise: Promise<void> | null = null;
@@ -428,7 +334,7 @@ export async function loadAssets(
   };
 
   try {
-    const tilesheet = await Assets.load<Texture>('assets/tiles.png');
+    const tilesheet = await loadRuntimeAtlasTexture('assets/tiles.png');
     tilesheet.source.scaleMode = 'nearest';
     if (tilesheet.width < 272 || tilesheet.height < 16) {
       throw new Error(
@@ -436,107 +342,38 @@ export async function loadAssets(
       );
     }
 
-    floorTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(0, 0, 16, 16),
-    });
-    floorShadowTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(16, 0, 16, 16),
-    });
-    wallTopTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(48, 0, 16, 16),
-    });
-    wallInteriorTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(64, 0, 16, 16),
-    });
-    wallSideLeftTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(80, 0, 16, 16),
-    });
-    wallSideRightTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(96, 0, 16, 16),
-    });
-    wallBottomTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(112, 0, 16, 16),
-    });
-    wallCornerTLTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(128, 0, 16, 16),
-    });
-    wallCornerTRTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(144, 0, 16, 16),
-    });
-    wallCornerBLTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(160, 0, 16, 16),
-    });
-    wallCornerBRTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(176, 0, 16, 16),
-    });
-    wallTopEdgeTexture = new Texture({
-      source: tilesheet.source,
-      frame: new Rectangle(192, 0, 16, 16),
-    });
+    floorTexture = createRelativeTexture(tilesheet, 0, 0, 16, 16);
+    floorShadowTexture = createRelativeTexture(tilesheet, 16, 0, 16, 16);
+    wallTopTexture = createRelativeTexture(tilesheet, 48, 0, 16, 16);
+    wallInteriorTexture = createRelativeTexture(tilesheet, 64, 0, 16, 16);
+    wallSideLeftTexture = createRelativeTexture(tilesheet, 80, 0, 16, 16);
+    wallSideRightTexture = createRelativeTexture(tilesheet, 96, 0, 16, 16);
+    wallBottomTexture = createRelativeTexture(tilesheet, 112, 0, 16, 16);
+    wallCornerTLTexture = createRelativeTexture(tilesheet, 128, 0, 16, 16);
+    wallCornerTRTexture = createRelativeTexture(tilesheet, 144, 0, 16, 16);
+    wallCornerBLTexture = createRelativeTexture(tilesheet, 160, 0, 16, 16);
+    wallCornerBRTexture = createRelativeTexture(tilesheet, 176, 0, 16, 16);
+    wallTopEdgeTexture = createRelativeTexture(tilesheet, 192, 0, 16, 16);
 
     // 4 grass variant textures at positions 13–16 (208–272 px)
     for (let i = 0; i < 4; i++) {
       grassVariantTextures.push(
-        new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(208 + i * 16, 0, 16, 16),
-        }),
+        createRelativeTexture(tilesheet, 208 + i * 16, 0, 16, 16),
       );
     }
 
     if (tilesheet.height >= 32) {
       dirtTextures = {
-        center: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(0, 16, 16, 16),
-        }),
-        plainAlt: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(16, 16, 16, 16),
-        }),
-        north: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(32, 16, 16, 16),
-        }),
-        northEast: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(48, 16, 16, 16),
-        }),
-        east: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(64, 16, 16, 16),
-        }),
-        southEast: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(80, 16, 16, 16),
-        }),
-        south: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(96, 16, 16, 16),
-        }),
-        southWest: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(112, 16, 16, 16),
-        }),
-        west: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(128, 16, 16, 16),
-        }),
-        northWest: new Texture({
-          source: tilesheet.source,
-          frame: new Rectangle(144, 16, 16, 16),
-        }),
+        center: createRelativeTexture(tilesheet, 0, 16, 16, 16),
+        plainAlt: createRelativeTexture(tilesheet, 16, 16, 16, 16),
+        north: createRelativeTexture(tilesheet, 32, 16, 16, 16),
+        northEast: createRelativeTexture(tilesheet, 48, 16, 16, 16),
+        east: createRelativeTexture(tilesheet, 64, 16, 16, 16),
+        southEast: createRelativeTexture(tilesheet, 80, 16, 16, 16),
+        south: createRelativeTexture(tilesheet, 96, 16, 16, 16),
+        southWest: createRelativeTexture(tilesheet, 112, 16, 16, 16),
+        west: createRelativeTexture(tilesheet, 128, 16, 16, 16),
+        northWest: createRelativeTexture(tilesheet, 144, 16, 16, 16),
       };
     } else {
       console.warn(
@@ -568,15 +405,12 @@ export async function loadAssets(
   }
 
   try {
-    const wallFaceSheet = await Assets.load<Texture>('assets/wall_tiles.png');
+    const wallFaceSheet = await loadRuntimeAtlasTexture('assets/wall_tiles.png');
     wallFaceSheet.source.scaleMode = 'nearest';
 
     for (let i = 0; i < 4; i++) {
       wallFaceVariantTextures.push(
-        new Texture({
-          source: wallFaceSheet.source,
-          frame: new Rectangle(i * 16, 0, 16, 16),
-        }),
+        createRelativeTexture(wallFaceSheet, i * 16, 0, 16, 16),
       );
     }
 
@@ -593,7 +427,7 @@ export async function loadAssets(
   }
   // Gate atlas asset: 3x3 grid of 16x16 gate pieces packed into one 48x48 PNG.
   try {
-    const gateSheet = await Assets.load<Texture>('assets/gates.png');
+    const gateSheet = await loadRuntimeAtlasTexture('assets/gates.png');
     gateSheet.source.scaleMode = 'nearest';
     if (gateSheet.width < 48 || gateSheet.height < 48) {
       throw new Error(
@@ -602,42 +436,15 @@ export async function loadAssets(
     }
 
     frontGateTextures = {
-      topLeft: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(0, 0, 16, 16),
-      }),
-      topMid: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(16, 0, 16, 16),
-      }),
-      topRight: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(32, 0, 16, 16),
-      }),
-      midLeft: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(0, 16, 16, 16),
-      }),
-      midCenter: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(16, 16, 16, 16),
-      }),
-      midRight: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(32, 16, 16, 16),
-      }),
-      bottomLeft: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(0, 32, 16, 16),
-      }),
-      bottomMid: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(16, 32, 16, 16),
-      }),
-      bottomRight: new Texture({
-        source: gateSheet.source,
-        frame: new Rectangle(32, 32, 16, 16),
-      }),
+      topLeft: createRelativeTexture(gateSheet, 0, 0, 16, 16),
+      topMid: createRelativeTexture(gateSheet, 16, 0, 16, 16),
+      topRight: createRelativeTexture(gateSheet, 32, 0, 16, 16),
+      midLeft: createRelativeTexture(gateSheet, 0, 16, 16, 16),
+      midCenter: createRelativeTexture(gateSheet, 16, 16, 16, 16),
+      midRight: createRelativeTexture(gateSheet, 32, 16, 16, 16),
+      bottomLeft: createRelativeTexture(gateSheet, 0, 32, 16, 16),
+      bottomMid: createRelativeTexture(gateSheet, 16, 32, 16, 16),
+      bottomRight: createRelativeTexture(gateSheet, 32, 32, 16, 16),
     };
     console.info('[Assets] Loaded gates.png (front-facing 3x3 gate atlas)');
   } catch (err) {
@@ -650,7 +457,7 @@ export async function loadAssets(
   }
 
   try {
-    treeTexture = await Assets.load<Texture>('assets/oak-tree.png');
+    treeTexture = await loadRuntimeAtlasTexture('assets/oak-tree.png');
     treeTexture.source.scaleMode = 'nearest';
     console.info(
       `[Assets] Loaded oak-tree.png (${treeTexture.width}×${treeTexture.height})`,
@@ -665,7 +472,7 @@ export async function loadAssets(
   // ── Forest labyrinth reskin ─────────────────────────────────────────────
   try {
     const loadForestTexture = async (name: string): Promise<Texture> => {
-      const texture = await Assets.load<Texture>(`assets/forest/${name}`);
+      const texture = await loadRuntimeAtlasTexture(`assets/forest/${name}`);
       texture.source.scaleMode = 'nearest';
       return texture;
     };
@@ -742,7 +549,7 @@ export async function loadAssets(
   // and placement match the extracted map layouts exactly.
   try {
     const loadFiorwoodsTile = async (id: number): Promise<Texture> => {
-      const texture = await Assets.load<Texture>(getFiorwoodsRuntimeAssetPath(id));
+      const texture = await loadRuntimeAtlasTexture(getFiorwoodsRuntimeAssetPath(id));
       texture.source.scaleMode = 'nearest';
       return texture;
     };
@@ -810,11 +617,11 @@ export async function loadAssets(
 
   // ── Shadow overlay assets (16×16 semi-transparent PNGs) ───────────────────
   try {
-    shadowTopTexture = await Assets.load<Texture>('assets/shadow_top.png');
+    shadowTopTexture = await loadRuntimeAtlasTexture('assets/shadow_top.png');
     shadowTopTexture.source.scaleMode = 'nearest';
-    shadowLeftTexture = await Assets.load<Texture>('assets/shadow_left.png');
+    shadowLeftTexture = await loadRuntimeAtlasTexture('assets/shadow_left.png');
     shadowLeftTexture.source.scaleMode = 'nearest';
-    shadowCornerTexture = await Assets.load<Texture>('assets/shadow_corner.png');
+    shadowCornerTexture = await loadRuntimeAtlasTexture('assets/shadow_corner.png');
     shadowCornerTexture.source.scaleMode = 'nearest';
     console.info('[Assets] Loaded shadow overlay textures (top, left, corner)');
   } catch {
@@ -854,13 +661,7 @@ export async function loadAssets(
   ): PlayerAnimationSet => {
     const textures = new Map<number, Texture>();
     for (const [sourceFrame, x, y, width, height] of frameDefinitions) {
-      textures.set(
-        sourceFrame,
-        new Texture({
-          source: atlas.source,
-          frame: new Rectangle(x, y, width, height),
-        }),
-      );
+      textures.set(sourceFrame, createRelativeTexture(atlas, x, y, width, height));
     }
 
     const textureFor = (sourceFrame: number): Texture => {
@@ -955,19 +756,13 @@ export async function loadAssets(
   // ── Runestone spritesheet (96×32 — 6 cols × 1 row, each frame 16×32) ──────
   // Layout: [inactive0, active0, inactive1, active1, inactive2, active2]
   try {
-    const rsSheet = await Assets.load<Texture>('assets/runestones.png');
+    const rsSheet = await loadRuntimeAtlasTexture('assets/runestones.png');
     rsSheet.source.scaleMode = 'nearest';
 
     runestoneTextures = [];
     for (let i = 0; i < 3; i++) {
-      const inactive = new Texture({
-        source: rsSheet.source,
-        frame: new Rectangle(i * 2 * 16, 0, 16, 32),
-      });
-      const active = new Texture({
-        source: rsSheet.source,
-        frame: new Rectangle((i * 2 + 1) * 16, 0, 16, 32),
-      });
+      const inactive = createRelativeTexture(rsSheet, i * 2 * 16, 0, 16, 32);
+      const active = createRelativeTexture(rsSheet, (i * 2 + 1) * 16, 0, 16, 32);
       runestoneTextures.push([inactive, active]);
     }
     console.info('[Assets] Loaded runestones.png (3 pairs)');
@@ -1007,7 +802,7 @@ export async function loadAssets(
     centralHubTextures = new Map(
       await Promise.all(
         CENTRAL_HUB_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1025,7 +820,7 @@ export async function loadAssets(
 
   // ── Portal spritesheet (2 rows: row 1 = activation, row 2 = active idle) ──────
   try {
-    const portalSheet = await Assets.load<Texture>('assets/portal_spritesheet.png');
+    const portalSheet = await loadRuntimeAtlasTexture('assets/portal_spritesheet.png');
     portalSheet.source.scaleMode = 'nearest';
 
     // Frame size: each row is half the sheet height, frames are square
@@ -1037,10 +832,7 @@ export async function loadAssets(
     // Row 1 (y=0): inactive frame followed by the activation sequence
     for (let i = 0; i < framesPerRow; i++) {
       portalFrames.push(
-        new Texture({
-          source: portalSheet.source,
-          frame: new Rectangle(i * frameW, 0, frameW, frameH),
-        }),
+        createRelativeTexture(portalSheet, i * frameW, 0, frameW, frameH),
       );
     }
     const activationCount = framesPerRow;
@@ -1048,10 +840,7 @@ export async function loadAssets(
     // Row 2 (y=frameH): active idle frames
     for (let i = 0; i < framesPerRow; i++) {
       portalFrames.push(
-        new Texture({
-          source: portalSheet.source,
-          frame: new Rectangle(i * frameW, frameH, frameW, frameH),
-        }),
+        createRelativeTexture(portalSheet, i * frameW, frameH, frameW, frameH),
       );
     }
     console.info(
@@ -1087,7 +876,7 @@ export async function loadAssets(
     portalPlatformTextures = new Map(
       await Promise.all(
         PORTAL_PLATFORM_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1108,7 +897,7 @@ export async function loadAssets(
     bridgeObstacleTextures = new Map(
       await Promise.all(
         BRIDGE_OBSTACLE_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1127,7 +916,7 @@ export async function loadAssets(
     swampObstacleTextures = new Map(
       await Promise.all(
         SWAMP_OBSTACLE_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1146,7 +935,7 @@ export async function loadAssets(
     swordFieldTextures = new Map(
       await Promise.all(
         SWORD_FIELD_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1165,7 +954,7 @@ export async function loadAssets(
     spikeGateTextures = new Map(
       await Promise.all(
         SPIKE_GATE_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1184,7 +973,7 @@ export async function loadAssets(
     chestDeadEndTextures = new Map(
       await Promise.all(
         CHEST_DEAD_END_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1203,7 +992,7 @@ export async function loadAssets(
     tIntersectionDecorationTextures = new Map(
       await Promise.all(
         T_INTERSECTION_DECORATION_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1222,7 +1011,7 @@ export async function loadAssets(
     decoratedVerticalPassageTextures = new Map(
       await Promise.all(
         DECORATED_VERTICAL_PASSAGE_ASSET_PATHS.map(async (path) => {
-          const texture = await Assets.load<Texture>(path);
+          const texture = await loadRuntimeAtlasTexture(path);
           texture.source.scaleMode = 'nearest';
           return [path, texture] as const;
         }),
@@ -1239,10 +1028,10 @@ export async function loadAssets(
   // ── Authored magical cage prefab ────────────────────────────────────────
   try {
     const [back, closed, open, ...ground] = await Promise.all([
-      Assets.load<Texture>('assets/cage/birdCage1.png'),
-      Assets.load<Texture>('assets/cage/birdCage2.png'),
-      Assets.load<Texture>('assets/cage/birdCage3.png'),
-      ...CAGE_GROUND_ASSET_PATHS.map((path) => Assets.load<Texture>(path)),
+      loadRuntimeAtlasTexture('assets/cage/birdCage1.png'),
+      loadRuntimeAtlasTexture('assets/cage/birdCage2.png'),
+      loadRuntimeAtlasTexture('assets/cage/birdCage3.png'),
+      ...CAGE_GROUND_ASSET_PATHS.map(loadRuntimeAtlasTexture),
     ]);
     for (const texture of [back, closed, open, ...ground]) {
       texture.source.scaleMode = 'nearest';
@@ -1259,7 +1048,7 @@ export async function loadAssets(
 
   // ── Pixel Fonts (TTF) ─────────────────────────────────────────────────────
   try {
-    wisdomOrbTexture = await Assets.load<Texture>('assets/wisdom_orb.png');
+    wisdomOrbTexture = await loadRuntimeAtlasTexture('assets/wisdom_orb.png');
     wisdomOrbTexture.source.scaleMode = 'nearest';
     console.info(
       `[Assets] Loaded wisdom_orb.png (${wisdomOrbTexture.width}x${wisdomOrbTexture.height})`,
@@ -1271,8 +1060,8 @@ export async function loadAssets(
 
   try {
     [expandMapButtonTexture, contractMapButtonTexture] = await Promise.all([
-      Assets.load<Texture>('assets/expand_button.png'),
-      Assets.load<Texture>('assets/contract_button.png'),
+      loadRuntimeAtlasTexture('assets/expand_button.png'),
+      loadRuntimeAtlasTexture('assets/contract_button.png'),
     ]);
     expandMapButtonTexture.source.scaleMode = 'nearest';
     contractMapButtonTexture.source.scaleMode = 'nearest';
@@ -1297,18 +1086,13 @@ export async function loadAssets(
 
   // ── Pressure plate spritesheet (48×16 — 3 frames of 16×16) ────────────────
   try {
-    const plateSheet = await Assets.load<Texture>('assets/plate_spritesheet.png');
+    const plateSheet = await loadRuntimeAtlasTexture('assets/plate_spritesheet.png');
     plateSheet.source.scaleMode = 'nearest';
 
     // Row 1: 16x16 frames
     pressurePlateFrames = [];
     for (let i = 0; i < 3; i++) {
-      pressurePlateFrames.push(
-        new Texture({
-          source: plateSheet.source,
-          frame: new Rectangle(i * 16, 0, 16, 16),
-        }),
-      );
+      pressurePlateFrames.push(createRelativeTexture(plateSheet, i * 16, 0, 16, 16));
     }
 
     // Row 2: 24x16 frames
@@ -1316,10 +1100,7 @@ export async function loadAssets(
     if (plateSheet.height >= 32) {
       for (let i = 0; i < 3; i++) {
         hubPressurePlateFrames.push(
-          new Texture({
-            source: plateSheet.source,
-            frame: new Rectangle(i * 24, 16, 24, 16),
-          }),
+          createRelativeTexture(plateSheet, i * 24, 16, 24, 16),
         );
       }
       console.info('[Assets] Loaded plate_spritesheet.png Row 2 (24x16 hub plates)');
