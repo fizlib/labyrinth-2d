@@ -325,6 +325,20 @@ export function communityRoundStartAtFromZonedInput(
     : null;
 }
 
+/** Format an occurrence in the player's browser time zone and locale. */
+export function formatCommunityRoundDate(
+  date: Date,
+  locales?: string | string[],
+): string {
+  return new Intl.DateTimeFormat(locales, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
 export function formatCommunityRoundCountdown(remainingMs: number): string {
   const remainingSeconds = Math.max(0, Math.ceil(remainingMs / SECOND_MS));
   const hours = Math.floor(remainingSeconds / 3_600);

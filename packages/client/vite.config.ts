@@ -75,6 +75,9 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
   let pendingScan: Promise<CatalogAsset[]> | null = null;
 
   const styleLibraryRoot = path.join(publicDir, 'assets', 'chained-echoes-assets-sorted');
+  const supplementalStyleAssetFiles = [
+    path.join(publicDir, 'assets', 'bridge-obstacle', 'Sprite_Ancient_Ruins_106_front.png'),
+  ];
   const characterFrameSourceRoots = ['lenne', 'glenn', 'amalia', 'robb', 'sienna'].map(
     (name) => path.join(publicDir, 'assets', name),
   );
@@ -122,6 +125,21 @@ function styleAssetCatalogPlugin(publicDir: string, includeFullStyleLibrary: boo
           name: entry.name,
           filePath: path.join(root, entry.name),
           relativePath: entry.name,
+        });
+      }
+
+      for (const filePath of supplementalStyleAssetFiles) {
+        try {
+          const stats = await fs.promises.stat(filePath);
+          if (!stats.isFile()) continue;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw error;
+        }
+        candidates.push({
+          name: path.basename(filePath),
+          filePath,
+          relativePath: path.relative(publicDir, filePath).split(path.sep).join('/'),
         });
       }
 

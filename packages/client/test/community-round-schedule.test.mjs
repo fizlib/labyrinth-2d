@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   communityRoundStartAtFromZonedInput,
   formatCommunityRoundCountdown,
+  formatCommunityRoundDate,
   formatCommunityRoundWait,
   getCommunityRoundScheduleInputValues,
   getCommunityRoundGoogleCalendarUrl,
@@ -121,6 +122,29 @@ test('round-trips admin date and time inputs in the schedule time zone', () => {
     }),
     { date: '2026-08-23', time: '21:30' },
   );
+});
+
+test('formats player-facing round dates in the player time zone', () => {
+  const originalTimeZone = process.env.TZ;
+  try {
+    process.env.TZ = 'UTC';
+    assert.match(
+      formatCommunityRoundDate(new Date('2026-08-24T18:00:00.000Z'), 'en-US'),
+      /6:00 PM/,
+    );
+
+    process.env.TZ = 'Europe/Vilnius';
+    assert.match(
+      formatCommunityRoundDate(new Date('2026-08-24T18:00:00.000Z'), 'en-US'),
+      /9:00 PM/,
+    );
+  } finally {
+    if (originalTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTimeZone;
+    }
+  }
 });
 
 test('formats the compact wait shown after training', () => {

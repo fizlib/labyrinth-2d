@@ -3,7 +3,6 @@ import { inject } from '@vercel/analytics';
 import {
   isValidRoomCode,
   normalizeRoomCode,
-  type CommunityRoundSchedule,
   type LobbyJoinMode,
 } from '@labyrinth/shared';
 import {
@@ -42,6 +41,7 @@ import {
 } from './systems/AudioToggle';
 import {
   formatCommunityRoundCountdown,
+  formatCommunityRoundDate,
   getCommunityRoundState,
 } from './systems/CommunityRoundSchedule';
 import {
@@ -259,17 +259,6 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
-  }).format(date);
-}
-
-function formatCommunityRoundDate(date: Date, schedule: CommunityRoundSchedule): string {
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: schedule.timeZone,
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
   }).format(date);
 }
 
@@ -990,7 +979,7 @@ class AppController {
           <nav class="menu-actions" aria-label="Main menu">
             <section id="community-round-card" class="community-round-card${communityRound.isOpen ? ' community-round-card--open' : ''}" aria-labelledby="community-round-title">
               <span class="community-round-card__eyebrow">Community Round</span>
-              <strong id="community-round-title" class="community-round-card__date">${escapeHtml(formatCommunityRoundDate(communityRound.occurrence, this.communityRoundSchedule))}</strong>
+              <strong id="community-round-title" class="community-round-card__date">${escapeHtml(formatCommunityRoundDate(communityRound.occurrence))}</strong>
               <span id="community-round-status" class="community-round-card__status" aria-live="polite">${escapeHtml(communityRoundStatus)}</span>
               <button id="community-round-join" class="community-round-card__button" type="button" data-occurrence-key="${communityRound.occurrenceKey}" ${communityRound.isOpen ? '' : 'disabled'}>${communityRound.isOpen ? 'Join Round' : '🔒 Join Round'}</button>
             </section>
@@ -1789,10 +1778,7 @@ class AppController {
       this.communityRoundSchedule,
     );
     card.classList.toggle('community-round-card--open', communityRound.isOpen);
-    date.textContent = formatCommunityRoundDate(
-      communityRound.occurrence,
-      this.communityRoundSchedule,
-    );
+    date.textContent = formatCommunityRoundDate(communityRound.occurrence);
     status.textContent = communityRound.isOpen
       ? 'Round is open'
       : `Starts in ${formatCommunityRoundCountdown(communityRound.remainingMs)}`;
